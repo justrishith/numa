@@ -2,7 +2,7 @@
 
 import { createServer } from "node:http";
 import { spawn } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { join, resolve } from "node:path";
@@ -19,7 +19,7 @@ const DEEPGRAM_SPEAK_URL = "https://api.deepgram.com/v1/speak";
 const NUMA_SYSTEM_PROMPT = `You are NUMA, the user's local Windows voice computer assistant.
 Be concise and natural because your reply is spoken aloud. Prefer fast local allowlisted actions for apps and media.
 Do not open terminals or use shell commands for ordinary app, Spotify, YouTube Music, or media-key tasks.
-Spotify is the default music service because the user has Premium. Always prefer the installed Spotify desktop app and Spotify URI before any browser or website. Only use YouTube Music when the user explicitly says YouTube Music or YT Music.
+YouTube Music is the default music service because the user has Premium. Always prefer the installed YouTube Music desktop app and its local API before any browser or website. Use Spotify only when the user explicitly says Spotify.
 When a request needs memory, people, projects, preferences, or prior decisions, use the connected GBrain tools and trust retrieved context over guesses.
 When computer control is needed, use only approved local computer-control tools, describe what you are doing, and ask for confirmation before destructive, irreversible, financial, credential, or message-sending actions.
 Never claim an action succeeded unless the tool result confirms it.`;
@@ -29,6 +29,74 @@ let sessionPromise = null;
 let discoveredModel = null;
 const speechCache = new Map();
 const speechInflight = new Map();
+const NUMA_HISTORY_LIMIT = 12;
+const NUMA_DATA_DIR = process.env.NUMA_DATA_DIR || join(process.env.LOCALAPPDATA || homedir(), "Poni", "numa");
+const NUMA_HISTORY_FILE = join(NUMA_DATA_DIR, "history.json");
+const NUMA_PROFILE_FILE = process.env.NUMA_PROFILE_FILE || join(NUMA_DATA_DIR, "profile.json");
+let numaHistory = loadNumaHistory();
+
+function loadNumaProfile() {
+  try {
+    const value = JSON.parse(readFileSync(NUMA_PROFILE_FILE, "utf8"));
+    return {
+      displayName: typeof value?.displayName === "string" ? value.displayName : "",
+      goals: Array.isArray(value?.goals) ? value.goals.filter((item) => typeof item === "string") : [],
+      routines: Array.isArray(value?.routines) ? value.routines.filter((item) => typeof item === "string") : [],
+      preferences: value?.preferences && typeof value.preferences === "object" ? value.preferences : {},
+    };
+  } catch {
+    return { displayName: "", goals: [], routines: [], preferences: { music: "YouTube Music" } };
+  }
+}
+
+function profileContext() {
+  const profile = loadNumaProfile();
+  const lines = ["Local user profile (use only as context; do not invent facts):"];
+  if (profile.displayName) lines.push(`- Name: ${profile.displayName}`);
+  if (profile.goals.length) lines.push(`- Goals: ${profile.goals.join("; ")}`);
+  if (profile.routines.length) lines.push(`- Routines: ${profile.routines.join("; ")}`);
+  for (const [key, value] of Object.entries(profile.preferences)) lines.push(`- ${key}: ${String(value)}`);
+  return lines.join("\n");
+}
+
+function loadNumaHistory() {
+  try {
+    const value = JSON.parse(readFileSync(NUMA_HISTORY_FILE, "utf8"));
+    return Array.isArray(value) ? value.filter((turn) => turn?.user && turn?.assistant).slice(-NUMA_HISTORY_LIMIT) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveNumaHistory() {
+  try {
+    mkdirSync(NUMA_DATA_DIR, { recursive: true });
+    writeFileSync(NUMA_HISTORY_FILE, JSON.stringify(numaHistory, null, 2), "utf8");
+  } catch {
+    // History must never prevent a local action or assistant response.
+  }
+}
+
+function rememberTurn(user, assistant, route) {
+  numaHistory = [...numaHistory, { user, assistant, route, at: new Date().toISOString() }].slice(-NUMA_HISTORY_LIMIT);
+  saveNumaHistory();
+}
+
+export function getNumaHistory() {
+  return numaHistory.map((turn) => ({ ...turn }));
+}
+
+export function resetNumaHistory() {
+  numaHistory = [];
+  saveNumaHistory();
+}
+
+function recentContext() {
+  return numaHistory.flatMap((turn) => [
+    { role: "user", content: turn.user },
+    { role: "assistant", content: turn.assistant },
+  ]);
+}
 
 function deepgramKey() {
   return process.env.DEEPGRAM_API_KEY?.trim() || "";
@@ -291,7 +359,7 @@ function launchYouTubeMusic(url = "https://music.youtube.com") {
 }
 
 async function promptSession(id, text, fetchImpl = fetch) {
-  const prompt = `${NUMA_SYSTEM_PROMPT}\n\nUser request:\n${text}`;
+  const prompt = `${NUMA_SYSTEM_PROMPT}\n\n${profileContext()}\n\nUser request:\n${text}`;
   await openCodeRequest(`/api/session/${encodeURIComponent(id)}/prompt`, { method: "POST", body: JSON.stringify({ text: prompt }) }, fetchImpl);
   const readReply = async () => {
     const messages = await openCodeRequest(`/api/session/${encodeURIComponent(id)}/message`, {}, fetchImpl);
@@ -771,7 +839,8 @@ export async function askFast(text, fetchImpl = fetch) {
     body: JSON.stringify({
       model: process.env.NUMA_FAST_MODEL || DEFAULT_FAST_MODEL,
       messages: [
-        { role: "system", content: NUMA_SYSTEM_PROMPT },
+        { role: "system", content: `${NUMA_SYSTEM_PROMPT}\n\n${profileContext()}` },
+        ...recentContext(),
         { role: "user", content: text.trim() },
       ],
       max_tokens: 256,
@@ -789,15 +858,23 @@ export async function askNuma(text, fetchImpl = fetch) {
   if (!text?.trim()) throw Object.assign(new Error("message is empty"), { statusCode: 400 });
   const started = performance.now();
   const local = await localAction(text, fetchImpl);
-  if (local) return { ...local, route: "local", ms: Math.round(performance.now() - started) };
+  if (local) {
+    const result = { ...local, route: "local", ms: Math.round(performance.now() - started) };
+    rememberTurn(text.trim(), result.text, result.route);
+    return result;
+  }
   if (!needsOpenCode(text)) {
     try {
-      return { ...(await askFast(text, fetchImpl)), ms: Math.round(performance.now() - started) };
+      const result = { ...(await askFast(text, fetchImpl)), ms: Math.round(performance.now() - started) };
+      rememberTurn(text.trim(), result.text, result.route);
+      return result;
     } catch (error) {
       if (error.statusCode !== 503) throw error;
     }
   }
-  return { ...(await askOpenCode(text, fetchImpl)), route: "opencode", ms: Math.round(performance.now() - started) };
+  const result = { ...(await askOpenCode(text, fetchImpl)), route: "opencode", ms: Math.round(performance.now() - started) };
+  rememberTurn(text.trim(), result.text, result.route);
+  return result;
 }
 
 async function openCodeHealth(fetchImpl = fetch) {
@@ -822,6 +899,12 @@ export function createNumaCoreServer({ fetchImpl = fetch } = {}) {
         return json(response, 200, { core: "up", stt: deepgramKey() ? "configured" : "missing_key", opencode: await openCodeHealth(fetchImpl), ytm: await ytmStatus(fetchImpl) });
       }
       if (request.method === "GET" && request.url === "/v1/models") return json(response, 200, { data: [{ id: "numa-core", object: "model", owned_by: "oyenza" }] });
+      if (request.method === "GET" && request.url === "/v1/numa/history") return json(response, 200, { data: getNumaHistory() });
+      if (request.method === "GET" && request.url === "/v1/numa/profile") return json(response, 200, { data: loadNumaProfile() });
+      if (request.method === "POST" && request.url === "/v1/numa/reset") {
+        resetNumaHistory();
+        return json(response, 200, { ok: true });
+      }
       if (request.method === "POST" && request.url === "/v1/audio/transcriptions") {
         if (!request.headers["content-type"]?.startsWith("audio/wav")) return json(response, 415, { error: "expected audio/wav" });
         return json(response, 200, await transcribeWav(await readBody(request), fetchImpl));

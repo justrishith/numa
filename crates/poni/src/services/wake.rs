@@ -15,17 +15,22 @@ use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 const SCRIPT: &str = r#"
-Add-Type -AssemblyName System.Speech
-$r = New-Object System.Speech.Recognition.SpeechRecognitionEngine
-$r.SetInputToDefaultAudioDevice()
-$g = New-Object System.Speech.Recognition.DictationGrammar
-$r.LoadGrammar($g)
-while ($true) {
-  $x = $r.Recognize()
-  if ($x -and $x.Text) {
-    [Console]::Out.WriteLine($x.Text)
-    [Console]::Out.Flush()
+try {
+  Add-Type -AssemblyName System.Speech
+  $r = New-Object System.Speech.Recognition.SpeechRecognitionEngine
+  $r.SetInputToDefaultAudioDevice()
+  $g = New-Object System.Speech.Recognition.DictationGrammar
+  $r.LoadGrammar($g)
+  while ($true) {
+    $x = $r.Recognize()
+    if ($x -and $x.Text) {
+      [Console]::Out.WriteLine($x.Text)
+      [Console]::Out.Flush()
+    }
   }
+} catch {
+  [Console]::Out.WriteLine("__NUMA_WAKE_ERROR__ $($_.Exception.Message)")
+  [Console]::Out.Flush()
 }
 "#;
 
@@ -172,6 +177,10 @@ pub fn start(sink: EventSink) -> Result<WakeListener, String> {
                         break;
                     }
                     let Ok(text) = line else { break };
+                    if let Some(error) = text.strip_prefix("__NUMA_WAKE_ERROR__ ") {
+                        sink.send(AppEvent::Log(format!("NUMA wake listener error: {error}")));
+                        break;
+                    }
                     let normalized = normalize(&text);
                     if normalized.is_empty() {
                         continue;
