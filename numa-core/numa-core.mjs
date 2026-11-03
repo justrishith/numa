@@ -595,6 +595,12 @@ async function ytmConfirm(videoId, fetchImpl = fetch) {
   return null;
 }
 
+function queueVideoId(item) {
+  const renderer = item?.playlistPanelVideoRenderer ||
+    item?.playlistPanelVideoWrapperRenderer?.primaryRenderer?.playlistPanelVideoRenderer;
+  return renderer?.videoId || renderer?.navigationEndpoint?.watchEndpoint?.videoId || null;
+}
+
 /**
  * Play the best match for `query` and report what actually started, or null
  * when the app isn't there so the caller can fall back to a search page.
@@ -614,7 +620,19 @@ export async function ytmPlay(query, fetchImpl = fetch) {
     body: { videoId: found.videoId, insertPosition: "INSERT_AFTER_CURRENT_VIDEO" },
     fetchImpl,
   });
-  await ytmRequest("/next", { method: "POST", fetchImpl });
+  // Queue insertion is asynchronous. Calling /next here can skip over the
+  // requested song when the app already has a queue. Wait for the item, then
+  // select its exact queue index through the API.
+  const deadline = Date.now() + 3000;
+  let queueIndex = -1;
+  while (Date.now() < deadline) {
+    const queue = await ytmRequest("/queue", { fetchImpl }).catch(() => null);
+    queueIndex = Array.isArray(queue?.items) ? queue.items.findIndex((item) => queueVideoId(item) === found.videoId) : -1;
+    if (queueIndex >= 0) break;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  if (queueIndex < 0) return null;
+  await ytmRequest("/queue", { method: "PATCH", body: { index: queueIndex }, fetchImpl });
   return ytmConfirm(found.videoId, fetchImpl);
 }
 

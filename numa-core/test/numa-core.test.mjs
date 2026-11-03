@@ -174,7 +174,11 @@ test("plays a named song through the YouTube Music app", async () => {
     if (path === "/auth/numa-core") return new Response(JSON.stringify({ accessToken: "t1" }), { status: 200 });
     if (path === "/api/v1/search") return new Response(JSON.stringify(search), { status: 200 });
     if (path === "/api/v1/song") return new Response(JSON.stringify(song), { status: 200 });
-    if (path === "/api/v1/queue" || path === "/api/v1/next") return new Response(null, { status: 204 });
+    if (path === "/api/v1/queue") {
+      if (options?.method === "PATCH") return new Response(null, { status: 204 });
+      if (options?.method === "POST") return new Response(null, { status: 204 });
+      return new Response(JSON.stringify({ items: [{ playlistPanelVideoRenderer: { videoId: "abc123" } }] }), { status: 200 });
+    }
     return new Response("{}", { status: 200 });
   });
   assert.equal(result.route, "local");
@@ -184,7 +188,7 @@ test("plays a named song through the YouTube Music app", async () => {
   const queued = calls.find((call) => call.path === "/api/v1/queue");
   assert.equal(JSON.parse(queued.body).videoId, "abc123");
   assert.equal(JSON.parse(queued.body).insertPosition, "INSERT_AFTER_CURRENT_VIDEO");
-  assert.ok(calls.some((call) => call.path === "/api/v1/next"));
+  assert.ok(calls.some((call) => call.path === "/api/v1/queue" && call.body && JSON.parse(call.body).index === 0));
 });
 
 test("re-authorizes once when the app restarted and the token went stale", async () => {
