@@ -159,6 +159,19 @@ pub enum NotesCmd {
     Done,
 }
 
+/// NUMA's push-to-talk controls.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NumaCmd {
+    Start,
+    Stop,
+    Mute,
+    Unmute,
+    /// Enter safe computer-control takeover mode (stub boundary only).
+    Takeover,
+    /// Exit takeover and return to idle; safety path.
+    StopTakeover,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum Command {
     Media(MediaCmd),
@@ -226,6 +239,7 @@ pub enum Command {
     Oyenza(OyenzaCmd),
     Ielts(IeltsCmd),
     Notes(NotesCmd),
+    Numa(NumaCmd),
     /// Get one of Prayer times' online city files ("ed", "near/55_-5"; the
     /// answer: `AppEvent::Cities`).
     GetCities(String),

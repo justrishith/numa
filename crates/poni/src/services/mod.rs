@@ -23,6 +23,9 @@ pub mod lyrics;
 pub mod media;
 pub mod mic;
 pub mod notes;
+pub mod notifications;
+pub mod numa;
+pub mod numa_takeover;
 pub mod oyenza;
 pub mod pairdrop;
 pub mod phonedrop;
@@ -86,8 +89,15 @@ impl Services {
         let media = started("media", media::MediaService::start(sink.clone()));
         let lyrics = started("lyrics", lyrics::LyricsService::start(sink.clone()));
         let audio = started("audio", audio::AudioService::start(sink.clone()));
-        let bluetooth = started("bluetooth", bluetooth::BluetoothService::start(sink.clone()));
-        let fullscreen = started("fullscreen", fullscreen::FullscreenWatcher::start(helper, sink.clone()));
+        let wake = started("NUMA wake word", wake::start(sink.clone()));
+        let bluetooth = started(
+            "bluetooth",
+            bluetooth::BluetoothService::start(sink.clone()),
+        );
+        let fullscreen = started(
+            "fullscreen",
+            fullscreen::FullscreenWatcher::start(helper, sink.clone()),
+        );
         // Idle (no calls) until the person signs in to Oyenza from the tray.
         let oyenza = started("oyenza", oyenza::OyenzaService::start(sink.clone(), activity));
         // Asks nothing until a phone is paired.
@@ -215,6 +225,12 @@ impl Services {
     /// Something the AI tab asked its worker for (a key, a refresh, the
     /// inference.oyenza.com link): it starts the thread if need be.
     pub fn usage_cmd(&self, c: UsageCmd) {
+    pub fn set_numa_muted(&self, muted: bool) {
+        if let Some(wake) = &self._wake {
+            wake.set_muted(muted);
+        }
+    }
+
         if let Some(s) = self.usage.get_or_init(|| started("usage", usage::UsageService::start(self.sink.clone()))) {
             s.command(c);
         }

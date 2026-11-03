@@ -17,6 +17,7 @@ pub mod focus;
 pub mod health;
 pub mod ielts;
 pub mod media;
+pub mod numa;
 pub mod notes;
 pub mod notifications;
 pub mod oyenza;
@@ -64,6 +65,8 @@ pub enum PageKind {
     /// AI usage: how much of each AI coding plan is left (`pages::usage`).
     /// A core tab, always in the row.
     Ai,
+    /// NUMA voice assistant shell and conversation surface.
+    Numa,
     /// Oyenza, with Oyen himself as its tab (`oyen::tab`): signed out, the
     /// way to sign in; signed in, the money by day.
     Oyenza,
@@ -111,6 +114,7 @@ impl PageKind {
         PageKind::Tasks,
         PageKind::Focus,
         PageKind::Ai,
+        PageKind::Numa,
         PageKind::Oyenza,
         PageKind::Health,
         PageKind::Ielts,
@@ -131,6 +135,7 @@ impl PageKind {
             PageKind::Media => "media",
             PageKind::Focus => "focus",
             PageKind::Ai => "ai",
+            PageKind::Numa => "numa",
             PageKind::Health => "health",
             PageKind::Ielts => "ielts",
             PageKind::Notes => "notes",
@@ -161,6 +166,7 @@ impl PageKind {
             PageKind::Media => "Music",
             PageKind::Focus => "Focus",
             PageKind::Ai => "AI",
+            PageKind::Numa => "Numa",
             PageKind::Health => "Health",
             PageKind::Ielts => "IELTS",
             PageKind::Notes => "Notes",
@@ -185,6 +191,7 @@ impl PageKind {
             PageKind::Media => Icon::Music,
             PageKind::Focus => Icon::Timer,
             PageKind::Ai => Icon::Ai,
+            PageKind::Numa => Icon::Mic,
             PageKind::Health => Icon::Steps,
             PageKind::Ielts => Icon::Mic,
             PageKind::Notes => Icon::Notes,
@@ -278,6 +285,7 @@ pub fn content_height(p: PageKind, st: &AppState) -> f32 {
         PageKind::Media => media::height(st),
         PageKind::Focus => focus::height(st),
         PageKind::Ai => usage::height(st),
+        PageKind::Numa => numa::height(st),
         PageKind::Health => health::height(st),
         PageKind::Ielts => ielts::height(st),
         PageKind::Notes => notes::height(st),
@@ -419,6 +427,7 @@ pub(crate) fn draw_page(ui: &mut Ui, st: &mut AppState, area: Rect, page: PageKi
         PageKind::Media => media::draw(ui, st, area),
         PageKind::Focus => focus::draw(ui, st, area),
         PageKind::Ai => usage::draw(ui, st, area),
+        PageKind::Numa => numa::draw(ui, st, area),
         PageKind::Health => health::draw(ui, st, area),
         PageKind::Ielts => ielts::draw(ui, st, area),
         PageKind::Notes => notes::draw(ui, st, area),
@@ -554,7 +563,7 @@ pub(crate) fn draw_header(ui: &mut Ui, st: &mut AppState, r: Rect, page: PageKin
             ui.c.fill_rrect(tr, TAB_H / 2.0, palette::SURFACE);
             hover = Some((i, tr));
         }
-        if p == PageKind::Oyenza {
+        if p == PageKind::Numa {
             draw_oyen_tab(ui, st, r, tr);
         } else {
             let k = if active { e } else if from.tabbed() && i == fi { 1.0 - e } else { 0.0 };
@@ -564,7 +573,7 @@ pub(crate) fn draw_header(ui: &mut Ui, st: &mut AppState, r: Rect, page: PageKin
         }
         if resp.clicked && !active {
             st.cmd(Command::SetPage(p));
-            if p == PageKind::Oyenza {
+            if p == PageKind::Numa {
                 st.ui.oyen_tab = Some((crate::oyen::TabMove::Picked, ui.now));
             }
         }
@@ -740,18 +749,18 @@ mod tests {
 
     #[test]
     fn the_row_is_the_island_s_own_pages_then_oyenza_then_the_plus() {
-        // Music, then Today beside it; Focus where Today was; AI after it;
+        // Music, then Today beside it; Focus where Today was; AI and Numa
         // Oyenza last, signed in or not.
         use PageKind::*;
         let mut st = state();
-        assert_eq!(tabs(&st), [Media, Today, Shelf, Tasks, Focus, Ai, Oyenza, Addons]);
+        assert_eq!(tabs(&st), [Media, Today, Shelf, Tasks, Focus, Ai, Numa, Addons]);
         st.oyenza.link = OyenzaLink::Connected { account: "a•••@example.com".into() };
-        assert_eq!(tabs(&st), [Media, Today, Shelf, Tasks, Focus, Ai, Oyenza, Addons]);
+        assert_eq!(tabs(&st), [Media, Today, Shelf, Tasks, Focus, Ai, Numa, Addons]);
         // The add-ons' pages come after Oyenza (Health, Oyenza's steps, first), before the "+".
         for id in ["system", "script", "health"] {
             st.addons.insert(id, poni_core::addons::Status::Ready);
         }
-        assert_eq!(&tabs(&st)[6..], [Oyenza, Health, System, Script, Addons]);
+        assert_eq!(&tabs(&st)[6..], [Numa, Health, System, Script, Addons]);
         // Clipboard left the app: an island last open there opens on Music.
         assert_eq!(PageKind::from_key("clipboard"), Media);
     }
@@ -763,19 +772,19 @@ mod tests {
         st.settings.hidden_tabs = vec!["today".into(), "tasks".into(), "oyenza".into(), "addons".into()];
         st.page = Focus;
         // AI, Oyenza and the "+" can't be hidden.
-        assert_eq!(tabs(&st), [Media, Shelf, Focus, Ai, Oyenza, Addons]);
+        assert_eq!(tabs(&st), [Media, Shelf, Focus, Ai, Numa, Addons]);
         assert_eq!(first_tab(&st), Media);
         // Opened from elsewhere (a meeting's notice opens Today): its tab
         // shows while it's open, and stepping on leaves it behind.
         st.page = Today;
-        assert_eq!(tabs(&st), [Media, Today, Shelf, Focus, Ai, Oyenza, Addons]);
+        assert_eq!(tabs(&st), [Media, Today, Shelf, Focus, Ai, Numa, Addons]);
         st.page = step_tab(Today, &st, true);
         assert_eq!(st.page, Shelf);
         assert!(!tabs(&st).contains(&Today));
         // Every one of them hidden: the island opens on AI.
         st.settings.hidden_tabs = PageKind::HIDEABLE.iter().map(|p| p.key().to_string()).collect();
         st.page = Ai;
-        assert_eq!(tabs(&st), [Ai, Oyenza, Addons]);
+        assert_eq!(tabs(&st), [Ai, Numa, Addons]);
         assert_eq!(first_tab(&st), Ai);
         // A start on a hidden page opens on the first tab instead.
         let mut settings = poni_core::settings::Settings::default();
@@ -789,10 +798,10 @@ mod tests {
     fn settings_has_the_gear_not_a_tab() {
         let mut st = state();
         assert!(!tabs(&st).contains(&PageKind::Settings));
-        assert!(tabs(&st).contains(&PageKind::Oyenza), "signed out it's where to sign in");
+        assert!(tabs(&st).contains(&PageKind::Numa), "Numa remains available while signed out");
         st.oyenza.link = OyenzaLink::Connected { account: "a•••@example.com".into() };
         let row = tabs(&st);
-        assert!(row.contains(&PageKind::Oyenza) && !row.contains(&PageKind::Settings));
+        assert!(row.contains(&PageKind::Numa) && !row.contains(&PageKind::Oyenza) && !row.contains(&PageKind::Settings));
         // Stepping through the tabs never lands on Settings.
         let mut p = PageKind::Media;
         for _ in 0..2 * PageKind::ALL.len() {
@@ -928,12 +937,12 @@ mod tests {
 
     #[test]
     fn ielts_has_a_tab_only_while_its_add_on_is_on_after_health() {
-        use PageKind::{Addons, Health, Ielts, Oyenza};
+        use PageKind::{Addons, Health, Ielts, Numa};
         let mut st = state();
         assert!(!tabs(&st).contains(&Ielts), "off for everyone until switched on");
         st.addons.insert("ielts", poni_core::addons::Status::Ready);
         st.addons.insert("health", poni_core::addons::Status::Ready);
-        assert_eq!(&tabs(&st)[6..], [Oyenza, Health, Ielts, Addons]);
+        assert_eq!(&tabs(&st)[6..], [Numa, Health, Ielts, Addons]);
         // Signed out it shows the sign-in card; signed in, every state is as
         // tall, and never taller than System: the window keeps its size.
         let signed_out = content_height(Ielts, &st);

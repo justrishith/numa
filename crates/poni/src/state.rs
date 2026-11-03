@@ -402,6 +402,33 @@ pub enum FpsAccess {
 /// (`activities::Activity::Game`) and the System page's Games view.
 #[derive(Clone, Debug, Default)]
 pub struct GameState {
+    pub numa: NumaUi,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+/// NUMA's takeover state. Safe vertical slice only: the stub (`services::numa_takeover`)
+/// never drives real input, it only emits `AppEvent`s and a status string so the UI
+/// can show active computer-control with a blue edge and an explicit Stop.
+pub enum NumaPhase {
+    #[default]
+    Idle,
+    Listening,
+    /// After Start: listening for wake words, not yet in computer-control mode.
+    Takeover,
+    /// Transcribing through Deepgram and acting on the result.
+    Thinking,
+    /// Failed: transcript or action pipeline returned an error.
+    Error(String),
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct NumaUi {
+    pub phase: NumaPhase,
+    pub mic_muted: bool,
+    /// The latest action text while the takeover runner updates it. Null when idle.
+    pub takeover_action: Option<String>,
+    pub transcript: Option<String>,
+    pub response: Option<String>,
     /// The readout is on screen: Show over games is on and a full-screen
     /// app is in front.
     pub active: bool,

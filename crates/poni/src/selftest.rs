@@ -1468,6 +1468,8 @@ const SCENES: [Scene; 135] = [
     Scene::Ai(AiPicture::Inference),
     Scene::Ai(AiPicture::Services),
     Scene::Ai(AiPicture::Key),
+    // NUMA's M1 shell: visual surface only; voice and actions arrive later.
+    Scene::Page(PageKind::Numa),
     // Its heads-up notices on the closed island.
     Scene::AiNotice,
     Scene::AiNoticeOut,

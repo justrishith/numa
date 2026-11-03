@@ -208,3 +208,15 @@ pub enum AppEvent {
     /// or the disk wouldn't take more (`services::notes`).
     NotesStopped(poni_core::notes::CaptureIssue),
 }
+    /// NUMA's local Core returned a transcript.
+    NumaWake,
+    /// NUMA's local Core returned a transcript.
+    NumaTranscript(String),
+    /// NUMA Core returned an assistant response.
+    NumaResponse(String),
+    /// NUMA's local Core or recording pipeline failed.
+    NumaFailed(String),
+    /// A local NUMA media key handled natively by PONI (no shell process).
+    NumaMediaKey(String),
+    /// Takeover mode status update from the safe stub boundary (no execution).
+    NumaTakeoverState(String),

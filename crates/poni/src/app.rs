@@ -3,8 +3,13 @@
 
 use crate::activities::{self, Mode};
 use crate::clock;
-use crate::commands::{Command, MediaCmd, NotifyCmd, OyenzaCmd, PairCmd, PhoneCmd, UsageCmd};
-use crate::events::{AppEvent, AppleMusicStatus, EventSink, OyenzaEvent, SendHwnd, WM_APP_APPBAR, WM_APP_EVENT, WM_APP_FRAME, WM_APP_TRAY};
+use crate::commands::{
+    Command, MediaCmd, NotifyCmd, NumaCmd, OyenzaCmd, PairCmd, PhoneCmd, UsageCmd,
+};
+use crate::events::{
+    AppEvent, AppleMusicStatus, EventSink, OyenzaEvent, SendHwnd, WM_APP_APPBAR, WM_APP_EVENT,
+    WM_APP_FRAME, WM_APP_TRAY,
+};
 use crate::gfx::{px_rect, px_union, scale_about, union_rect, Canvas, Gfx, HitMask};
 use crate::icons::Icon;
 use crate::island::{Geom, Island, SHOULDER};
@@ -67,6 +72,10 @@ const TIMER_UPDATE: usize = 11;
 /// Show over games: how long the readout shows over a game, the least time
 /// between two peeks for a frame-rate drop, and Alt+Shift+F's id.
 const PEEK_S: f64 = 5.0;
+/// Polls the global Ctrl+Alt push-to-talk chord. RegisterHotKey cannot report
+/// the release edge, so this lightweight UI-thread poll keeps the recorder
+/// lifetime identical to the physical key hold.
+const TIMER_NUMA: usize = 12;
 const DROP_PEEK_EVERY_S: f64 = 30.0;
 const HOTKEY_PEEK: i32 = 1;
 /// Alt+Shift+S pauses and resumes the Script page's reading from any app.
@@ -446,6 +455,13 @@ pub struct App {
     fullscreen_on: bool,
     /// Step aside: the app windows at the top edge of the island's monitor
     /// (screen pixels, cut to the band along it), as last reported.
+    /// NUMA's microphone while a push-to-talk turn is being recorded.
+    numa_mic: Option<services::mic::Mic>,
+    /// NUMA's safe takeover status runner (no OS input injection yet).
+    numa_takeover: Option<services::numa_takeover::TakeoverRunner>,
+    numa_hotkey: bool,
+    /// Mono time at which a bare "hey numa" stops waiting for its command.
+    numa_listen_until: Option<f64>,
     top_windows: Vec<[i32; 4]>,
     /// Follow-up raises still due (TIMER_RAISE).
     raises_left: u8,
@@ -728,6 +744,10 @@ impl App {
             tray: None,
             taskbar_created_msg,
             selftest,
+            numa_mic: None,
+            numa_takeover: None,
+            numa_hotkey: false,
+            numa_listen_until: None,
             exit_code: 0,
             saved_settings,
             settings_writable,
@@ -863,6 +883,10 @@ impl App {
     }
 
     /// Step aside on: have the full-screen watcher report the app windows
+        // Ctrl+Alt is intentionally polled rather than registered as a normal
+        // hotkey: RegisterHotKey only delivers a key-down notification and
+        // cannot provide the release edge needed to stop a recording.
+        unsafe { SetTimer(self.hwnd, TIMER_NUMA, 25, None) };
     /// at the top edge of the island's monitor, where the island hangs from
     /// (below a taskbar at the top). Off (always, since 0.2.6; the self-test
     /// still draws it): it looks at nothing, and nothing is under the island.
@@ -877,6 +901,9 @@ impl App {
             s.watch_top(band);
         }
     }
+        unsafe {
+            let _ = KillTimer(self.hwnd, TIMER_NUMA);
+        }
 
     /// Lay the window out for an island body up to `body_w`×`body_h` DIPs.
     fn layout_surface_for(&mut self, body_w: f32, body_h: f32) {
@@ -1479,6 +1506,13 @@ impl App {
                 pages::script::toggle(&mut self.st);
                 self.request_frame();
                 Some(LRESULT(0))
+                if wp.0 as u16 == VK_ESCAPE.0
+                    && matches!(self.st.ui.numa.phase, crate::state::NumaPhase::Takeover)
+                {
+                    self.numa_cmd(crate::commands::NumaCmd::StopTakeover);
+                    self.request_frame();
+                    return Some(LRESULT(0));
+                }
             }
             WM_QUERYENDSESSION => Some(LRESULT(1)),
             WM_ENDSESSION => {
@@ -2000,6 +2034,11 @@ impl App {
             }
             OyenzaEvent::Connecting { code, url, expires_in_s } => {
                 self.st.oyenza.link = OyenzaLink::Connecting { code, url, until: now + expires_in_s as f64 };
+            TIMER_NUMA => {
+                self.poll_numa_hotkey();
+                self.poll_numa_safety();
+                self.poll_numa_listen();
+            }
                 // Keep the code on screen while the person goes to oyenza.app.
                 if self.st.oyenza.pinned_before.is_none() {
                     self.st.oyenza.pinned_before = Some(self.st.pinned);
@@ -3167,6 +3206,44 @@ impl App {
             self.st.rec = crate::state::RecView::default();
             self.request_frame();
         }
+            AppEvent::NumaTranscript(text) => {
+                self.numa_listen_until = None;
+                self.st.ui.numa.phase = crate::state::NumaPhase::Thinking;
+                self.st.ui.numa.transcript = Some(text);
+                if let Some(text) = self.st.ui.numa.transcript.clone() {
+                    services::numa::ask(text, self.sink.clone());
+                }
+            }
+            AppEvent::NumaWake => {
+                self.st.page = PageKind::Numa;
+                self.expand();
+                self.st.ui.numa.phase = crate::state::NumaPhase::Listening;
+                self.st.ui.numa.transcript = None;
+                self.st.ui.numa.response = Some("Listeningâ€¦".into());
+                // The recognizer reports one phrase per pause, so the wake
+                // word is usually its own line and the command is the next
+                // one. Hold the window open so it isn't dropped.
+                self.numa_listen_until = Some(now + services::wake::FOLLOW_UP_SECS);
+            }
+            AppEvent::NumaResponse(text) => {
+                self.st.ui.numa.phase = crate::state::NumaPhase::Idle;
+                self.st.ui.numa.response = Some(text);
+                if let Some(response) = self.st.ui.numa.response.clone() {
+                    services::numa::speak(response);
+                }
+            }
+            AppEvent::NumaFailed(error) => {
+                self.numa_listen_until = None;
+                self.st.ui.numa.phase = crate::state::NumaPhase::Error(error);
+            }
+            AppEvent::NumaMediaKey(action) => {
+                services::numa::send_media_key(&action);
+            }
+            AppEvent::NumaTakeoverState(action) => {
+                if matches!(self.st.ui.numa.phase, crate::state::NumaPhase::Takeover) {
+                    self.st.ui.numa.takeover_action = Some(action);
+                }
+            }
     }
 
     /// Out of the recorder's video (and every other capture) while a recording
@@ -5417,6 +5494,137 @@ impl App {
         self.glass.app_light = app_light;
         self.glass.inject(px, w, h, &mut self.gfx);
     }
+    // ------------------------------------------------------------ NUMA
+
+    fn poll_numa_hotkey(&mut self) {
+        let ctrl = unsafe {
+            GetAsyncKeyState(VK_LCONTROL.0 as i32) < 0 || GetAsyncKeyState(VK_RCONTROL.0 as i32) < 0
+        };
+        let alt = unsafe {
+            GetAsyncKeyState(VK_LMENU.0 as i32) < 0 || GetAsyncKeyState(VK_RMENU.0 as i32) < 0
+        };
+        let held = ctrl && alt;
+        if held && !self.numa_hotkey {
+            self.numa_hotkey = true;
+            self.numa_cmd(NumaCmd::Start);
+        } else if !held && self.numa_hotkey {
+            self.numa_hotkey = false;
+            self.numa_cmd(NumaCmd::Stop);
+        }
+    }
+
+    /// Escape is polled as well as handled by the island window. Takeover is
+    /// deliberately cancellable even when the island is not focused.
+    fn poll_numa_safety(&mut self) {
+        let escape = unsafe { GetAsyncKeyState(VK_ESCAPE.0 as i32) < 0 };
+        if escape && matches!(self.st.ui.numa.phase, crate::state::NumaPhase::Takeover) {
+            self.numa_cmd(NumaCmd::StopTakeover);
+        }
+    }
+
+    /// A bare "hey numa" only has a few seconds to be followed by a command.
+    /// Without this the page would sit on "Listeningâ€¦" for ever, reading as if
+    /// NUMA were still capturing when nothing is open.
+    fn poll_numa_listen(&mut self) {
+        let Some(until) = self.numa_listen_until else {
+            return;
+        };
+        if self.numa_mic.is_some() {
+            // Push-to-talk owns the phase from here.
+            self.numa_listen_until = None;
+            return;
+        }
+        if self.st.now < until {
+            return;
+        }
+        self.numa_listen_until = None;
+        if matches!(self.st.ui.numa.phase, crate::state::NumaPhase::Listening) {
+            self.st.ui.numa.phase = crate::state::NumaPhase::Idle;
+            self.st.ui.numa.response = Some("Didn't catch that.".into());
+        }
+    }
+
+    fn numa_cmd(&mut self, c: NumaCmd) {
+        match c {
+            NumaCmd::Start => {
+                if self.st.ui.numa.mic_muted {
+                    self.st.ui.numa.response = Some("Microphone is muted.".into());
+                    return;
+                }
+                if self.numa_mic.is_some() {
+                    return;
+                }
+                // Push-to-talk supersedes a wake word that is still waiting
+                // for its command.
+                self.numa_listen_until = None;
+                // Push-to-talk is a global entry point: bring the Numa surface
+                // forward even when the island is currently on another page
+                // or collapsed into the notch.
+                self.st.page = PageKind::Numa;
+                self.expand();
+                let dir = paths::cache_dir().join("numa");
+                let _ = std::fs::create_dir_all(&dir);
+                let path = dir.join("turn.wav");
+                match services::mic::Mic::start(&path, &self.sink) {
+                    Ok(mic) => {
+                        self.numa_mic = Some(mic);
+                        self.st.ui.numa.phase = crate::state::NumaPhase::Listening;
+                        self.st.ui.numa.transcript = None;
+                        self.st.ui.numa.response = None;
+                    }
+                    Err(error) => {
+                        self.st.ui.numa.phase = crate::state::NumaPhase::Error(error.to_string())
+                    }
+                }
+            }
+            NumaCmd::Stop => {
+                let Some(mic) = self.numa_mic.take() else {
+                    return;
+                };
+                match mic.stop() {
+                    Ok((path, _secs)) => {
+                        self.st.ui.numa.phase = crate::state::NumaPhase::Thinking;
+                        services::numa::transcribe(path, self.sink.clone());
+                    }
+                    Err(error) => {
+                        self.st.ui.numa.phase = crate::state::NumaPhase::Error(error.to_string())
+                    }
+                }
+            }
+            NumaCmd::Mute => {
+                if let Some(services) = &self.services {
+                    services.set_numa_muted(true);
+                }
+                self.st.ui.numa.mic_muted = true;
+                self.st.ui.numa.phase = crate::state::NumaPhase::Idle;
+            }
+            NumaCmd::Unmute => {
+                if let Some(services) = &self.services {
+                    services.set_numa_muted(false);
+                }
+                self.st.ui.numa.mic_muted = false;
+            }
+            NumaCmd::Takeover => {
+                // Safe vertical slice: enter takeover stub boundary. No arbitrary
+                // mouse/keyboard execution; `services::numa_takeover` only emits
+                // events and updates `st.ui.numa.takeover_action`.
+                self.st.page = PageKind::Numa;
+                self.expand();
+                self.st.ui.numa.phase = crate::state::NumaPhase::Takeover;
+                self.st.ui.numa.takeover_action = Some("Entering computer-control mode.".into());
+                self.numa_takeover = Some(services::numa_takeover::TakeoverRunner::start(
+                    self.sink.clone(),
+                ));
+            }
+            NumaCmd::StopTakeover => {
+                // Esc / Stop safety path: exit takeover, drop to idle.
+                self.numa_takeover = None;
+                self.st.ui.numa.phase = crate::state::NumaPhase::Idle;
+                self.st.ui.numa.takeover_action = None;
+            }
+        }
+    }
+
 
     /// Self-test: a new scene starts (the glass takes its side at once).
     pub fn selftest_glass_reseed(&mut self) {
@@ -5781,6 +5989,7 @@ mod tests {
             let left = (body.x * s).floor() as i32 - 1;
             let right = (body.right() * s).ceil() as i32;
             assert!(!m.contains(px_centre(left, mid, s)) && !m.contains(px_centre(right, mid, s)), "beside at {s}");
+                Command::Numa(c) => self.numa_cmd(c),
             assert!(m.contains(px_centre(left + 2, mid, s)) && m.contains(px_centre(right - 2, mid, s)), "inside the ends at {s}");
             let below = (body.bottom() * s).ceil() as i32;
             assert!(!m.contains(px_centre(x, below, s)) && m.contains(px_centre(x, below - 1, s)), "the bottom edge at {s}");
