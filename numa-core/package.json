@@ -1,0 +1,10 @@
+{
+  "name": "numa-core",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "start": "node numa-core.mjs",
+    "test": "node --test test/*.test.mjs"
+  }
+}
