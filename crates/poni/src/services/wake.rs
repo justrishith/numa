@@ -42,12 +42,15 @@ pub const FOLLOW_UP: Duration = Duration::from_secs(8);
 pub const FOLLOW_UP_SECS: f64 = 8.0;
 
 /// Pronunciation variants the local recognizer returns for "Numa".
-const WAKE_PHRASES: [&str; 5] = [
+const WAKE_PHRASES: [&str; 7] = [
     "hey numa",
     "hey numah",
     "hey nooma",
     "hey new ma",
     "hey n numa",
+    // This user's enrollment recording is consistently heard as "he pneuma".
+    "he pneuma",
+    "hey pneuma",
 ];
 
 /// One line from the recognizer, already resolved against the wake word.
@@ -285,6 +288,11 @@ mod tests {
             Line::Wake(Some("play jazz".into()))
         );
         assert_eq!(hear("hey numah", false), Line::Wake(None));
+        assert_eq!(hear("he pneuma", false), Line::Wake(None));
+        assert_eq!(
+            hear("he pneuma play music", false),
+            Line::Wake(Some("play music".into()))
+        );
     }
 
     #[test]
