@@ -23,14 +23,18 @@ impl AdzanPlayer {
     /// caller plays the tone instead).
     pub fn play(&mut self, path: &Path, sink: &EventSink) -> Result<(), String> {
         self.stop();
-        let uri = Uri::CreateUri(&HSTRING::from(file_uri(path))).map_err(|e| format!("bad path ({e})"))?;
+        let uri = Uri::CreateUri(&HSTRING::from(file_uri(path)))
+            .map_err(|e| format!("bad path ({e})"))?;
         let player = MediaPlayer::new().map_err(|e| format!("no media player ({e})"))?;
         // No media session: the adzan isn't a song.
         if let Ok(cm) = player.CommandManager() {
             let _ = cm.SetIsEnabled(false);
         }
-        let source = MediaSource::CreateFromUri(&uri).map_err(|e| format!("can't open the recording ({e})"))?;
-        player.SetSource(&source).map_err(|e| format!("can't open the recording ({e})"))?;
+        let source = MediaSource::CreateFromUri(&uri)
+            .map_err(|e| format!("can't open the recording ({e})"))?;
+        player
+            .SetSource(&source)
+            .map_err(|e| format!("can't open the recording ({e})"))?;
         let ended = sink.clone();
         let _ = player.MediaEnded(&TypedEventHandler::new(move |_, _| {
             ended.send(AppEvent::AdzanEnded);
@@ -64,7 +68,13 @@ pub(crate) fn file_uri(path: &Path) -> String {
         .split(['\\', '/'])
         .filter(|s| !s.is_empty())
         .enumerate()
-        .map(|(i, s)| if i == 0 && s.ends_with(':') { s.to_string() } else { poni_core::urlenc::encode(s) })
+        .map(|(i, s)| {
+            if i == 0 && s.ends_with(':') {
+                s.to_string()
+            } else {
+                poni_core::urlenc::encode(s)
+            }
+        })
         .collect();
     format!("file:///{}", parts.join("/"))
 }
@@ -79,6 +89,9 @@ mod tests {
             file_uri(Path::new(r"C:\Users\Luca Cada\AppData\Local\Poni\addons\sholat\addon-sholat-1\adzan.m4a")),
             "file:///C:/Users/Luca%20Cada/AppData/Local/Poni/addons/sholat/addon-sholat-1/adzan.m4a"
         );
-        assert_eq!(file_uri(Path::new(r"D:\Müzik\a.m4a")), "file:///D:/M%C3%BCzik/a.m4a");
+        assert_eq!(
+            file_uri(Path::new(r"D:\Müzik\a.m4a")),
+            "file:///D:/M%C3%BCzik/a.m4a"
+        );
     }
 }

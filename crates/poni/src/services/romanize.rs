@@ -24,7 +24,9 @@ use poni_core::lrc::Lyrics;
 use poni_core::romanize::{self, JaWord, Ruby, Script};
 use windows::core::HSTRING;
 use windows::Globalization::JapanesePhoneticAnalyzer;
-use windows::Win32::System::Com::{CoInitializeEx, CoUninitialize, COINIT_APARTMENTTHREADED, COINIT_DISABLE_OLE1DDE};
+use windows::Win32::System::Com::{
+    CoInitializeEx, CoUninitialize, COINIT_APARTMENTTHREADED, COINIT_DISABLE_OLE1DDE,
+};
 
 /// The analyzer reads at most 100 characters per call.
 const ANALYZER_MAX: usize = 100;
@@ -45,7 +47,10 @@ pub struct Pronounced {
 
 impl Pronounced {
     fn read(ruby: Vec<Vec<Ruby>>) -> Self {
-        Pronounced { ruby, wants_ja_readings: false }
+        Pronounced {
+            ruby,
+            wants_ja_readings: false,
+        }
     }
 }
 
@@ -64,7 +69,16 @@ pub fn pronounce(lyrics: &Lyrics) -> Pronounced {
 
 /// `read` for every line that needs a reading.
 fn each_line(texts: &[&str], mut read: impl FnMut(&str) -> Vec<Ruby>) -> Vec<Vec<Ruby>> {
-    texts.iter().map(|t| if romanize::needs_roman(t) { read(t) } else { Vec::new() }).collect()
+    texts
+        .iter()
+        .map(|t| {
+            if romanize::needs_roman(t) {
+                read(t)
+            } else {
+                Vec::new()
+            }
+        })
+        .collect()
 }
 
 /// Every line of a Japanese song through the analyzer. If it fails outright
@@ -89,13 +103,19 @@ fn japanese_song(texts: &[&str]) -> Pronounced {
             }
         }
         let pieces = own.read(t);
-        unread += pieces.iter().filter(|p| p.roman.is_empty() && has_kanji(&p.text)).count();
+        unread += pieces
+            .iter()
+            .filter(|p| p.roman.is_empty() && has_kanji(&p.text))
+            .count();
         pieces
     });
     if unread > 0 {
         crate::pinfo!("lyrics: {unread} kanji words came back without a reading");
     }
-    Pronounced { ruby: out, wants_ja_readings: own.wanted(texts) }
+    Pronounced {
+        ruby: out,
+        wants_ja_readings: own.wanted(texts),
+    }
 }
 
 /// Every line of a Japanese song through Oyenza Studio's own dictionary (when the
@@ -103,7 +123,10 @@ fn japanese_song(texts: &[&str]) -> Pronounced {
 pub fn own_song(texts: &[&str]) -> Pronounced {
     let mut own = OwnDictionary::default();
     let ruby = each_line(texts, |t| own.read(t));
-    Pronounced { ruby, wants_ja_readings: own.wanted(texts) }
+    Pronounced {
+        ruby,
+        wants_ja_readings: own.wanted(texts),
+    }
 }
 
 /// Oyenza Studio's own reading dictionary from the Japanese readings add-on,
@@ -130,14 +153,19 @@ impl OwnDictionary {
     fn load(&mut self) -> Option<romanize::JaDict> {
         let path = super::addons::file_path(&JAPANESE_READINGS, JA_READINGS_FILE);
         match read_dictionary(&path) {
-            Ok(bytes) => romanize::JaDict::load(&bytes).map_err(|e| crate::pwarn!("lyrics: {e}; only kana lines get romaji")).ok(),
+            Ok(bytes) => romanize::JaDict::load(&bytes)
+                .map_err(|e| crate::pwarn!("lyrics: {e}; only kana lines get romaji"))
+                .ok(),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
                 crate::pinfo!("lyrics: the Japanese readings add-on isn't on this PC; only kana lines get romaji");
                 self.missing = true;
                 None
             }
             Err(e) => {
-                crate::pwarn!("lyrics: couldn't read {} ({e}); only kana lines get romaji", path.display());
+                crate::pwarn!(
+                    "lyrics: couldn't read {} ({e}); only kana lines get romaji",
+                    path.display()
+                );
                 None
             }
         }
@@ -166,7 +194,9 @@ fn read_dictionary(_path: &std::path::Path) -> std::io::Result<Vec<u8>> {
 pub fn analyzer_works() -> Result<(), String> {
     on_sta(|| match japanese("今日は晴れ") {
         Ok((_, 0)) => Ok(()),
-        Ok((_, n)) => Err(format!("Windows' Japanese reading analyzer left {n} kanji words unread")),
+        Ok((_, n)) => Err(format!(
+            "Windows' Japanese reading analyzer left {n} kanji words unread"
+        )),
         Err(e) => Err(e),
     })
     .unwrap_or_else(|| Err("couldn't start the Japanese reading thread".into()))
@@ -177,7 +207,8 @@ pub fn analyzer_works() -> Result<(), String> {
 pub(super) fn japanese(line: &str) -> Result<(Vec<Ruby>, usize), String> {
     let mut words: Vec<(String, String, bool)> = Vec::new();
     for chunk in chunks(line, ANALYZER_MAX) {
-        let found = JapanesePhoneticAnalyzer::GetWords(&HSTRING::from(chunk)).map_err(|e| format!("Windows' Japanese reading analyzer failed ({e})"))?;
+        let found = JapanesePhoneticAnalyzer::GetWords(&HSTRING::from(chunk))
+            .map_err(|e| format!("Windows' Japanese reading analyzer failed ({e})"))?;
         if found.Size().unwrap_or(0) == 0 && romanize::needs_roman(chunk) {
             // Windows 11 keeps the analyzer's dictionary (IME\IMEJP\DICTS\
             // SDDS0411.DIC) in the Japanese typing feature; without it every
@@ -186,8 +217,14 @@ pub(super) fn japanese(line: &str) -> Result<(Vec<Ruby>, usize), String> {
         }
         let mut read: Vec<(String, String, bool)> = Vec::new();
         for w in &found {
-            let display = w.DisplayText().map_err(|e| format!("Windows' Japanese reading analyzer failed ({e})"))?.to_string_lossy();
-            let yomi = w.YomiText().map(|y| y.to_string_lossy()).unwrap_or_default();
+            let display = w
+                .DisplayText()
+                .map_err(|e| format!("Windows' Japanese reading analyzer failed ({e})"))?
+                .to_string_lossy();
+            let yomi = w
+                .YomiText()
+                .map(|y| y.to_string_lossy())
+                .unwrap_or_default();
             read.push((display, yomi, w.IsPhraseStart().unwrap_or(true)));
         }
         // The analyzer hands Latin letters and spaces back in full width
@@ -210,7 +247,11 @@ pub(super) fn japanese(line: &str) -> Result<(Vec<Ruby>, usize), String> {
         .map(|(d, y, p)| {
             let ok = !has_kanji(d) || (!y.is_empty() && !has_kanji(y));
             unread += usize::from(!ok);
-            JaWord { display: d, yomi: if ok { y } else { "" }, phrase_start: *p }
+            JaWord {
+                display: d,
+                yomi: if ok { y } else { "" },
+                phrase_start: *p,
+            }
         })
         .collect();
     Ok((romanize::japanese_ruby(&ja), unread))
@@ -218,7 +259,8 @@ pub(super) fn japanese(line: &str) -> Result<(Vec<Ruby>, usize), String> {
 
 /// The text has CJK ideographs (kanji).
 fn has_kanji(s: &str) -> bool {
-    s.chars().any(|c| ('\u{4E00}'..='\u{9FFF}').contains(&c) || ('\u{3400}'..='\u{4DBF}').contains(&c))
+    s.chars()
+        .any(|c| ('\u{4E00}'..='\u{9FFF}').contains(&c) || ('\u{3400}'..='\u{4DBF}').contains(&c))
 }
 
 /// `line` cut into the analyzer's `words` (same characters up to width), or
@@ -258,7 +300,11 @@ fn chunks(s: &str, max: usize) -> Vec<&str> {
     let mut rest = s;
     while rest.chars().count() > max {
         let cut = rest.char_indices().nth(max).map_or(rest.len(), |(i, _)| i);
-        let at = rest[..cut].rfind(' ').map(|i| i + 1).filter(|&i| i < cut).unwrap_or(cut);
+        let at = rest[..cut]
+            .rfind(' ')
+            .map(|i| i + 1)
+            .filter(|&i| i < cut)
+            .unwrap_or(cut);
         out.push(&rest[..at]);
         rest = &rest[at..];
     }
@@ -281,10 +327,15 @@ pub(super) fn on_sta<R: Send>(f: impl FnOnce() -> R + Send) -> Option<R> {
         }
     }
     std::thread::scope(|s| {
-        let t = std::thread::Builder::new().name("poni-romaji".into()).spawn_scoped(s, || {
-            let _com = Sta(unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE) }.is_ok());
-            f()
-        });
+        let t = std::thread::Builder::new()
+            .name("poni-romaji".into())
+            .spawn_scoped(s, || {
+                let _com = Sta(unsafe {
+                    CoInitializeEx(None, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE)
+                }
+                .is_ok());
+                f()
+            });
         t.ok()?.join().ok()
     })
 }
@@ -300,8 +351,14 @@ fn split_long(pieces: Vec<Ruby>) -> Vec<Ruby> {
             out.push(p);
             continue;
         }
-        for (cs, ss) in chars.chunks(HAN_PIECE_MAX).zip(syllables.chunks(HAN_PIECE_MAX)) {
-            out.push(Ruby { text: cs.iter().collect(), roman: ss.join(" ") });
+        for (cs, ss) in chars
+            .chunks(HAN_PIECE_MAX)
+            .zip(syllables.chunks(HAN_PIECE_MAX))
+        {
+            out.push(Ruby {
+                text: cs.iter().collect(),
+                roman: ss.join(" "),
+            });
         }
     }
     out
@@ -314,7 +371,12 @@ mod tests {
     // Test lines are original phrases, not song lyrics.
 
     fn roman(pieces: &[Ruby]) -> String {
-        pieces.iter().map(|r| r.roman.as_str()).filter(|s| !s.is_empty()).collect::<Vec<_>>().join(" ")
+        pieces
+            .iter()
+            .map(|r| r.roman.as_str())
+            .filter(|s| !s.is_empty())
+            .collect::<Vec<_>>()
+            .join(" ")
     }
 
     #[test]
@@ -324,11 +386,22 @@ mod tests {
         if analyzer_works().is_err() {
             return;
         }
-        for (line, want) in [("心には君がいる", "ni wa"), ("光を照らすは月", "terasu wa"), ("本当は好きだよ", "hontou wa"), ("それではまた", "de wa")] {
-            let pieces = on_sta(|| japanese(line)).expect("the analyzer's thread starts").expect("Windows reads the line").0;
+        for (line, want) in [
+            ("心には君がいる", "ni wa"),
+            ("光を照らすは月", "terasu wa"),
+            ("本当は好きだよ", "hontou wa"),
+            ("それではまた", "de wa"),
+        ] {
+            let pieces = on_sta(|| japanese(line))
+                .expect("the analyzer's thread starts")
+                .expect("Windows reads the line")
+                .0;
             let read = roman(&pieces);
             eprintln!("{line} -> {read}");
-            assert!(read.contains(want) && !read.contains("ha"), "{line} read as {read:?}");
+            assert!(
+                read.contains(want) && !read.contains("ha"),
+                "{line} read as {read:?}"
+            );
         }
     }
 
@@ -344,23 +417,44 @@ mod tests {
 
     #[test]
     fn without_the_add_on_kana_still_reads_and_kanji_ask_for_it() {
-        let mut own = OwnDictionary { dict: Some(None), missing: true };
+        let mut own = OwnDictionary {
+            dict: Some(None),
+            missing: true,
+        };
         assert_eq!(roman(&own.read("ありがとう")), "arigatou");
         assert!(own.wanted(&["ありがとう", "君の名前"]));
-        assert!(!own.wanted(&["ありがとう", "la la la"]), "kana alone never needs it");
-        assert!(!OwnDictionary { dict: Some(None), missing: false }.wanted(&["君の名前"]), "a file that failed to load isn't fixed by the offer");
+        assert!(
+            !own.wanted(&["ありがとう", "la la la"]),
+            "kana alone never needs it"
+        );
+        assert!(
+            !OwnDictionary {
+                dict: Some(None),
+                missing: false
+            }
+            .wanted(&["君の名前"]),
+            "a file that failed to load isn't fixed by the offer"
+        );
     }
 
     #[test]
     fn every_japanese_line_reads_with_or_without_windows_data() {
         // Windows' analyzer where it has its data (Windows CI), Oyenza Studio's own
         // dictionary where it doesn't (Wine, most Windows 11 PCs outside Japan).
-        let lyrics = poni_core::lrc::parse_lrc("[00:01.00]朝の光を浴びて\n[00:02.00]遠くへ行こう\n[00:03.00]la la la\n");
+        let lyrics = poni_core::lrc::parse_lrc(
+            "[00:01.00]朝の光を浴びて\n[00:02.00]遠くへ行こう\n[00:03.00]la la la\n",
+        );
         let song = pronounce(&lyrics);
         assert!(!song.wants_ja_readings);
         let read = &song.ruby;
         assert_eq!(read.len(), 3);
-        assert!(read[0].iter().any(|p| p.text.contains('光') && !p.roman.is_empty()), "{:?}", read[0]);
+        assert!(
+            read[0]
+                .iter()
+                .any(|p| p.text.contains('光') && !p.roman.is_empty()),
+            "{:?}",
+            read[0]
+        );
         assert!(roman(&read[1]).starts_with("tooku e"), "{:?}", read[1]);
         assert!(read[2].is_empty());
     }
@@ -378,7 +472,10 @@ mod tests {
     #[test]
     fn full_width_words_map_back_onto_the_line() {
         let words = ["指", "で", "ｈｏｌｄ", "　", "ｍｅ", "　", "ｔｉｇｈｔ"];
-        assert_eq!(align("指でhold me tight", words.into_iter()), Some(vec!["指", "で", "hold", " ", "me", " ", "tight"]));
+        assert_eq!(
+            align("指でhold me tight", words.into_iter()),
+            Some(vec!["指", "で", "hold", " ", "me", " ", "tight"])
+        );
         // A word the line doesn't have: no alignment.
         assert_eq!(align("指で", ["指", "で", "ｘ"].into_iter()), None);
         // The analyzer dropped a character: no alignment either.
@@ -394,7 +491,10 @@ mod tests {
 
     #[test]
     fn long_han_runs_split_with_their_syllables() {
-        let p = Ruby { text: "一二三四五六七八九十".into(), roman: "yī èr sān sì wǔ liù qī bā jiǔ shí".into() };
+        let p = Ruby {
+            text: "一二三四五六七八九十".into(),
+            roman: "yī èr sān sì wǔ liù qī bā jiǔ shí".into(),
+        };
         let out = split_long(vec![p]);
         assert_eq!(out.len(), 2);
         assert_eq!(out[0].text, "一二三四五六七八");

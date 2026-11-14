@@ -160,16 +160,16 @@ pub enum NotesCmd {
 }
 
 /// NUMA's push-to-talk controls.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum NumaCmd {
     Start,
     Stop,
     Mute,
     Unmute,
-    /// Enter safe computer-control takeover mode (stub boundary only).
-    Takeover,
-    /// Exit takeover and return to idle; safety path.
-    StopTakeover,
+    /// A gateway run asked for permission and the user granted it.
+    Approve(String),
+    /// The user refused it.
+    Cancel(String),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -254,7 +254,10 @@ pub enum Command {
 #[derive(Clone, Debug, PartialEq)]
 pub enum DownloadCmd {
     /// Download `url`'s video or sound.
-    Start { url: String, mode: poni_core::ytdlp::Mode },
+    Start {
+        url: String,
+        mode: poni_core::ytdlp::Mode,
+    },
     /// Stop a download; one still waiting its turn leaves the list (Cancel).
     Stop(u64),
     /// Take a finished, failed or stopped job off the list.

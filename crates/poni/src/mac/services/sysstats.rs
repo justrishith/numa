@@ -11,7 +11,10 @@
 //! * Uptime: since the Mac started (`kern.boottime`).
 
 use crate::state::SysStats;
-use objc2_foundation::{NSArray, NSNumber, NSString, NSURLResourceKey, NSURLVolumeAvailableCapacityForImportantUsageKey, NSURLVolumeTotalCapacityKey, NSURL};
+use objc2_foundation::{
+    NSArray, NSNumber, NSString, NSURLResourceKey,
+    NSURLVolumeAvailableCapacityForImportantUsageKey, NSURLVolumeTotalCapacityKey, NSURL,
+};
 use std::ffi::{c_char, c_void, CStr};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
@@ -60,7 +63,13 @@ extern "C" {
     fn mach_host_self() -> u32;
     fn host_statistics(host: u32, flavor: i32, info: *mut i32, count: *mut u32) -> i32;
     fn host_statistics64(host: u32, flavor: i32, info: *mut i32, count: *mut u32) -> i32;
-    fn sysctlbyname(name: *const c_char, oldp: *mut c_void, oldlenp: *mut usize, newp: *mut c_void, newlen: usize) -> i32;
+    fn sysctlbyname(
+        name: *const c_char,
+        oldp: *mut c_void,
+        oldlenp: *mut usize,
+        newp: *mut c_void,
+        newlen: usize,
+    ) -> i32;
 }
 
 /// The previous CPU ticks: user, system, idle, nice.
@@ -76,7 +85,10 @@ fn warn_once(what: &str) {
 }
 
 pub fn sample() -> SysStats {
-    let mut s = SysStats { valid: true, ..SysStats::default() };
+    let mut s = SysStats {
+        valid: true,
+        ..SysStats::default()
+    };
     match cpu_ticks() {
         Some(now) => {
             let mut prev = PREV_CPU.lock().unwrap_or_else(|p| p.into_inner());
@@ -89,7 +101,11 @@ pub fn sample() -> SysStats {
     match memory_split() {
         Some(m) => {
             let used = m.app + m.wired + m.compressed;
-            s.mem_used = if s.mem_total > 0 { used.min(s.mem_total) } else { used };
+            s.mem_used = if s.mem_total > 0 {
+                used.min(s.mem_total)
+            } else {
+                used
+            };
         }
         None => warn_once("memory"),
     }
@@ -103,13 +119,22 @@ pub fn sample() -> SysStats {
 fn cpu_ticks() -> Option<[u32; 4]> {
     let mut ticks = [0u32; 4];
     let mut count = 4u32;
-    let r = unsafe { host_statistics(mach_host_self(), HOST_CPU_LOAD_INFO, ticks.as_mut_ptr() as *mut i32, &mut count) };
+    let r = unsafe {
+        host_statistics(
+            mach_host_self(),
+            HOST_CPU_LOAD_INFO,
+            ticks.as_mut_ptr() as *mut i32,
+            &mut count,
+        )
+    };
     (r == 0).then_some(ticks)
 }
 
 /// Busy share of the ticks between two samples (counters wrap).
 fn cpu_load(prev: [u32; 4], now: [u32; 4]) -> f32 {
-    let d: Vec<u64> = (0..4).map(|i| now[i].wrapping_sub(prev[i]) as u64).collect();
+    let d: Vec<u64> = (0..4)
+        .map(|i| now[i].wrapping_sub(prev[i]) as u64)
+        .collect();
     let total = d.iter().sum::<u64>();
     if total == 0 {
         return 0.0;
@@ -143,14 +168,29 @@ pub(super) fn memory_split() -> Option<MemSplit> {
 fn vm_stats() -> Option<VmStatistics64> {
     let mut vm = VmStatistics64::default();
     let mut count = (std::mem::size_of::<VmStatistics64>() / 4) as u32;
-    let r = unsafe { host_statistics64(mach_host_self(), HOST_VM_INFO64, &mut vm as *mut VmStatistics64 as *mut i32, &mut count) };
+    let r = unsafe {
+        host_statistics64(
+            mach_host_self(),
+            HOST_VM_INFO64,
+            &mut vm as *mut VmStatistics64 as *mut i32,
+            &mut count,
+        )
+    };
     (r == 0).then_some(vm)
 }
 
 pub(super) fn sysctl_u64(name: &CStr) -> Option<u64> {
     let mut v: u64 = 0;
     let mut len = std::mem::size_of::<u64>();
-    let r = unsafe { sysctlbyname(name.as_ptr(), &mut v as *mut u64 as *mut c_void, &mut len, std::ptr::null_mut(), 0) };
+    let r = unsafe {
+        sysctlbyname(
+            name.as_ptr(),
+            &mut v as *mut u64 as *mut c_void,
+            &mut len,
+            std::ptr::null_mut(),
+            0,
+        )
+    };
     match (r, len) {
         (0, 8) => Some(v),
         (0, 4) => Some(v & 0xffff_ffff),
@@ -159,9 +199,20 @@ pub(super) fn sysctl_u64(name: &CStr) -> Option<u64> {
 }
 
 pub(super) fn uptime_s() -> Option<u64> {
-    let mut tv = Timeval { tv_sec: 0, tv_usec: 0 };
+    let mut tv = Timeval {
+        tv_sec: 0,
+        tv_usec: 0,
+    };
     let mut len = std::mem::size_of::<Timeval>();
-    let r = unsafe { sysctlbyname(c"kern.boottime".as_ptr(), &mut tv as *mut Timeval as *mut c_void, &mut len, std::ptr::null_mut(), 0) };
+    let r = unsafe {
+        sysctlbyname(
+            c"kern.boottime".as_ptr(),
+            &mut tv as *mut Timeval as *mut c_void,
+            &mut len,
+            std::ptr::null_mut(),
+            0,
+        )
+    };
     if r != 0 || tv.tv_sec <= 0 {
         return None;
     }
@@ -177,11 +228,23 @@ fn disk() -> (u64, u64) {
         }
     }
     let url = NSURL::fileURLWithPath(&NSString::from_str("/"));
-    let keys: [&NSURLResourceKey; 2] = unsafe { [NSURLVolumeAvailableCapacityForImportantUsageKey, NSURLVolumeTotalCapacityKey] };
-    let read = url.resourceValuesForKeys_error(&NSArray::from_slice(&keys)).ok().map(|vals| {
-        let num = |k: &NSURLResourceKey| vals.objectForKey(k).and_then(|v| v.downcast::<NSNumber>().ok()).map(|n| n.longLongValue().max(0) as u64);
-        (num(keys[0]).unwrap_or(0), num(keys[1]).unwrap_or(0))
-    });
+    let keys: [&NSURLResourceKey; 2] = unsafe {
+        [
+            NSURLVolumeAvailableCapacityForImportantUsageKey,
+            NSURLVolumeTotalCapacityKey,
+        ]
+    };
+    let read = url
+        .resourceValuesForKeys_error(&NSArray::from_slice(&keys))
+        .ok()
+        .map(|vals| {
+            let num = |k: &NSURLResourceKey| {
+                vals.objectForKey(k)
+                    .and_then(|v| v.downcast::<NSNumber>().ok())
+                    .map(|n| n.longLongValue().max(0) as u64)
+            };
+            (num(keys[0]).unwrap_or(0), num(keys[1]).unwrap_or(0))
+        });
     let (free, total) = read.unwrap_or((0, 0));
     if total == 0 {
         warn_once("disk space");

@@ -26,7 +26,11 @@ use std::collections::HashMap;
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
-const USER_AGENT: &str = concat!("OyenzaStudio/", env!("CARGO_PKG_VERSION"), " (+https://github.com/lucacadalora/oyenza-studio)");
+const USER_AGENT: &str = concat!(
+    "OyenzaStudio/",
+    env!("CARGO_PKG_VERSION"),
+    " (+https://github.com/lucacadalora/oyenza-studio)"
+);
 const TIMEOUT: Duration = Duration::from_secs(8);
 /// The page opening again within this time asks for nothing new: oyenza.trade
 /// reads the exchange every 15 s at most.
@@ -85,12 +89,17 @@ pub struct StocksService {
 
 impl StocksService {
     pub fn start(sink: EventSink) -> std::io::Result<Self> {
-        let shared = Arc::new(Shared { q: Mutex::new(Queue::default()), cv: Condvar::new() });
+        let shared = Arc::new(Shared {
+            q: Mutex::new(Queue::default()),
+            cv: Condvar::new(),
+        });
         let worker = shared.clone();
         std::thread::Builder::new()
             .name("poni-stocks".into())
             .spawn(move || worker_main(worker, sink))
-            .map_err(|e| std::io::Error::other(format!("could not start the Stocks thread: {e}")))?;
+            .map_err(|e| {
+                std::io::Error::other(format!("could not start the Stocks thread: {e}"))
+            })?;
         Ok(Self { shared })
     }
 
@@ -195,7 +204,11 @@ fn worker_main(shared: Arc<Shared>, sink: EventSink) {
     }
 }
 
-fn wait<'a>(shared: &Shared, g: MutexGuard<'a, Queue>, timeout: Option<Duration>) -> MutexGuard<'a, Queue> {
+fn wait<'a>(
+    shared: &Shared,
+    g: MutexGuard<'a, Queue>,
+    timeout: Option<Duration>,
+) -> MutexGuard<'a, Queue> {
     match timeout {
         Some(d) => match shared.cv.wait_timeout(g, d) {
             Ok((g, _)) => g,
@@ -256,11 +269,19 @@ impl Worker {
             return None;
         }
         // A changed list is asked for at once.
-        let mut t = if watch.codes != self.codes { now } else { self.next_board };
+        let mut t = if watch.codes != self.codes {
+            now
+        } else {
+            self.next_board
+        };
         if watch.names && self.names.is_none() {
             t = t.min(self.next_names);
         }
-        if let Some(code) = watch.chart.as_ref().filter(|c| !self.years.contains_key(*c)) {
+        if let Some(code) = watch
+            .chart
+            .as_ref()
+            .filter(|c| !self.years.contains_key(*c))
+        {
             t = t.min(self.next_year.get(code).copied().unwrap_or(now));
         }
         Some(t)
@@ -274,8 +295,16 @@ impl Worker {
         if watch.names && self.names.is_none() && self.next_names <= Instant::now() {
             self.ask_names();
         }
-        if let Some(code) = watch.chart.as_ref().filter(|c| !self.years.contains_key(*c)) {
-            if self.next_year.get(code).is_none_or(|t| *t <= Instant::now()) {
+        if let Some(code) = watch
+            .chart
+            .as_ref()
+            .filter(|c| !self.years.contains_key(*c))
+        {
+            if self
+                .next_year
+                .get(code)
+                .is_none_or(|t| *t <= Instant::now())
+            {
                 self.ask_year(code);
             }
         }
@@ -283,7 +312,10 @@ impl Worker {
 
     fn get(&mut self, url: &str, tag: Option<&str>) -> Result<Response, FetchError> {
         let etag = tag.map(|t| format!("\"{t}\""));
-        let headers: Vec<(&str, &str)> = etag.as_deref().map(|e| vec![("If-None-Match", e)]).unwrap_or_default();
+        let headers: Vec<(&str, &str)> = etag
+            .as_deref()
+            .map(|e| vec![("If-None-Match", e)])
+            .unwrap_or_default();
         self.client()?.get_with_headers(url, &headers, TIMEOUT)
     }
 
@@ -344,7 +376,8 @@ impl Worker {
                 self.failed(Trouble::Offline, None)
             }
         };
-        let wait = next.unwrap_or_else(|| Duration::from_secs(stocks::next_ask(self.every_s, self.fails)));
+        let wait =
+            next.unwrap_or_else(|| Duration::from_secs(stocks::next_ask(self.every_s, self.fails)));
         self.next_board = Instant::now() + wait;
     }
 
@@ -353,7 +386,9 @@ impl Worker {
         self.fails = self.fails.saturating_add(1);
         self.send(StocksEvent::Failed(why));
         let backoff = stocks::next_ask(self.every_s, self.fails);
-        Some(Duration::from_secs(retry_after_s.map_or(backoff, |s| s.clamp(backoff, 600))))
+        Some(Duration::from_secs(
+            retry_after_s.map_or(backoff, |s| s.clamp(backoff, 600)),
+        ))
     }
 
     fn ask_names(&mut self) {
@@ -393,7 +428,8 @@ impl Worker {
             Ok(r) => crate::pwarn!("stocks: chart {code}: HTTP {}", r.status),
             Err(e) => crate::pwarn!("stocks: chart {code}: {e}"),
         }
-        self.next_year.insert(code.to_string(), Instant::now() + RETRY_GAP);
+        self.next_year
+            .insert(code.to_string(), Instant::now() + RETRY_GAP);
         self.send(StocksEvent::NoHistory(code.to_string()));
     }
 }
@@ -419,7 +455,11 @@ mod tests {
     }
 
     fn open(codes: &[&str]) -> Watch {
-        Watch { open: true, codes: codes.iter().map(|c| c.to_string()).collect(), ..Watch::default() }
+        Watch {
+            open: true,
+            codes: codes.iter().map(|c| c.to_string()).collect(),
+            ..Watch::default()
+        }
     }
 
     /// The thread asks only once `next_due` is at or before its own `now`.
@@ -455,7 +495,16 @@ mod tests {
     fn a_closed_page_asks_for_nothing() {
         let now = Instant::now();
         let w = worker(now);
-        assert_eq!(w.next_due(&Watch { open: false, ..open(&["BBCA"]) }, now), None);
+        assert_eq!(
+            w.next_due(
+                &Watch {
+                    open: false,
+                    ..open(&["BBCA"])
+                },
+                now
+            ),
+            None
+        );
     }
 
     /// The real thread against the live oyenza.trade (CI's Windows unit tests
@@ -472,13 +521,21 @@ mod tests {
         let start = Instant::now();
         // As the page opens on the day's chart it wants the prices only (the
         // names and a year would wake 0.2.11's thread through their own times).
-        let mut watch = Watch { open: true, codes: codes.clone(), ..Watch::default() };
+        let mut watch = Watch {
+            open: true,
+            codes: codes.clone(),
+            ..Watch::default()
+        };
         service.set_watch(watch.clone());
         let (mut board, mut names, mut year) = (None, None, None);
         while board.is_none() || names.is_none() || year.is_none() {
             if board.is_some() && !watch.names {
                 // Then the search opens and 1M is picked.
-                watch = Watch { names: true, chart: Some("BBCA".into()), ..watch };
+                watch = Watch {
+                    names: true,
+                    chart: Some("BBCA".into()),
+                    ..watch
+                };
                 service.set_watch(watch.clone());
             }
             let left = Duration::from_secs(30).saturating_sub(start.elapsed());
@@ -486,15 +543,27 @@ mod tests {
                 Ok(AppEvent::Stocks(ev)) => ev,
                 Ok(_) => continue,
                 Err(_) => {
-                    let missing = [("prices", board.is_none()), ("names", names.is_none()), ("BBCA's year", year.is_none())];
+                    let missing = [
+                        ("prices", board.is_none()),
+                        ("names", names.is_none()),
+                        ("BBCA's year", year.is_none()),
+                    ];
                     let missing: Vec<&str> = missing.iter().filter(|m| m.1).map(|m| m.0).collect();
-                    panic!("no {} from the Stocks thread in 30 s: it never asked oyenza.trade", missing.join(", "));
+                    panic!(
+                        "no {} from the Stocks thread in 30 s: it never asked oyenza.trade",
+                        missing.join(", ")
+                    );
                 }
             };
             let at = start.elapsed().as_secs_f32();
             match ev {
                 StocksEvent::Board(b) => {
-                    println!("prices after {at:.2} s: {} rows, tag {}, every {} s", b.rows.len(), b.tag, b.every_s);
+                    println!(
+                        "prices after {at:.2} s: {} rows, tag {}, every {} s",
+                        b.rows.len(),
+                        b.tag,
+                        b.every_s
+                    );
                     board = Some(b);
                 }
                 StocksEvent::Names(n) => {
@@ -518,11 +587,16 @@ mod tests {
         }
         let board = board.expect("prices came");
         for code in std::iter::once(stocks::INDEX).chain(stocks::STARTERS) {
-            let q = board.quote(code).unwrap_or_else(|| panic!("{code} isn't in the answer"));
+            let q = board
+                .quote(code)
+                .unwrap_or_else(|| panic!("{code} isn't in the answer"));
             assert!(q.price > 0.0, "{code} has no price");
             println!("  {code} {}", q.price);
         }
-        assert!(names.is_some_and(|n| n.list.len() > 500), "every listed stock's name");
+        assert!(
+            names.is_some_and(|n| n.list.len() > 500),
+            "every listed stock's name"
+        );
         assert_eq!(year.map(|h| h.code), Some("BBCA".to_string()));
     }
 }

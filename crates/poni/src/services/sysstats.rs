@@ -11,7 +11,9 @@ use std::sync::{Mutex, OnceLock};
 use windows::core::HSTRING;
 use windows::Win32::Foundation::FILETIME;
 use windows::Win32::Storage::FileSystem::GetDiskFreeSpaceExW;
-use windows::Win32::System::SystemInformation::{GetTickCount64, GlobalMemoryStatusEx, MEMORYSTATUSEX};
+use windows::Win32::System::SystemInformation::{
+    GetTickCount64, GlobalMemoryStatusEx, MEMORYSTATUSEX,
+};
 use windows::Win32::System::Threading::GetSystemTimes;
 
 /// Cumulative system times in 100 ns ticks, as reported by `GetSystemTimes`
@@ -38,7 +40,10 @@ fn warn_once(flag: &AtomicBool, what: &str, e: &windows::core::Error) {
 }
 
 pub fn sample() -> SysStats {
-    let mut s = SysStats { valid: true, ..SysStats::default() };
+    let mut s = SysStats {
+        valid: true,
+        ..SysStats::default()
+    };
 
     match cpu_times() {
         Ok(now) => {
@@ -49,7 +54,10 @@ pub fn sample() -> SysStats {
         Err(e) => warn_once(&WARNED_CPU, "CPU times", &e),
     }
 
-    let mut mem = MEMORYSTATUSEX { dwLength: std::mem::size_of::<MEMORYSTATUSEX>() as u32, ..Default::default() };
+    let mut mem = MEMORYSTATUSEX {
+        dwLength: std::mem::size_of::<MEMORYSTATUSEX>() as u32,
+        ..Default::default()
+    };
     match unsafe { GlobalMemoryStatusEx(&mut mem) } {
         Ok(()) => {
             s.mem_total = mem.ullTotalPhys;
@@ -59,7 +67,11 @@ pub fn sample() -> SysStats {
     }
 
     static DRIVE: OnceLock<HSTRING> = OnceLock::new();
-    let drive = DRIVE.get_or_init(|| HSTRING::from(system_drive_root(std::env::var("SystemDrive").ok().as_deref())));
+    let drive = DRIVE.get_or_init(|| {
+        HSTRING::from(system_drive_root(
+            std::env::var("SystemDrive").ok().as_deref(),
+        ))
+    });
     let (mut avail, mut total) = (0u64, 0u64);
     match unsafe { GetDiskFreeSpaceExW(drive, Some(&mut avail), Some(&mut total), None) } {
         Ok(()) => {
@@ -74,9 +86,17 @@ pub fn sample() -> SysStats {
 }
 
 fn cpu_times() -> windows::core::Result<CpuTimes> {
-    let (mut idle, mut kernel, mut user) = (FILETIME::default(), FILETIME::default(), FILETIME::default());
+    let (mut idle, mut kernel, mut user) = (
+        FILETIME::default(),
+        FILETIME::default(),
+        FILETIME::default(),
+    );
     unsafe { GetSystemTimes(Some(&mut idle), Some(&mut kernel), Some(&mut user))? };
-    Ok(CpuTimes { idle: ft_ticks(idle), kernel: ft_ticks(kernel), user: ft_ticks(user) })
+    Ok(CpuTimes {
+        idle: ft_ticks(idle),
+        kernel: ft_ticks(kernel),
+        user: ft_ticks(user),
+    })
 }
 
 fn ft_ticks(ft: FILETIME) -> u64 {
@@ -151,7 +171,10 @@ mod tests {
 
     #[test]
     fn filetime_ticks_combine_high_and_low() {
-        let ft = FILETIME { dwLowDateTime: 0xDEAD_BEEF, dwHighDateTime: 0x1 };
+        let ft = FILETIME {
+            dwLowDateTime: 0xDEAD_BEEF,
+            dwHighDateTime: 0x1,
+        };
         assert_eq!(ft_ticks(ft), 0x1_DEAD_BEEF);
     }
 

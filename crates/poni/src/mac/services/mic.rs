@@ -19,10 +19,13 @@ use objc2::rc::Retained;
 use objc2::runtime::{AnyObject, Bool, ProtocolObject};
 use objc2::{define_class, msg_send, AnyThread, DefinedClass};
 use objc2_avf_audio::{
-    AVAudioApplication, AVAudioApplicationRecordPermission, AVAudioFileTypeKey, AVAudioRecorder, AVAudioRecorderDelegate, AVFormatIDKey,
-    AVLinearPCMBitDepthKey, AVLinearPCMIsBigEndianKey, AVLinearPCMIsFloatKey, AVNumberOfChannelsKey, AVSampleRateKey,
+    AVAudioApplication, AVAudioApplicationRecordPermission, AVAudioFileTypeKey, AVAudioRecorder,
+    AVAudioRecorderDelegate, AVFormatIDKey, AVLinearPCMBitDepthKey, AVLinearPCMIsBigEndianKey,
+    AVLinearPCMIsFloatKey, AVNumberOfChannelsKey, AVSampleRateKey,
 };
-use objc2_foundation::{NSDictionary, NSError, NSNumber, NSObject, NSObjectProtocol, NSString, NSURL};
+use objc2_foundation::{
+    NSDictionary, NSError, NSNumber, NSObject, NSObjectProtocol, NSString, NSURL,
+};
 use std::ffi::c_void;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -82,7 +85,9 @@ impl Mic {
         let permission = unsafe { AVAudioApplication::sharedInstance().recordPermission() };
         if permission == AVAudioApplicationRecordPermission::Granted {
             let rec = record(out, sink)?;
-            return Ok(Mic { state: Arc::new(Mutex::new(State::Recording(rec))) });
+            return Ok(Mic {
+                state: Arc::new(Mutex::new(State::Recording(rec))),
+            });
         }
         if permission == AVAudioApplicationRecordPermission::Denied {
             return Err(MicError::Denied);
@@ -94,8 +99,10 @@ impl Mic {
         let state = Arc::new(Mutex::new(State::Asking));
         let (st, out, sink) = (state.clone(), out.to_path_buf(), sink.clone());
         let answered = RcBlock::new(move |granted: Bool| {
-            let (st, out, sink, granted) = (st.clone(), out.clone(), sink.clone(), granted.as_bool());
-            dispatch2::DispatchQueue::main().exec_async(move || on_answer(&st, &out, &sink, granted));
+            let (st, out, sink, granted) =
+                (st.clone(), out.clone(), sink.clone(), granted.as_bool());
+            dispatch2::DispatchQueue::main()
+                .exec_async(move || on_answer(&st, &out, &sink, granted));
         });
         unsafe { AVAudioApplication::requestRecordPermissionWithCompletionHandler(&answered) };
         Ok(Mic { state })
@@ -103,8 +110,12 @@ impl Mic {
 
     /// 0..1 peak of the last ~50 ms, for the level meter (read only while recording).
     pub fn level(&self) -> f32 {
-        let Ok(st) = self.state.lock() else { return 0.0 };
-        let State::Recording(r) = &*st else { return 0.0 };
+        let Ok(st) = self.state.lock() else {
+            return 0.0;
+        };
+        let State::Recording(r) = &*st else {
+            return 0.0;
+        };
         // dBFS, -160 for silence.
         let db = unsafe {
             r.rec.updateMeters();
@@ -119,7 +130,11 @@ impl Mic {
 
     /// The file and its length in seconds.
     pub fn stop(self) -> Result<(PathBuf, f32), MicError> {
-        let was = self.state.lock().map(|mut s| std::mem::replace(&mut *s, State::Done)).unwrap_or(State::Done);
+        let was = self
+            .state
+            .lock()
+            .map(|mut s| std::mem::replace(&mut *s, State::Done))
+            .unwrap_or(State::Done);
         match was {
             State::Recording(r) => {
                 let secs = unsafe {
@@ -131,7 +146,9 @@ impl Mic {
                 };
                 Ok((r.path, secs as f32))
             }
-            State::Asking => Err(MicError::Failed("macOS is still asking for the microphone".into())),
+            State::Asking => Err(MicError::Failed(
+                "macOS is still asking for the microphone".into(),
+            )),
             State::TurnedDown => Err(MicError::Denied),
             State::Failed(e) => Err(MicError::Failed(e)),
             State::Done => Err(MicError::Failed("already stopped".into())),
@@ -143,7 +160,9 @@ impl Drop for Mic {
     /// The page closed mid-answer: the recording stops, and a late "Allow"
     /// starts nothing.
     fn drop(&mut self) {
-        let Ok(mut st) = self.state.lock() else { return };
+        let Ok(mut st) = self.state.lock() else {
+            return;
+        };
         if let State::Recording(r) = std::mem::replace(&mut *st, State::Done) {
             unsafe {
                 r.rec.setDelegate(None);
@@ -155,7 +174,9 @@ impl Drop for Mic {
 
 impl std::fmt::Debug for Mic {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let Ok(st) = self.state.lock() else { return f.write_str("poisoned") };
+        let Ok(st) = self.state.lock() else {
+            return f.write_str("poisoned");
+        };
         match &*st {
             State::Asking => f.write_str("asking macOS"),
             State::Recording(_) => f.write_str("recording"),
@@ -173,7 +194,10 @@ fn on_answer(state: &Mutex<State>, out: &Path, sink: &EventSink, granted: bool) 
         if !matches!(*st, State::Asking) {
             return;
         }
-        crate::pinfo!("mic: the person {} the microphone", if granted { "allowed" } else { "turned down" });
+        crate::pinfo!(
+            "mic: the person {} the microphone",
+            if granted { "allowed" } else { "turned down" }
+        );
         if !granted {
             *st = State::TurnedDown;
             "microphone access denied".to_string()
@@ -204,8 +228,10 @@ fn record(out: &Path, sink: &EventSink) -> Result<Recorder, MicError> {
         let _ = std::fs::create_dir_all(dir);
     }
     let url = NSURL::fileURLWithPath(&NSString::from_str(&out.to_string_lossy()));
-    let rec = unsafe { AVAudioRecorder::initWithURL_settings_error(AVAudioRecorder::alloc(), &url, &settings()) }
-        .map_err(|e| MicError::Failed(e.localizedDescription().to_string()))?;
+    let rec = unsafe {
+        AVAudioRecorder::initWithURL_settings_error(AVAudioRecorder::alloc(), &url, &settings())
+    }
+    .map_err(|e| MicError::Failed(e.localizedDescription().to_string()))?;
     let delegate = MicDelegate::new(sink.clone());
     unsafe {
         rec.setDelegate(Some(ProtocolObject::from_ref(&*delegate)));
@@ -215,7 +241,11 @@ fn record(out: &Path, sink: &EventSink) -> Result<Recorder, MicError> {
             return Err(MicError::Failed("macOS didn't start the recording".into()));
         }
     }
-    Ok(Recorder { rec, _delegate: delegate, path: out.to_path_buf() })
+    Ok(Recorder {
+        rec,
+        _delegate: delegate,
+        path: out.to_path_buf(),
+    })
 }
 
 /// 16 kHz mono 16-bit little-endian PCM in a WAV file.
@@ -233,7 +263,10 @@ fn settings() -> Retained<NSDictionary<NSString, AnyObject>> {
             (AVLinearPCMIsBigEndianKey, NSNumber::new_bool(false)),
         ]
     };
-    let pairs: Vec<(&NSString, Retained<NSNumber>)> = pairs.into_iter().filter_map(|(k, v)| Some((k?, v))).collect();
+    let pairs: Vec<(&NSString, Retained<NSNumber>)> = pairs
+        .into_iter()
+        .filter_map(|(k, v)| Some((k?, v)))
+        .collect();
     let keys: Vec<&NSString> = pairs.iter().map(|(k, _)| *k).collect();
     let values: Vec<&AnyObject> = pairs.iter().map(|(_, v)| v.as_ref()).collect();
     NSDictionary::from_slices(&keys, &values)
@@ -248,15 +281,35 @@ struct Addr {
 
 #[link(name = "CoreAudio", kind = "framework")]
 extern "C" {
-    fn AudioObjectGetPropertyData(id: u32, addr: *const Addr, qual_size: u32, qual: *const c_void, size: *mut u32, data: *mut c_void) -> i32;
+    fn AudioObjectGetPropertyData(
+        id: u32,
+        addr: *const Addr,
+        qual_size: u32,
+        qual: *const c_void,
+        size: *mut u32,
+        data: *mut c_void,
+    ) -> i32;
 }
 
 /// Whether the Mac has a microphone now: Core Audio's default input device
 /// (`kAudioHardwarePropertyDefaultInputDevice` on the system object).
 fn has_input() -> bool {
-    let addr = Addr { selector: u32::from_be_bytes(*b"dIn "), scope: u32::from_be_bytes(*b"glob"), element: 0 };
+    let addr = Addr {
+        selector: u32::from_be_bytes(*b"dIn "),
+        scope: u32::from_be_bytes(*b"glob"),
+        element: 0,
+    };
     let (mut id, mut size) = (0u32, std::mem::size_of::<u32>() as u32);
-    let r = unsafe { AudioObjectGetPropertyData(1, &addr, 0, std::ptr::null(), &mut size, (&mut id as *mut u32).cast()) };
+    let r = unsafe {
+        AudioObjectGetPropertyData(
+            1,
+            &addr,
+            0,
+            std::ptr::null(),
+            &mut size,
+            (&mut id as *mut u32).cast(),
+        )
+    };
     r == 0 && id != 0
 }
 
@@ -274,12 +327,16 @@ define_class!(
         // ending by itself (the microphone went away).
         #[unsafe(method(audioRecorderDidFinishRecording:successfully:))]
         fn did_finish(&self, _recorder: &AVAudioRecorder, _ok: bool) {
-            self.ivars().send(AppEvent::MicFailed("the microphone stopped".into()));
+            self.ivars()
+                .send(AppEvent::MicFailed("the microphone stopped".into()));
         }
 
         #[unsafe(method(audioRecorderEncodeErrorDidOccur:error:))]
         fn encode_error(&self, _recorder: &AVAudioRecorder, error: Option<&NSError>) {
-            let why = error.map_or_else(|| "the recording couldn't be written".to_string(), |e| e.localizedDescription().to_string());
+            let why = error.map_or_else(
+                || "the recording couldn't be written".to_string(),
+                |e| e.localizedDescription().to_string(),
+            );
             self.ivars().send(AppEvent::MicFailed(why));
         }
     }

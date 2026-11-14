@@ -27,7 +27,9 @@ impl App {
         if self.smoke_run || !self.st.downloader_on() {
             return;
         }
-        let Some(link) = services::clipboard::read_text().and_then(|t| link_in(&t)) else { return };
+        let Some(link) = services::clipboard::read_text().and_then(|t| link_in(&t)) else {
+            return;
+        };
         let ui = &mut self.st.ui.downloads;
         let known = ui.link.trim() == link || self.st.downloads.list.iter().any(|j| j.url == link);
         if !known && ui.offered != link {
@@ -47,7 +49,13 @@ impl App {
                     return;
                 };
                 // The same link twice at once would write the same file.
-                if self.st.downloads.list.iter().any(|j| j.url == url && j.mode == mode && j.state.live()) {
+                if self
+                    .st
+                    .downloads
+                    .list
+                    .iter()
+                    .any(|j| j.url == url && j.mode == mode && j.state.live())
+                {
                     pages::downloads::note(&mut self.st, "Already downloading");
                     return;
                 }
@@ -74,7 +82,10 @@ impl App {
                     services::reveal(&path);
                 }
             }
-            DownloadCmd::PasteLink => match services::clipboard::read_text().as_deref().and_then(link_in) {
+            DownloadCmd::PasteLink => match services::clipboard::read_text()
+                .as_deref()
+                .and_then(link_in)
+            {
                 Some(link) => {
                     // The field has the keyboard: its caret goes after the link.
                     if self.input.focused.is_some() {
@@ -109,7 +120,14 @@ impl App {
     /// The Downloader switched off, or Studio Pro went: its downloads stop
     /// before its tools are deleted, and the list goes with the tab.
     pub(super) fn downloads_off(&mut self) {
-        let live: Vec<u64> = self.st.downloads.list.iter().filter(|j| j.state.live()).map(|j| j.id).collect();
+        let live: Vec<u64> = self
+            .st
+            .downloads
+            .list
+            .iter()
+            .filter(|j| j.state.live())
+            .map(|j| j.id)
+            .collect();
         for id in live {
             self.stop_job(id);
         }
@@ -130,11 +148,21 @@ impl App {
                 Err(e) => return pwarn!("downloader: unavailable ({e})"),
             }
         }
-        let Some(svc) = self.downloader.as_ref() else { return };
+        let Some(svc) = self.downloader.as_ref() else {
+            return;
+        };
         let folder = paths::media_downloads_dir().to_string_lossy().into_owned();
         for id in ids {
-            let Some(job) = self.st.downloads.get(id) else { continue };
-            svc.run(Request { id, url: job.url.clone(), mode: job.mode, max_height: None, folder: folder.clone() });
+            let Some(job) = self.st.downloads.get(id) else {
+                continue;
+            };
+            svc.run(Request {
+                id,
+                url: job.url.clone(),
+                mode: job.mode,
+                max_height: None,
+                folder: folder.clone(),
+            });
             self.st.downloads.starting(id);
         }
     }
@@ -160,7 +188,9 @@ impl App {
     /// notice while the island is closed. Not for a download stopped in the
     /// meantime, or a file that isn't where yt-dlp said.
     fn saved(&mut self, id: u64, path: String) {
-        let Some(job) = self.st.downloads.get(id) else { return };
+        let Some(job) = self.st.downloads.get(id) else {
+            return;
+        };
         if !matches!(&job.state, State::Done { path: done, .. } if *done == path) {
             return;
         }
@@ -175,7 +205,14 @@ impl App {
         self.st.cmds.push(Command::LoadThumb(path));
         self.st.save();
         if !self.expanded {
-            self.st.notify(Icon::Download, palette::GREEN, "Saved", title, 6.0, Some(NoticeAction::OpenPage(PageKind::Shelf)));
+            self.st.notify(
+                Icon::Download,
+                palette::GREEN,
+                "Saved",
+                title,
+                6.0,
+                Some(NoticeAction::OpenPage(PageKind::Shelf)),
+            );
         }
     }
 }

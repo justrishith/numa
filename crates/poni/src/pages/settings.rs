@@ -86,7 +86,12 @@ const CHIP_ICON_GAP: f32 = 5.0;
 const CHIP_GAP: f32 = 6.0;
 
 // Glass: on Windows from a copy of the screen, on a Mac macOS's own glass.
-const THEMES: [(Theme, &str); 4] = [(Theme::Classic, "Classic"), (Theme::Oyen, "Oyen"), (Theme::Glass, "Glass"), (Theme::Pill, "Pill")];
+const THEMES: [(Theme, &str); 4] = [
+    (Theme::Classic, "Classic"),
+    (Theme::Oyen, "Oyen"),
+    (Theme::Glass, "Glass"),
+    (Theme::Pill, "Pill"),
+];
 
 /// An idle look's name in the picker (`eyes` is Oyen in his theme).
 fn idle_name(s: IdleStyle, eyes: &'static str) -> &'static str {
@@ -125,10 +130,18 @@ const LEFT: &[Row] = &[
 ];
 // The version took the row of the new versions' switch (Clipboard history's
 // before it), so the columns stay even.
-const RIGHT: &[Row] = &[Row::Version, Row::Fullscreen, Row::Switch(Switch::Autostart, "Start with Windows")];
+const RIGHT: &[Row] = &[
+    Row::Version,
+    Row::Fullscreen,
+    Row::Switch(Switch::Autostart, "Start with Windows"),
+];
 const COLUMNS: [&[Row]; 2] = [LEFT, RIGHT];
 /// Rows in the taller column.
-const ROWS: usize = if LEFT.len() > RIGHT.len() { LEFT.len() } else { RIGHT.len() };
+const ROWS: usize = if LEFT.len() > RIGHT.len() {
+    LEFT.len()
+} else {
+    RIGHT.len()
+};
 
 /// The full-screen choices as the tray menu names them, and the
 /// `hide_in_fullscreen` each one sets.
@@ -156,49 +169,110 @@ pub fn draw(ui: &mut Ui, st: &mut AppState, area: Rect) {
     }
     draw_account(ui, st, Rect::new(area.x, area.y, area.w, ACCOUNT_H));
     let px = 1.0 / ui.c.scale().max(0.5);
-    ui.c.fill_rect(Rect::new(area.x, area.y + RULE_Y, area.w, px), Color::white(0.10));
+    ui.c.fill_rect(
+        Rect::new(area.x, area.y + RULE_Y, area.w, px),
+        Color::white(0.10),
+    );
 
     let col_w = ((area.w - COL_GAP) / 2.0).max(0.0);
     let cols = [area.x, area.x + col_w + COL_GAP];
-    let label_st = TextStyle::caption().weight(Weight::Semibold).color(palette::TEXT_FAINT);
+    let label_st = TextStyle::caption()
+        .weight(Weight::Semibold)
+        .color(palette::TEXT_FAINT);
 
     // Pickers.
     let theme_names: Vec<&str> = THEMES.iter().map(|t| t.1).collect();
-    let theme_sel = THEMES.iter().position(|t| t.0 == st.settings.theme).unwrap_or(0);
+    let theme_sel = THEMES
+        .iter()
+        .position(|t| t.0 == st.settings.theme)
+        .unwrap_or(0);
     let looks = status::looks(st.settings.theme);
     // In the Oyen theme the eyes are Oyen's own (as in the tray menu).
-    let eyes = if st.settings.theme == Theme::Oyen { "Oyen" } else { "Eyes" };
+    let eyes = if st.settings.theme == Theme::Oyen {
+        "Oyen"
+    } else {
+        "Eyes"
+    };
     let look_names: Vec<&str> = looks.iter().map(|s| idle_name(*s, eyes)).collect();
-    let look_sel = looks.iter().position(|s| *s == status::shown(st.settings.theme, st.settings.idle_style)).unwrap_or(0);
+    let look_sel = looks
+        .iter()
+        .position(|s| *s == status::shown(st.settings.theme, st.settings.idle_style))
+        .unwrap_or(0);
     // Side by side under their labels when both fit their columns, each
     // closed up only as far as it needs; else a row each. Whether they fit is
     // asked of this theme's own looks, so Classic, Oyen and Glass sit side by
     // side exactly where they always did (at a narrow island picking Pill,
     // with its fifth look, can stack them).
     let theme_pad = pad_to_fit(ui, &theme_names, col_w);
-    let side_by_side = theme_pad >= SEG_PAD_MIN && pad_to_fit(ui, &look_names, col_w) >= SEG_PAD_MIN;
+    let side_by_side =
+        theme_pad >= SEG_PAD_MIN && pad_to_fit(ui, &look_names, col_w) >= SEG_PAD_MIN;
     let (theme_pick, look_pick) = if side_by_side {
-        ui.c.text("THEME", Rect::new(cols[0], area.y + LABELS_Y, col_w, 14.0), &label_st);
-        ui.c.text("IDLE LOOK", Rect::new(cols[1], area.y + LABELS_Y, col_w, 14.0), &label_st);
+        ui.c.text(
+            "THEME",
+            Rect::new(cols[0], area.y + LABELS_Y, col_w, 14.0),
+            &label_st,
+        );
+        ui.c.text(
+            "IDLE LOOK",
+            Rect::new(cols[1], area.y + LABELS_Y, col_w, 14.0),
+            &label_st,
+        );
         let y = area.y + PICKERS_Y;
         let look_pad = pad_to_fit(ui, &look_names, col_w);
         (
-            picker_padded(ui, "settings.theme", cols[0], y, PILL_SMALL, &theme_names, theme_sel, theme_pad),
-            picker_padded(ui, "settings.idle", cols[1], y, PILL_SMALL, &look_names, look_sel, look_pad),
+            picker_padded(
+                ui,
+                "settings.theme",
+                cols[0],
+                y,
+                PILL_SMALL,
+                &theme_names,
+                theme_sel,
+                theme_pad,
+            ),
+            picker_padded(
+                ui,
+                "settings.idle",
+                cols[1],
+                y,
+                PILL_SMALL,
+                &look_names,
+                look_sel,
+                look_pad,
+            ),
         )
     } else {
         // A row each, the labels in a column of their own and both pickers
         // starting after it.
         let labels = ["THEME", "IDLE LOOK"];
-        let label_w = labels.iter().map(|l| ui.c.measure(l, &label_st, 300.0).0.ceil()).fold(0.0f32, f32::max);
+        let label_w = labels
+            .iter()
+            .map(|l| ui.c.measure(l, &label_st, 300.0).0.ceil())
+            .fold(0.0f32, f32::max);
         let x = area.x + label_w + STACK_GAP;
         let pick = |ui: &mut Ui, i: usize, id: &str, names: &[&str], sel: usize| {
             let row = Rect::new(area.x, area.y + STACK_Y[i], area.w, ROW_H);
-            ui.c.text(labels[i], Rect::new(row.x, row.y, label_w + 2.0, row.h), &label_st);
+            ui.c.text(
+                labels[i],
+                Rect::new(row.x, row.y, label_w + 2.0, row.h),
+                &label_st,
+            );
             let pad = pad_to_fit(ui, names, row.right() - x).max(0.0);
-            picker_padded(ui, id, x, row.center().y - ROW_PICKER_H / 2.0, ROW_PICKER_H, names, sel, pad)
+            picker_padded(
+                ui,
+                id,
+                x,
+                row.center().y - ROW_PICKER_H / 2.0,
+                ROW_PICKER_H,
+                names,
+                sel,
+                pad,
+            )
         };
-        (pick(ui, 0, "settings.theme", &theme_names, theme_sel), pick(ui, 1, "settings.idle", &look_names, look_sel))
+        (
+            pick(ui, 0, "settings.theme", &theme_names, theme_sel),
+            pick(ui, 1, "settings.idle", &look_names, look_sel),
+        )
     };
     if let Some(i) = theme_pick {
         st.settings.theme = THEMES[i].0;
@@ -214,11 +288,20 @@ pub fn draw(ui: &mut Ui, st: &mut AppState, area: Rect) {
     let card = super::card::pill_card(st, area);
     for (c, column) in COLUMNS.iter().enumerate() {
         for (r, &kind) in column.iter().enumerate() {
-            let row = Rect::new(cols[c], area.y + SWITCHES_Y + r as f32 * ROW_H, col_w, ROW_H);
+            let row = Rect::new(
+                cols[c],
+                area.y + SWITCHES_Y + r as f32 * ROW_H,
+                col_w,
+                ROW_H,
+            );
             match kind {
                 Row::Switch(sw, label) => {
                     // A Mac starts apps at login, as its menu bar says.
-                    let label = if cfg!(target_os = "macos") && sw == Switch::Autostart { "Start at login" } else { label };
+                    let label = if cfg!(target_os = "macos") && sw == Switch::Autostart {
+                        "Start at login"
+                    } else {
+                        label
+                    };
                     let on = switch_on(st, sw);
                     let id = wid_n("settings.switch", (c * ROWS + r) as u64);
                     if switch_row_on(ui, id, row, label, on, accent, card) {
@@ -228,19 +311,43 @@ pub fn draw(ui: &mut Ui, st: &mut AppState, area: Rect) {
                 Row::Version => {
                     // Check now at its right end; while a later version is
                     // out, Update to it there instead (the Update sheet).
-                    let update = st.update.offer.as_ref().map(|rel| update_label(ui, row, &rel.version));
+                    let update = st
+                        .update
+                        .offer
+                        .as_ref()
+                        .map(|rel| update_label(ui, row, &rel.version));
                     let slot = match &update {
                         Some(text) => {
                             let w = ui.pill_width(text, false, true);
-                            Some(Rect::new(row.right() - w, row.center().y - ROW_PICKER_H / 2.0, w, ROW_PICKER_H))
+                            Some(Rect::new(
+                                row.right() - w,
+                                row.center().y - ROW_PICKER_H / 2.0,
+                                w,
+                                ROW_PICKER_H,
+                            ))
                         }
                         None => check_slot(ui, st, row),
                     };
                     let right = slot.map_or(row.right(), |b| b.x - 10.0);
-                    text_with_dim(ui, "Version", VERSION, Rect::new(row.x, row.y, (right - row.x).max(0.0), row.h), TextStyle::body());
+                    text_with_dim(
+                        ui,
+                        "Version",
+                        VERSION,
+                        Rect::new(row.x, row.y, (right - row.x).max(0.0), row.h),
+                        TextStyle::body(),
+                    );
                     match (update, slot) {
                         (Some(text), Some(b)) => {
-                            if ui.pill(wid("settings.update"), b, &text, None, PillStyle::Primary(accent)).clicked {
+                            if ui
+                                .pill(
+                                    wid("settings.update"),
+                                    b,
+                                    &text,
+                                    None,
+                                    PillStyle::Primary(accent),
+                                )
+                                .clicked
+                            {
                                 st.update.sheet = true;
                             }
                         }
@@ -249,8 +356,18 @@ pub fn draw(ui: &mut Ui, st: &mut AppState, area: Rect) {
                     }
                 }
                 Row::Fullscreen => {
-                    let sel = FULLSCREEN.iter().position(|f| f.0 == st.settings.hide_in_fullscreen).unwrap_or(0);
-                    if let Some(i) = choice_row(ui, row, "In full-screen apps", "settings.fullscreen", &FULLSCREEN.map(|f| f.1), sel) {
+                    let sel = FULLSCREEN
+                        .iter()
+                        .position(|f| f.0 == st.settings.hide_in_fullscreen)
+                        .unwrap_or(0);
+                    if let Some(i) = choice_row(
+                        ui,
+                        row,
+                        "In full-screen apps",
+                        "settings.fullscreen",
+                        &FULLSCREEN.map(|f| f.1),
+                        sel,
+                    ) {
                         st.settings.hide_in_fullscreen = FULLSCREEN[i].0;
                         st.cmd(Command::SaveSettings);
                     }
@@ -259,7 +376,12 @@ pub fn draw(ui: &mut Ui, st: &mut AppState, area: Rect) {
         }
     }
     draw_tabs(ui, st, Rect::new(area.x, area.y + TABS_Y, area.w, ROW_H));
-    draw_advanced(ui, st, Rect::new(area.x, area.y + ADVANCED_Y, area.w, ROW_H), card);
+    draw_advanced(
+        ui,
+        st,
+        Rect::new(area.x, area.y + ADVANCED_Y, area.w, ROW_H),
+        card,
+    );
 }
 
 /// The last row, under a line: Advanced settings, the window with every
@@ -272,11 +394,34 @@ fn draw_advanced(ui: &mut Ui, st: &mut AppState, r: Rect, card: Option<(Rect, f3
     let resp = ui.button(wid(ADVANCED_ID), hit);
     let lit = resp.hovered || resp.pressed;
     if lit {
-        super::card::fill_box(ui, card, hit.inset(0.0, 1.0), 8.0, Color::white(if resp.pressed { 0.10 } else { 0.06 }));
+        super::card::fill_box(
+            ui,
+            card,
+            hit.inset(0.0, 1.0),
+            8.0,
+            Color::white(if resp.pressed { 0.10 } else { 0.06 }),
+        );
     }
-    let icon = Rect::new(r.right() - ADVANCED_ICON, r.center().y - ADVANCED_ICON / 2.0, ADVANCED_ICON, ADVANCED_ICON);
-    ui.c.icon(Icon::Open, icon, if lit { palette::TEXT } else { palette::TEXT_DIM });
-    ui.c.text("Advanced settings", Rect::new(r.x, r.y, (icon.x - 10.0 - r.x).max(0.0), r.h), &TextStyle::body());
+    let icon = Rect::new(
+        r.right() - ADVANCED_ICON,
+        r.center().y - ADVANCED_ICON / 2.0,
+        ADVANCED_ICON,
+        ADVANCED_ICON,
+    );
+    ui.c.icon(
+        Icon::Open,
+        icon,
+        if lit {
+            palette::TEXT
+        } else {
+            palette::TEXT_DIM
+        },
+    );
+    ui.c.text(
+        "Advanced settings",
+        Rect::new(r.x, r.y, (icon.x - 10.0 - r.x).max(0.0), r.h),
+        &TextStyle::body(),
+    );
     if resp.clicked {
         st.cmd(Command::OpenSettings);
     }
@@ -293,10 +438,23 @@ fn draw_tabs(ui: &mut Ui, st: &mut AppState, r: Rect) {
     let chip_st = TextStyle::footnote().weight(Weight::Semibold);
     let pages = PageKind::HIDEABLE;
     let gaps = CHIP_GAP * (pages.len() - 1) as f32;
-    let full: Vec<f32> =
-        pages.iter().map(|p| (CHIP_PAD + CHIP_ICON + CHIP_ICON_GAP + ui.c.measure(p.title(), &chip_st, 200.0).0 + CHIP_PAD).ceil()).collect();
+    let full: Vec<f32> = pages
+        .iter()
+        .map(|p| {
+            (CHIP_PAD
+                + CHIP_ICON
+                + CHIP_ICON_GAP
+                + ui.c.measure(p.title(), &chip_st, 200.0).0
+                + CHIP_PAD)
+                .ceil()
+        })
+        .collect();
     let names = full.iter().sum::<f32>() + gaps <= r.w - label_w - 12.0;
-    let widths: Vec<f32> = if names { full } else { vec![CHIP_H + 8.0; pages.len()] };
+    let widths: Vec<f32> = if names {
+        full
+    } else {
+        vec![CHIP_H + 8.0; pages.len()]
+    };
     let mut x = r.right() - widths.iter().sum::<f32>() - gaps;
     let y = r.center().y - CHIP_H / 2.0;
     let mut flip = None;
@@ -317,15 +475,28 @@ fn draw_tabs(ui: &mut Ui, st: &mut AppState, r: Rect) {
         };
         ui.c.fill_rrect(c, CHIP_H / 2.0, fill);
         let color = if on { palette::TEXT } else { palette::TEXT_DIM };
-        let ix = if names { c.x + CHIP_PAD } else { c.center().x - CHIP_ICON / 2.0 };
+        let ix = if names {
+            c.x + CHIP_PAD
+        } else {
+            c.center().x - CHIP_ICON / 2.0
+        };
         let ir = Rect::new(ix, c.center().y - CHIP_ICON / 2.0, CHIP_ICON, CHIP_ICON);
         ui.c.icon(p.icon(), ir, color);
         if !on {
-            ui.c.line(Point::new(ir.x, ir.bottom()), Point::new(ir.right(), ir.y), color, 1.5);
+            ui.c.line(
+                Point::new(ir.x, ir.bottom()),
+                Point::new(ir.right(), ir.y),
+                color,
+                1.5,
+            );
         }
         if names {
             let tx = ix + CHIP_ICON + CHIP_ICON_GAP;
-            ui.c.text(p.title(), Rect::new(tx, c.y, (c.right() - tx).max(0.0), c.h), &chip_st.color(color));
+            ui.c.text(
+                p.title(),
+                Rect::new(tx, c.y, (c.right() - tx).max(0.0), c.h),
+                &chip_st.color(color),
+            );
         }
     }
     if let Some(p) = flip {
@@ -350,10 +521,19 @@ pub(crate) fn check_slot(ui: &mut Ui, st: &AppState, row: Rect) -> Option<Rect> 
     let (text, _) = check_look(st.update.said, st.accent);
     // Checking… and Up to date are words only: no room for a wash, so they
     // take less of the label's, ending where Check now's words end.
-    let pad = if answered(st.update.said) { 0.0 } else { CHECK_PAD };
+    let pad = if answered(st.update.said) {
+        0.0
+    } else {
+        CHECK_PAD
+    };
     let w = (ui.c.measure(text, &check_text(), 300.0).0 + 2.0 * pad).ceil();
     let right = row.right() - (CHECK_PAD - pad);
-    Some(Rect::new(right - w, row.center().y - CHECK_H / 2.0, w, CHECK_H))
+    Some(Rect::new(
+        right - w,
+        row.center().y - CHECK_H / 2.0,
+        w,
+        CHECK_H,
+    ))
 }
 
 /// Check now said something that isn't a button: checking, or up to date.
@@ -372,7 +552,11 @@ pub(crate) fn draw_check(ui: &mut Ui, st: &mut AppState, b: Rect) {
     }
     let resp = ui.button(wid("settings.check"), b);
     if resp.hovered || resp.pressed {
-        ui.c.fill_rrect(b, b.h / 2.0, Color::white(if resp.pressed { 0.14 } else { 0.08 }));
+        ui.c.fill_rrect(
+            b,
+            b.h / 2.0,
+            Color::white(if resp.pressed { 0.14 } else { 0.08 }),
+        );
     }
     ui.c.text(text, b, &check_text().color(color).center());
     if resp.clicked {
@@ -385,7 +569,9 @@ pub(crate) fn draw_check(ui: &mut Ui, st: &mut AppState, b: Rect) {
 /// where it and the version don't both fit (a narrow island).
 fn update_label(ui: &mut Ui, row: Rect, version: &str) -> String {
     let long = format!("Update to {version}");
-    let need = text_with_dim_width(ui, "Version", VERSION, &TextStyle::body()) + 10.0 + ui.pill_width(&long, false, true);
+    let need = text_with_dim_width(ui, "Version", VERSION, &TextStyle::body())
+        + 10.0
+        + ui.pill_width(&long, false, true);
     if need <= row.w {
         long
     } else {
@@ -442,48 +628,133 @@ fn draw_sheet(ui: &mut Ui, st: &mut AppState, area: Rect, rel: &Release) {
     ui.c.fill_circle(c, ICON / 2.0, accent.with_alpha(0.22));
     ui.c.icon(Icon::Download, Rect::from_center(c, 20.0, 20.0), accent);
     let later_w = ui.pill_width("Not now", false, true);
-    let later = Rect::new(head.right() - later_w, cy - PILL_SMALL / 2.0, later_w, PILL_SMALL);
-    if ui.pill(wid("update.later"), later, "Not now", None, PillStyle::Utility).clicked {
+    let later = Rect::new(
+        head.right() - later_w,
+        cy - PILL_SMALL / 2.0,
+        later_w,
+        PILL_SMALL,
+    );
+    if ui
+        .pill(
+            wid("update.later"),
+            later,
+            "Not now",
+            None,
+            PillStyle::Utility,
+        )
+        .clicked
+    {
         st.cmd(Command::Collapse);
     }
     let x = head.x + TEXT_X;
     let w = (later.x - 16.0 - x).max(0.0);
     let ready = st.update.ready;
-    let title = if ready { "Update ready to install" } else { "Update available" };
-    text_with_dim(ui, title, &rel.version, Rect::new(x, cy - 19.0, w, 20.0), TextStyle::headline());
-    let size = rel.download(cfg!(target_os = "macos")).map(|d| fmt_bytes(d.size)).unwrap_or_default();
+    let title = if ready {
+        "Update ready to install"
+    } else {
+        "Update available"
+    };
+    text_with_dim(
+        ui,
+        title,
+        &rel.version,
+        Rect::new(x, cy - 19.0, w, 20.0),
+        TextStyle::headline(),
+    );
+    let size = rel
+        .download(cfg!(target_os = "macos"))
+        .map(|d| fmt_bytes(d.size))
+        .unwrap_or_default();
     let line = if ready {
         "A new version of Oyenza Studio is ready to be installed.".to_string()
     } else {
         format!("A new version of Oyenza Studio is ready to download ({size}).")
     };
-    ui.c.text(&line, Rect::new(x, cy + 1.0, w, 17.0), &TextStyle::footnote().color(palette::TEXT_DIM));
+    ui.c.text(
+        &line,
+        Rect::new(x, cy + 1.0, w, 17.0),
+        &TextStyle::footnote().color(palette::TEXT_DIM),
+    );
 
     let px = 1.0 / ui.c.scale().max(0.5);
-    ui.c.fill_rect(Rect::new(area.x, area.y + RULE_Y, area.w, px), Color::white(0.10));
-    let label_st = TextStyle::caption().weight(Weight::Semibold).color(palette::TEXT_FAINT);
-    ui.c.text("WHAT'S NEW", Rect::new(area.x, area.y + SHEET_CAPTION_Y, area.w, 14.0), &label_st);
-    ui.c.text(&rel.headline, Rect::new(area.x, area.y + SHEET_HEADLINE_Y, area.w, 20.0), &TextStyle::body());
+    ui.c.fill_rect(
+        Rect::new(area.x, area.y + RULE_Y, area.w, px),
+        Color::white(0.10),
+    );
+    let label_st = TextStyle::caption()
+        .weight(Weight::Semibold)
+        .color(palette::TEXT_FAINT);
+    ui.c.text(
+        "WHAT'S NEW",
+        Rect::new(area.x, area.y + SHEET_CAPTION_Y, area.w, 14.0),
+        &label_st,
+    );
+    ui.c.text(
+        &rel.headline,
+        Rect::new(area.x, area.y + SHEET_HEADLINE_Y, area.w, 20.0),
+        &TextStyle::body(),
+    );
 
     // Windows with the Setup in: now or next start. Otherwise the DMG on a
     // Mac, and the release page on Windows (the Setup couldn't download).
     let cards: Vec<(Get, Icon, String, &str)> = if ready {
         let next = if st.update.next_start {
-            (Get::NextStart, Icon::Check, "Installs on next start".to_string(), "Set: before it next opens")
+            (
+                Get::NextStart,
+                Icon::Check,
+                "Installs on next start".to_string(),
+                "Set: before it next opens",
+            )
         } else {
-            (Get::NextStart, Icon::Reset, "Install on next start".to_string(), "Before it next opens")
+            (
+                Get::NextStart,
+                Icon::Reset,
+                "Install on next start".to_string(),
+                "Before it next opens",
+            )
         };
-        vec![(Get::InstallNow, Icon::Download, "Install now".to_string(), "Closes, updates and opens again"), next]
+        vec![
+            (
+                Get::InstallNow,
+                Icon::Download,
+                "Install now".to_string(),
+                "Closes, updates and opens again",
+            ),
+            next,
+        ]
     } else if cfg!(target_os = "macos") {
-        vec![(Get::Download, Icon::Download, format!("Download {}", rel.version), "Downloads the DMG: open it and drag Oyenza Studio to Applications.")]
+        vec![(
+            Get::Download,
+            Icon::Download,
+            format!("Download {}", rel.version),
+            "Downloads the DMG: open it and drag Oyenza Studio to Applications.",
+        )]
     } else {
-        vec![(Get::Download, Icon::Download, format!("Download {}", rel.version), "Opens its release page: run the Setup there, your settings stay.")]
+        vec![(
+            Get::Download,
+            Icon::Download,
+            format!("Download {}", rel.version),
+            "Opens its release page: run the Setup there, your settings stay.",
+        )]
     };
     let n = cards.len() as f32;
     let card_w = ((area.w - (n - 1.0) * CARD_GAP) / n).max(0.0);
     for (i, (get, icon, title, line)) in cards.iter().enumerate() {
-        let r = Rect::new(area.x + i as f32 * (card_w + CARD_GAP), area.y + CARDS_Y, card_w, CARD_H);
-        if card(ui, wid_n("update.card", i as u64), r, *icon, title, line, accent) {
+        let r = Rect::new(
+            area.x + i as f32 * (card_w + CARD_GAP),
+            area.y + CARDS_Y,
+            card_w,
+            CARD_H,
+        );
+        if card(
+            ui,
+            wid_n("update.card", i as u64),
+            r,
+            *icon,
+            title,
+            line,
+            accent,
+        ) {
             match get {
                 Get::Download | Get::InstallNow => st.cmd(Command::Update),
                 Get::NextStart => st.cmd(Command::InstallOnNextStart),
@@ -494,7 +765,16 @@ fn draw_sheet(ui: &mut Ui, st: &mut AppState, area: Rect, rel: &Release) {
     let notes = format!("See what's new in Oyenza Studio {}", rel.version);
     let nw = ui.pill_width(&notes, true, true).min(area.w);
     let nr = Rect::new(area.x, area.y + NOTES_Y, nw, PILL_SMALL);
-    if ui.pill(wid("update.notes"), nr, &notes, Some(Icon::Open), PillStyle::Utility).clicked {
+    if ui
+        .pill(
+            wid("update.notes"),
+            nr,
+            &notes,
+            Some(Icon::Open),
+            PillStyle::Utility,
+        )
+        .clicked
+    {
         st.cmd(Command::OpenUrl(rel.notes.clone()));
     }
 }
@@ -517,17 +797,44 @@ fn card(ui: &mut Ui, id: u64, r: Rect, icon: Icon, title: &str, line: &str, acce
     let x = c.x + CARD_DISC / 2.0 + 12.0;
     let w = (r.right() - 14.0 - x).max(0.0);
     let cy = r.center().y;
-    ui.c.text(title, Rect::new(x, cy - 18.0, w, 20.0), &TextStyle::body().weight(Weight::Semibold));
-    ui.c.text(line, Rect::new(x, cy + 1.0, w, 16.0), &TextStyle::footnote().color(palette::TEXT_DIM));
+    ui.c.text(
+        title,
+        Rect::new(x, cy - 18.0, w, 20.0),
+        &TextStyle::body().weight(Weight::Semibold),
+    );
+    ui.c.text(
+        line,
+        Rect::new(x, cy + 1.0, w, 16.0),
+        &TextStyle::footnote().color(palette::TEXT_DIM),
+    );
     resp.clicked
 }
 
 /// A choice's label with its picker where the other rows have their
 /// switch. Returns the choice clicked, if any.
-fn choice_row(ui: &mut Ui, r: Rect, label: &str, id: &str, names: &[&str], sel: usize) -> Option<usize> {
+fn choice_row(
+    ui: &mut Ui,
+    r: Rect,
+    label: &str,
+    id: &str,
+    names: &[&str],
+    sel: usize,
+) -> Option<usize> {
     let x = r.right() - picker_width(ui, names);
-    ui.c.text(label, Rect::new(r.x, r.y, (x - 10.0 - r.x).max(0.0), r.h), &TextStyle::body());
-    picker(ui, id, x, r.center().y - ROW_PICKER_H / 2.0, ROW_PICKER_H, names, sel)
+    ui.c.text(
+        label,
+        Rect::new(r.x, r.y, (x - 10.0 - r.x).max(0.0), r.h),
+        &TextStyle::body(),
+    );
+    picker(
+        ui,
+        id,
+        x,
+        r.center().y - ROW_PICKER_H / 2.0,
+        ROW_PICKER_H,
+        names,
+        sel,
+    )
 }
 
 /// Where a switch reads from. Start with Windows is read off the UI thread
@@ -568,41 +875,102 @@ pub(crate) fn draw_account(ui: &mut Ui, st: &mut AppState, r: Rect) {
             let label = "Sign in with Oyenza";
             let w = ui.pill_width(label, false, false);
             let b = Rect::new(r.right() - w, cy - PILL_REGULAR / 2.0, w, PILL_REGULAR);
-            if ui.pill(wid("settings.sign-in"), b, label, None, PillStyle::Primary(OYENZA)).clicked {
+            if ui
+                .pill(
+                    wid("settings.sign-in"),
+                    b,
+                    label,
+                    None,
+                    PillStyle::Primary(OYENZA),
+                )
+                .clicked
+            {
                 st.cmd(Command::Oyenza(OyenzaCmd::SignIn));
             }
-            account_text(ui, r, b.x, "Oyenza", "Sign in to see money in and bills due here.");
+            account_text(
+                ui,
+                r,
+                b.x,
+                "Oyenza",
+                "Sign in to see money in and bills due here.",
+            );
         }
         OyenzaLink::Connecting { code, until, .. } => {
             let cancel_w = ui.pill_width("Cancel", false, true);
-            let cancel = Rect::new(r.right() - cancel_w, cy - PILL_SMALL / 2.0, cancel_w, PILL_SMALL);
-            if ui.pill(wid("settings.cancel"), cancel, "Cancel", None, PillStyle::Utility).clicked {
+            let cancel = Rect::new(
+                r.right() - cancel_w,
+                cy - PILL_SMALL / 2.0,
+                cancel_w,
+                PILL_SMALL,
+            );
+            if ui
+                .pill(
+                    wid("settings.cancel"),
+                    cancel,
+                    "Cancel",
+                    None,
+                    PillStyle::Utility,
+                )
+                .clicked
+            {
                 st.cmd(Command::Oyenza(OyenzaCmd::Cancel));
             }
             let show_w = ui.pill_width("Show code", false, true);
             let show = Rect::new(cancel.x - PILL_GAP - show_w, cancel.y, show_w, PILL_SMALL);
-            if ui.pill(wid("settings.show-code"), show, "Show code", None, PillStyle::Primary(OYENZA)).clicked {
+            if ui
+                .pill(
+                    wid("settings.show-code"),
+                    show,
+                    "Show code",
+                    None,
+                    PillStyle::Primary(OYENZA),
+                )
+                .clicked
+            {
                 st.cmd(Command::SetPage(PageKind::Oyenza));
             }
-            let line = format!("Code {code} · works for {}", oyenza::code_time_left(until - st.now));
+            let line = format!(
+                "Code {code} · works for {}",
+                oyenza::code_time_left(until - st.now)
+            );
             account_text(ui, r, show.x, "Signing in to Oyenza", &line);
         }
         OyenzaLink::Connected { account } => {
             let dis_w = ui.pill_width("Disconnect", false, true);
             let dis = Rect::new(r.right() - dis_w, cy - PILL_SMALL / 2.0, dis_w, PILL_SMALL);
-            if ui.pill(wid("settings.disconnect"), dis, "Disconnect", None, PillStyle::Utility).clicked {
+            if ui
+                .pill(
+                    wid("settings.disconnect"),
+                    dis,
+                    "Disconnect",
+                    None,
+                    PillStyle::Utility,
+                )
+                .clicked
+            {
                 st.cmd(Command::Oyenza(OyenzaCmd::Disconnect));
             }
             // Sums and senders straight away on the island (off: they wait for Show).
             let label = "Show amounts";
             let lw = ui.c.measure(label, &TextStyle::body(), 300.0).0.ceil();
-            let row = Rect::new(dis.x - 2.0 * ROW_BLEED - lw - 10.0 - SWITCH_W, cy - ROW_H / 2.0, lw + 10.0 + SWITCH_W, ROW_H);
+            let row = Rect::new(
+                dis.x - 2.0 * ROW_BLEED - lw - 10.0 - SWITCH_W,
+                cy - ROW_H / 2.0,
+                lw + 10.0 + SWITCH_W,
+                ROW_H,
+            );
             let on = st.settings.oyenza_show_amounts;
             if switch_row(ui, wid("settings.amounts"), row, label, Some(on), st.accent) {
                 st.settings.oyenza_show_amounts = !on;
                 st.cmd(Command::SaveSettings);
             }
-            account_text(ui, r, row.x - ROW_BLEED, "Oyenza", &format!("Signed in as {account}"));
+            account_text(
+                ui,
+                r,
+                row.x - ROW_BLEED,
+                "Oyenza",
+                &format!("Signed in as {account}"),
+            );
         }
     }
 }
@@ -613,8 +981,16 @@ fn account_text(ui: &mut Ui, r: Rect, right: f32, title: &str, line: &str) {
     let x = r.x + TEXT_X;
     let w = (right - 16.0 - x).max(0.0);
     let cy = r.center().y;
-    ui.c.text(title, Rect::new(x, cy - 19.0, w, 20.0), &TextStyle::headline());
-    ui.c.text(line, Rect::new(x, cy + 1.0, w, 17.0), &TextStyle::footnote().color(palette::TEXT_DIM));
+    ui.c.text(
+        title,
+        Rect::new(x, cy - 19.0, w, 20.0),
+        &TextStyle::headline(),
+    );
+    ui.c.text(
+        line,
+        Rect::new(x, cy + 1.0, w, 17.0),
+        &TextStyle::footnote().color(palette::TEXT_DIM),
+    );
 }
 
 // ---------------------------------------------------------------- widgets
@@ -622,20 +998,40 @@ fn account_text(ui: &mut Ui, r: Rect, right: f32, title: &str, line: &str) {
 /// The widest padding (up to SEG_PAD) that fits a picker of `names` into `w`.
 fn pad_to_fit(ui: &mut Ui, names: &[&str], w: f32) -> f32 {
     let n = names.len().max(1) as f32;
-    let text: f32 = names.iter().map(|s| ui.c.measure(s, &picker_text(), 300.0).0).sum();
+    let text: f32 = names
+        .iter()
+        .map(|s| ui.c.measure(s, &picker_text(), 300.0).0)
+        .sum();
     // Each choice's width is rounded up: up to a DIP each.
     ((w - 2.0 * SEG_INSET - text - n) / (2.0 * n)).min(SEG_PAD)
 }
 
 /// Choices side by side in a track `h` tall, the chosen one lifted (the
 /// Focus page's picker, a size smaller). Returns the choice clicked, if any.
-pub(crate) fn picker(ui: &mut Ui, id: &str, x: f32, y: f32, h: f32, names: &[&str], sel: usize) -> Option<usize> {
+pub(crate) fn picker(
+    ui: &mut Ui,
+    id: &str,
+    x: f32,
+    y: f32,
+    h: f32,
+    names: &[&str],
+    sel: usize,
+) -> Option<usize> {
     picker_padded(ui, id, x, y, h, names, sel, SEG_PAD)
 }
 
 /// [`picker`] with `pad` around each choice's name.
 #[allow(clippy::too_many_arguments)]
-fn picker_padded(ui: &mut Ui, id: &str, x: f32, y: f32, h: f32, names: &[&str], sel: usize, pad: f32) -> Option<usize> {
+fn picker_padded(
+    ui: &mut Ui,
+    id: &str,
+    x: f32,
+    y: f32,
+    h: f32,
+    names: &[&str],
+    sel: usize,
+    pad: f32,
+) -> Option<usize> {
     let st = picker_text();
     let inner_h = h - 2.0 * SEG_INSET;
     let mut cx = x + SEG_INSET;
@@ -648,7 +1044,11 @@ fn picker_padded(ui: &mut Ui, id: &str, x: f32, y: f32, h: f32, names: &[&str], 
             cell
         })
         .collect();
-    ui.c.fill_rrect(Rect::new(x, y, cx + SEG_INSET - x, h), h / 2.0, palette::SURFACE);
+    ui.c.fill_rrect(
+        Rect::new(x, y, cx + SEG_INSET - x, h),
+        h / 2.0,
+        palette::SURFACE,
+    );
     let mut picked = None;
     for (i, (name, cell)) in names.iter().zip(&cells).enumerate() {
         let color = if i == sel {
@@ -660,7 +1060,11 @@ fn picker_padded(ui: &mut Ui, id: &str, x: f32, y: f32, h: f32, names: &[&str], 
                 picked = Some(i);
             }
             if resp.pressed || resp.hovered {
-                ui.c.fill_rrect(*cell, inner_h / 2.0, Color::white(if resp.pressed { 0.10 } else { 0.06 }));
+                ui.c.fill_rrect(
+                    *cell,
+                    inner_h / 2.0,
+                    Color::white(if resp.pressed { 0.10 } else { 0.06 }),
+                );
                 palette::TEXT
             } else {
                 palette::TEXT_DIM
@@ -682,26 +1086,64 @@ fn choice_width(ui: &mut Ui, name: &str, pad: f32) -> f32 {
 
 /// A whole picker: its choices and the track's inset.
 pub(crate) fn picker_width(ui: &mut Ui, names: &[&str]) -> f32 {
-    2.0 * SEG_INSET + names.iter().map(|n| choice_width(ui, n, SEG_PAD)).sum::<f32>()
+    2.0 * SEG_INSET
+        + names
+            .iter()
+            .map(|n| choice_width(ui, n, SEG_PAD))
+            .sum::<f32>()
 }
 
 /// A label with a switch at the row's right end; the whole row toggles.
 /// `None` = not known yet: drawn off and dimmed, and it doesn't click.
 /// Returns true when clicked.
-pub(crate) fn switch_row(ui: &mut Ui, id: u64, r: Rect, label: &str, on: Option<bool>, accent: Color) -> bool {
+pub(crate) fn switch_row(
+    ui: &mut Ui,
+    id: u64,
+    r: Rect,
+    label: &str,
+    on: Option<bool>,
+    accent: Color,
+) -> bool {
     switch_row_on(ui, id, r, label, on, accent, None)
 }
 
 /// [`switch_row`] on the open card (`card` from `card::pill_card`): in
 /// Pill, a bottom row's hover wash follows the card's rounder corners.
-fn switch_row_on(ui: &mut Ui, id: u64, r: Rect, label: &str, on: Option<bool>, accent: Color, card: Option<(Rect, f32)>) -> bool {
+fn switch_row_on(
+    ui: &mut Ui,
+    id: u64,
+    r: Rect,
+    label: &str,
+    on: Option<bool>,
+    accent: Color,
+    card: Option<(Rect, f32)>,
+) -> bool {
     let hit = Rect::new(r.x - ROW_BLEED, r.y, r.w + 2.0 * ROW_BLEED, r.h);
-    let resp = if on.is_some() { ui.button(id, hit) } else { Default::default() };
+    let resp = if on.is_some() {
+        ui.button(id, hit)
+    } else {
+        Default::default()
+    };
     if resp.hovered || resp.pressed {
-        super::card::fill_box(ui, card, hit.inset(0.0, 1.0), 8.0, Color::white(if resp.pressed { 0.10 } else { 0.06 }));
+        super::card::fill_box(
+            ui,
+            card,
+            hit.inset(0.0, 1.0),
+            8.0,
+            Color::white(if resp.pressed { 0.10 } else { 0.06 }),
+        );
     }
-    let sw = Rect::new(r.right() - SWITCH_W, r.center().y - SWITCH_H / 2.0, SWITCH_W, SWITCH_H);
-    ui.c.text(label, Rect::new(r.x, r.y, (sw.x - 10.0 - r.x).max(0.0), r.h), &TextStyle::body());
+    let sw = Rect::new(
+        r.right() - SWITCH_W,
+        r.center().y - SWITCH_H / 2.0,
+        SWITCH_W,
+        SWITCH_H,
+    );
+    ui.c.text(
+        label,
+        Rect::new(r.x, r.y, (sw.x - 10.0 - r.x).max(0.0), r.h),
+        &TextStyle::body(),
+    );
     let alpha = if on.is_some() { 1.0 } else { 0.5 };
     ui.c.with_alpha(alpha, |c| draw_switch(c, sw, on == Some(true), accent));
     resp.clicked
@@ -711,6 +1153,10 @@ fn switch_row_on(ui: &mut Ui, id: u64, r: Rect, label: &str, on: Option<bool>, a
 pub(crate) fn draw_switch(c: &mut crate::gfx::Canvas, r: Rect, on: bool, accent: Color) {
     c.fill_rrect(r, r.h / 2.0, if on { accent } else { palette::TRACK });
     let d = r.h - 2.0 * KNOB_INSET;
-    let x = if on { r.right() - KNOB_INSET - d / 2.0 } else { r.x + KNOB_INSET + d / 2.0 };
+    let x = if on {
+        r.right() - KNOB_INSET - d / 2.0
+    } else {
+        r.x + KNOB_INSET + d / 2.0
+    };
     c.fill_circle(Point::new(x, r.center().y), d / 2.0, palette::ON_ACCENT);
 }

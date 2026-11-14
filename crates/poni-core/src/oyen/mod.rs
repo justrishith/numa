@@ -65,6 +65,12 @@ pub enum Mood {
     Tercatat,
     /// Nodding off, then waking with a start.
     Drowsy,
+    /// Agent interaction states: pointer fly, hold, done, listen.
+    /// Used by pointer.rs for Oyen animation when the agent points/hovers.
+    PointFly,
+    PointHold,
+    PointDone,
+    Listen,
     /// Petted: a smile, the ear lifts, the head hums.
     Purr,
     /// Writing: eyes down, following `Input::pencil`.
@@ -77,7 +83,7 @@ pub enum Mood {
 
 impl Mood {
     /// Every mood, in the Swift port's order.
-    pub const ALL: [Mood; 17] = [
+    pub const ALL: [Mood; 21] = [
         Mood::Oyen,
         Mood::Hello,
         Mood::Happy,
@@ -92,6 +98,10 @@ impl Mood {
         Mood::Tercatat,
         Mood::Drowsy,
         Mood::Purr,
+        Mood::PointFly,
+        Mood::PointHold,
+        Mood::PointDone,
+        Mood::Listen,
         Mood::Nulis,
         Mood::Baca,
         Mood::Napas,
@@ -117,6 +127,10 @@ impl Mood {
             Mood::Nulis => "nulis",
             Mood::Baca => "baca",
             Mood::Napas => "napas",
+            Mood::PointFly => "point-fly",
+            Mood::PointHold => "point-hold",
+            Mood::PointDone => "point-done",
+            Mood::Listen => "listen",
         }
     }
 
@@ -144,6 +158,7 @@ impl Mood {
             Mood::Nulis => 3.2,
             Mood::Baca => 3.0,
             Mood::Napas => 9.0,
+            Mood::PointFly | Mood::PointHold | Mood::PointDone | Mood::Listen => 1.5,
         }
     }
 }
@@ -722,6 +737,10 @@ fn pose(mood: Mood, t: f64, input: Input, r: f64) -> Pose {
                 ..Pose::new(pair(&|x| dot(x, y, r, open)))
             }
         }
+        Mood::PointFly | Mood::PointHold | Mood::PointDone | Mood::Listen => {
+            // Pointing states: fly / hold / done / listen ΓÇö simple active pose.
+            Pose::new(smiling())
+        }
     }
 }
 
@@ -833,7 +852,7 @@ mod tests {
 
     #[test]
     fn moods_have_names_and_loops() {
-        assert_eq!(Mood::ALL.len(), 17);
+        assert_eq!(Mood::ALL.len(), 21);
         for mood in Mood::ALL {
             assert_eq!(Mood::from_name(mood.name()), Some(mood));
             assert!(mood.loop_secs() > 1.0);

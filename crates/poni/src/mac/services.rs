@@ -53,13 +53,13 @@ pub mod downloader;
 #[path = "../services/ielts.rs"]
 pub mod ielts;
 // And Meeting notes' recording and handing over (its sources: capture.rs).
-#[path = "../services/notes.rs"]
-pub mod notes;
+#[path = "../services/cities.rs"]
+pub mod cities;
 #[cfg(test)]
 #[path = "../services/downloader_live.rs"]
 mod downloader_live;
-#[path = "../services/cities.rs"]
-pub mod cities;
+#[path = "../services/notes.rs"]
+pub mod notes;
 // And Oyenza sign-in: its key goes through secret.rs above.
 #[path = "../services/oyenza.rs"]
 pub mod oyenza;
@@ -70,8 +70,6 @@ pub mod update;
 #[path = "../services/stocks.rs"]
 pub mod stocks;
 // And the AI tab's worker (`studio_usage` does the reading).
-#[path = "../services/usage.rs"]
-pub mod usage;
 #[path = "services/location.rs"]
 pub mod location;
 #[path = "services/login.rs"]
@@ -88,6 +86,8 @@ pub mod sysmon;
 pub mod sysstats;
 #[path = "services/thumbs.rs"]
 pub mod thumbs;
+#[path = "../services/usage.rs"]
+pub mod usage;
 #[path = "services/voice.rs"]
 pub mod voice;
 
@@ -124,13 +124,19 @@ pub mod imaging {
 pub fn system_accent() -> Option<Color> {
     let c = NSColor::controlAccentColor();
     let c = c.colorUsingColorSpace(&NSColorSpace::sRGBColorSpace())?;
-    Some(Color::rgba(c.redComponent() as f32, c.greenComponent() as f32, c.blueComponent() as f32, 1.0))
+    Some(Color::rgba(
+        c.redComponent() as f32,
+        c.greenComponent() as f32,
+        c.blueComponent() as f32,
+        1.0,
+    ))
 }
 
 /// Show a file selected in a Finder window.
 pub fn reveal(path: &str) {
     let url = NSURL::fileURLWithPath(&NSString::from_str(path));
-    NSWorkspace::sharedWorkspace().activateFileViewerSelectingURLs(&NSArray::from_retained_slice(&[url]));
+    NSWorkspace::sharedWorkspace()
+        .activateFileViewerSelectingURLs(&NSArray::from_retained_slice(&[url]));
 }
 
 /// The app was called Oyen Poni before 0.2.0, and a copy from then has the same
@@ -155,10 +161,17 @@ pub fn trash_app_from_before_rename() -> Option<String> {
         let url = NSURL::fileURLWithPath(&NSString::from_str(&old.to_string_lossy()));
         match NSFileManager::defaultManager().trashItemAtURL_resultingItemURL_error(&url, None) {
             Ok(()) => {
-                pinfo!("moved {} to the Trash (the app from before the rename)", old.display());
+                pinfo!(
+                    "moved {} to the Trash (the app from before the rename)",
+                    old.display()
+                );
                 return Some(dir.to_string_lossy().into_owned());
             }
-            Err(e) => pwarn!("couldn't move {} to the Trash: {}", old.display(), e.localizedDescription()),
+            Err(e) => pwarn!(
+                "couldn't move {} to the Trash: {}",
+                old.display(),
+                e.localizedDescription()
+            ),
         }
     }
     None
@@ -169,7 +182,11 @@ pub fn trash_app_from_before_rename() -> Option<String> {
 pub fn open(target: &str) {
     let s = NSString::from_str(target);
     let is_url = target.contains("://") || target.starts_with("x-apple.systempreferences:");
-    let url = if is_url { NSURL::URLWithString(&s) } else { Some(NSURL::fileURLWithPath(&s)) };
+    let url = if is_url {
+        NSURL::URLWithString(&s)
+    } else {
+        Some(NSURL::fileURLWithPath(&s))
+    };
     match url {
         Some(u) => {
             if !NSWorkspace::sharedWorkspace().openURL(&u) {

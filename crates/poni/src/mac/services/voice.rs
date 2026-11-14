@@ -31,11 +31,21 @@ impl VoicePlayer {
     pub fn play(&mut self, path: &Path, sink: &EventSink) -> Result<(), String> {
         self.stop();
         let mtm = MainThreadMarker::new().ok_or("the voice plays from the main thread")?;
-        let sound = NSSound::initWithContentsOfFile_byReference(<NSSound as AnyThread>::alloc(), &NSString::from_str(&path.to_string_lossy()), true)
-            .ok_or_else(|| format!("can't open {}", path.display()))?;
+        let sound = NSSound::initWithContentsOfFile_byReference(
+            <NSSound as AnyThread>::alloc(),
+            &NSString::from_str(&path.to_string_lossy()),
+            true,
+        )
+        .ok_or_else(|| format!("can't open {}", path.display()))?;
         // Each line has its own flag: a stopped line's late report can't mark the next one.
         let failed = Arc::new(AtomicBool::new(false));
-        let delegate = VoiceDelegate::new(mtm, Ivars { sink: sink.clone(), failed: failed.clone() });
+        let delegate = VoiceDelegate::new(
+            mtm,
+            Ivars {
+                sink: sink.clone(),
+                failed: failed.clone(),
+            },
+        );
         sound.setDelegate(Some(ProtocolObject::from_ref(&*delegate)));
         if !sound.play() {
             sound.setDelegate(None);

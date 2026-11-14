@@ -34,28 +34,34 @@ use poni_core::ytdlp_partial;
 use std::collections::HashMap;
 use std::fs;
 use std::io::{self, PipeReader, Read};
+#[cfg(windows)]
+use std::os::windows::io::AsRawHandle;
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 #[cfg(windows)]
-use std::os::windows::io::AsRawHandle;
-#[cfg(windows)]
-use std::os::windows::process::CommandExt;
-#[cfg(windows)]
 use windows::core::PCWSTR;
 #[cfg(windows)]
 use windows::Win32::Foundation::{CloseHandle, HANDLE};
 #[cfg(windows)]
-use windows::Win32::System::Diagnostics::ToolHelp::{CreateToolhelp32Snapshot, Thread32First, Thread32Next, TH32CS_SNAPTHREAD, THREADENTRY32};
+use windows::Win32::System::Diagnostics::ToolHelp::{
+    CreateToolhelp32Snapshot, Thread32First, Thread32Next, TH32CS_SNAPTHREAD, THREADENTRY32,
+};
 #[cfg(windows)]
 use windows::Win32::System::JobObjects::{
-    AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation, SetInformationJobObject, TerminateJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+    AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation,
+    SetInformationJobObject, TerminateJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
     JOB_OBJECT_LIMIT_DIE_ON_UNHANDLED_EXCEPTION, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
 };
 #[cfg(windows)]
-use windows::Win32::System::Threading::{OpenThread, ResumeThread, BELOW_NORMAL_PRIORITY_CLASS, CREATE_NO_WINDOW, CREATE_SUSPENDED, THREAD_SUSPEND_RESUME};
+use windows::Win32::System::Threading::{
+    OpenThread, ResumeThread, BELOW_NORMAL_PRIORITY_CLASS, CREATE_NO_WINDOW, CREATE_SUSPENDED,
+    THREAD_SUSPEND_RESUME,
+};
 
 /// Progress reaches the island at most this often per download (yt-dlp
 /// prints a line for every block it reads); the newest one waiting goes next.
@@ -72,7 +78,10 @@ pub struct DownloaderService {
 
 impl DownloaderService {
     pub fn start(sink: EventSink) -> io::Result<Self> {
-        Ok(Self { sink, runs: Arc::default() })
+        Ok(Self {
+            sink,
+            runs: Arc::default(),
+        })
     }
 
     /// Start yt-dlp for `req`; returns at once (UI thread safe).
@@ -82,10 +91,17 @@ impl DownloaderService {
             let run = Arc::new(Run::new(job));
             self.runs.lock().insert(id, run.clone());
             let (runs, sink) = (self.runs.clone(), self.sink.clone());
-            std::thread::Builder::new().name(format!("poni-dl-{id}")).spawn(move || {
-                let mut ended = Ended { id, ok: false, runs: &runs, sink: &sink };
-                ended.ok = download(&req, &run, &runs, &sink);
-            })
+            std::thread::Builder::new()
+                .name(format!("poni-dl-{id}"))
+                .spawn(move || {
+                    let mut ended = Ended {
+                        id,
+                        ok: false,
+                        runs: &runs,
+                        sink: &sink,
+                    };
+                    ended.ok = download(&req, &run, &runs, &sink);
+                })
         });
         if let Err(e) = started {
             crate::pwarn!("downloader: {id}: could not start ({e})");
@@ -142,7 +158,12 @@ struct Run {
 
 impl Run {
     fn new(job: Job) -> Self {
-        Run { job, stopped: AtomicBool::new(false), tidy: AtomicBool::new(false), video: Mutex::new(None) }
+        Run {
+            job,
+            stopped: AtomicBool::new(false),
+            tidy: AtomicBool::new(false),
+            video: Mutex::new(None),
+        }
     }
 
     fn stop(&self) {
@@ -171,7 +192,10 @@ struct Ended<'a> {
 impl Drop for Ended<'_> {
     fn drop(&mut self) {
         self.runs.lock().remove(&self.id);
-        self.sink.send(AppEvent::DownloadEnded { id: self.id, ok: self.ok });
+        self.sink.send(AppEvent::DownloadEnded {
+            id: self.id,
+            ok: self.ok,
+        });
     }
 }
 
@@ -179,7 +203,11 @@ impl Drop for Ended<'_> {
 /// True when it finished well: exit code 0, not stopped.
 fn download(req: &Request, run: &Run, runs: &Runs, sink: &EventSink) -> bool {
     let id = req.id;
-    let tool = |name: &str| crate::services::addons::file_path(&DOWNLOADER, name).to_string_lossy().into_owned();
+    let tool = |name: &str| {
+        crate::services::addons::file_path(&DOWNLOADER, name)
+            .to_string_lossy()
+            .into_owned()
+    };
     let (ytdlp, qjs, ffmpeg) = (tool(YTDLP_EXE), tool(QJS_EXE), tool(FFMPEG_EXE));
     // yt-dlp's cache (YouTube's solved players: QuickJS is slow at them)
     // sits with this version's tools, so it lasts while the add-on stays on
@@ -190,9 +218,19 @@ fn download(req: &Request, run: &Run, runs: &Runs, sink: &EventSink) -> bool {
     let temps = crate::paths::addons_dir().join(DOWNLOADER.id).join("tmp");
     sweep(&temps, runs);
     let temp = temps.join(id.to_string());
-    let args = ytdlp::args(req, &Tools { ytdlp: &ytdlp, qjs: &qjs, ffmpeg: &ffmpeg, cache: &cache.to_string_lossy() });
+    let args = ytdlp::args(
+        req,
+        &Tools {
+            ytdlp: &ytdlp,
+            qjs: &qjs,
+            ffmpeg: &ffmpeg,
+            cache: &cache.to_string_lossy(),
+        },
+    );
     let began = Instant::now();
-    let spawned = fs::create_dir_all(&cache).and_then(|_| fs::create_dir_all(&temp)).and_then(|_| spawn(&ytdlp, &args, &temp, run));
+    let spawned = fs::create_dir_all(&cache)
+        .and_then(|_| fs::create_dir_all(&temp))
+        .and_then(|_| spawn(&ytdlp, &args, &temp, run));
     let ok = match spawned {
         Ok((out, mut child)) => {
             crate::pinfo!("downloader: {id}: yt-dlp started");
@@ -203,7 +241,10 @@ fn download(req: &Request, run: &Run, runs: &Runs, sink: &EventSink) -> bool {
             if stopped {
                 crate::pinfo!("downloader: {id}: stopped after {secs} s");
             } else {
-                crate::pinfo!("downloader: {id}: yt-dlp ended after {secs} s (exit code {})", code.unwrap_or(-1));
+                crate::pinfo!(
+                    "downloader: {id}: yt-dlp ended after {secs} s (exit code {})",
+                    code.unwrap_or(-1)
+                );
             }
             code == Some(0) && !stopped
         }
@@ -308,7 +349,10 @@ fn resume(pid: u32) -> io::Result<()> {
     // SAFETY: plain calls on handles opened and closed here.
     unsafe {
         let snap = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0)?;
-        let mut t = THREADENTRY32 { dwSize: std::mem::size_of::<THREADENTRY32>() as u32, ..Default::default() };
+        let mut t = THREADENTRY32 {
+            dwSize: std::mem::size_of::<THREADENTRY32>() as u32,
+            ..Default::default()
+        };
         let mut resumed = false;
         let mut more = Thread32First(snap, &mut t).is_ok();
         while more {
@@ -331,7 +375,14 @@ fn resume(pid: u32) -> io::Result<()> {
 
 /// Pass yt-dlp's output on, line by line, until it ends.
 fn read(mut out: PipeReader, id: u64, run: &Run, sink: &EventSink) {
-    let mut lines = Lines { id, run, sink, line: Vec::new(), held: None, sent: None };
+    let mut lines = Lines {
+        id,
+        run,
+        sink,
+        line: Vec::new(),
+        held: None,
+        sent: None,
+    };
     let mut buf = [0u8; 4096];
     loop {
         match out.read(&mut buf) {
@@ -376,12 +427,19 @@ impl Lines<'_> {
         let text = String::from_utf8_lossy(&self.line);
         let parsed = ytdlp::parse(&text);
         // The video's id comes with its info line (`Line::Info` leaves it out).
-        if let Some(video) = matches!(parsed, Some(Line::Info { .. })).then(|| ytdlp_partial::video_id(&text)).flatten() {
+        if let Some(video) = matches!(parsed, Some(Line::Info { .. }))
+            .then(|| ytdlp_partial::video_id(&text))
+            .flatten()
+        {
             self.run.set_video(video);
         }
         self.line.clear();
         match parsed {
-            Some(p @ Line::Progress { .. }) if self.sent.is_some_and(|t| t.elapsed() < PROGRESS_EVERY) => self.held = Some(p),
+            Some(p @ Line::Progress { .. })
+                if self.sent.is_some_and(|t| t.elapsed() < PROGRESS_EVERY) =>
+            {
+                self.held = Some(p)
+            }
             Some(p @ Line::Progress { .. }) => {
                 self.held = None;
                 self.sent = Some(Instant::now());
@@ -413,15 +471,24 @@ impl Lines<'_> {
 
 /// The line the page shows when yt-dlp couldn't start.
 fn not_started(id: u64) -> AppEvent {
-    AppEvent::Download { id, line: Line::Failed(Problem::Other(NOT_STARTED.into())) }
+    AppEvent::Download {
+        id,
+        line: Line::Failed(Problem::Other(NOT_STARTED.into())),
+    }
 }
 
 /// Delete the temporary folders of downloads that aren't running: left when
 /// Poni was ended during one, or when deleting one failed.
 fn sweep(temps: &Path, runs: &Runs) {
-    let Ok(entries) = fs::read_dir(temps) else { return };
+    let Ok(entries) = fs::read_dir(temps) else {
+        return;
+    };
     for e in entries.flatten() {
-        let running = e.file_name().to_str().and_then(|n| n.parse::<u64>().ok()).is_some_and(|id| runs.lock().contains_key(&id));
+        let running = e
+            .file_name()
+            .to_str()
+            .and_then(|n| n.parse::<u64>().ok())
+            .is_some_and(|id| runs.lock().contains_key(&id));
         if !running {
             let _ = fs::remove_dir_all(e.path());
         }
@@ -435,7 +502,9 @@ fn remove(dir: &Path) {
         match fs::remove_dir_all(dir) {
             Ok(()) => return,
             Err(e) if e.kind() == io::ErrorKind::NotFound => return,
-            Err(e) if left == 0 => crate::pwarn!("downloader: could not delete {} ({e})", dir.display()),
+            Err(e) if left == 0 => {
+                crate::pwarn!("downloader: could not delete {} ({e})", dir.display())
+            }
             Err(_) => std::thread::sleep(Duration::from_millis(100)),
         }
     }
@@ -446,23 +515,36 @@ fn remove(dir: &Path) {
 /// Not while another download of the same video runs (its sound alone, say):
 /// they may be that one's. Like [`remove`], it tries for about a second.
 fn tidy(folder: &Path, video: &str, id: u64, runs: &Runs) {
-    if runs.lock().iter().any(|(&other, run)| other != id && run.video().as_deref() == Some(video)) {
-        crate::pinfo!("downloader: {id}: stopped; its video downloads again, so its unfinished files stay");
+    if runs
+        .lock()
+        .iter()
+        .any(|(&other, run)| other != id && run.video().as_deref() == Some(video))
+    {
+        crate::pinfo!(
+            "downloader: {id}: stopped; its video downloads again, so its unfinished files stay"
+        );
         return;
     }
     let mut gone = 0;
     for left in (0..10).rev() {
-        let Ok(entries) = fs::read_dir(folder) else { return };
+        let Ok(entries) = fs::read_dir(folder) else {
+            return;
+        };
         let mut busy = false;
         for e in entries.flatten() {
-            let ours = e.file_name().to_str().is_some_and(|n| ytdlp_partial::is_partial(n, video));
+            let ours = e
+                .file_name()
+                .to_str()
+                .is_some_and(|n| ytdlp_partial::is_partial(n, video));
             if !ours || !e.file_type().is_ok_and(|t| t.is_file()) {
                 continue;
             }
             match fs::remove_file(e.path()) {
                 Ok(()) => gone += 1,
                 Err(err) if err.kind() == io::ErrorKind::NotFound => {}
-                Err(err) if left == 0 => crate::pwarn!("downloader: {id}: could not delete an unfinished file ({err})"),
+                Err(err) if left == 0 => {
+                    crate::pwarn!("downloader: {id}: could not delete an unfinished file ({err})")
+                }
                 Err(_) => busy = true,
             }
         }
@@ -494,9 +576,15 @@ impl Job {
             let job = Job(CreateJobObjectW(None, PCWSTR::null())?);
             let mut limits = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
             // A tool that crashes ends quietly, without Windows' error dialog.
-            limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE | JOB_OBJECT_LIMIT_DIE_ON_UNHANDLED_EXCEPTION;
+            limits.BasicLimitInformation.LimitFlags =
+                JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE | JOB_OBJECT_LIMIT_DIE_ON_UNHANDLED_EXCEPTION;
             let size = std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32;
-            SetInformationJobObject(job.0, JobObjectExtendedLimitInformation, (&limits as *const JOBOBJECT_EXTENDED_LIMIT_INFORMATION).cast(), size)?;
+            SetInformationJobObject(
+                job.0,
+                JobObjectExtendedLimitInformation,
+                (&limits as *const JOBOBJECT_EXTENDED_LIMIT_INFORMATION).cast(),
+                size,
+            )?;
             Ok(job)
         }
     }
@@ -549,7 +637,9 @@ struct Job {
 #[cfg(unix)]
 impl Job {
     fn new() -> io::Result<Self> {
-        Ok(Job { group: std::sync::atomic::AtomicI32::new(0) })
+        Ok(Job {
+            group: std::sync::atomic::AtomicI32::new(0),
+        })
     }
 
     /// End every process in the group (none left: nothing happens): SIGTERM
@@ -565,10 +655,12 @@ impl Job {
             return;
         }
         unsafe { killpg(group, SIGTERM) };
-        let _ = std::thread::Builder::new().name("poni-dl-stop".into()).spawn(move || {
-            std::thread::sleep(STOP_GRACE);
-            unsafe { killpg(group, SIGKILL) };
-        });
+        let _ = std::thread::Builder::new()
+            .name("poni-dl-stop".into())
+            .spawn(move || {
+                std::thread::sleep(STOP_GRACE);
+                unsafe { killpg(group, SIGKILL) };
+            });
     }
 }
 
@@ -581,14 +673,19 @@ mod tests {
 
     /// An empty folder of the test's own, as the Downloads folder.
     fn folder(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("poni-downloader-{name}-{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("poni-downloader-{name}-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).expect("a temp folder");
         dir
     }
 
     fn names(dir: &Path) -> Vec<String> {
-        let mut names: Vec<String> = fs::read_dir(dir).unwrap().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect();
+        let mut names: Vec<String> = fs::read_dir(dir)
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .collect();
         names.sort();
         names
     }
@@ -602,7 +699,11 @@ mod tests {
             fs::write(dir.join(format!("{film}{end}")), b"x").unwrap();
         }
         // The same film saved before, another video's download, and a folder.
-        let kept = [film.clone(), "Big Buck Bunny [BigBuckBunny_124].ogv.part".to_string(), format!("odd [{FILM}].part")];
+        let kept = [
+            film.clone(),
+            "Big Buck Bunny [BigBuckBunny_124].ogv.part".to_string(),
+            format!("odd [{FILM}].part"),
+        ];
         fs::write(dir.join(&kept[0]), b"x").unwrap();
         fs::write(dir.join(&kept[1]), b"x").unwrap();
         fs::create_dir(dir.join(&kept[2])).unwrap();
@@ -623,7 +724,11 @@ mod tests {
         other.set_video(FILM.to_string());
         runs.lock().insert(2, other);
         tidy(&dir, FILM, 1, &runs);
-        assert_eq!(names(&dir), [sound], "download 2, the sound alone, still writes it");
+        assert_eq!(
+            names(&dir),
+            [sound],
+            "download 2, the sound alone, still writes it"
+        );
         runs.lock().remove(&2);
         tidy(&dir, FILM, 1, &runs);
         assert!(names(&dir).is_empty());

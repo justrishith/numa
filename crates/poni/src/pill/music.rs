@@ -33,9 +33,9 @@ use crate::icons::Icon;
 use crate::pages::media::{self as classic, Anim, Frame, LyricsCtx};
 use crate::state::AppState;
 use crate::ui::{wid, Ui, WidgetId};
+use poni_core::addons;
 use poni_core::datetime::fmt_duration;
 use poni_core::geom::{lerp, palette, Color, Point, Rect};
-use poni_core::addons;
 use poni_core::nowplaying::lyrics_lead_s;
 use poni_core::svgpath::Seg;
 
@@ -122,7 +122,11 @@ pub fn height(st: &AppState) -> Option<f32> {
     if !super::on(st.settings.theme) {
         return None;
     }
-    Some(if st.media.is_some() { H_SESSION } else { H_EMPTY })
+    Some(if st.media.is_some() {
+        H_SESSION
+    } else {
+        H_EMPTY
+    })
 }
 
 /// Draw the page in `area`. `false` = the Classic page draws.
@@ -153,11 +157,19 @@ struct Columns {
 }
 
 fn columns(w: f32, lyrics_on: bool, scale: f32) -> Columns {
-    let lyr_w = (w * classic::LYRICS_SHARE).min(w - classic::GAP_LYRICS - MIN_BLOCK_W).round();
+    let lyr_w = (w * classic::LYRICS_SHARE)
+        .min(w - classic::GAP_LYRICS - MIN_BLOCK_W)
+        .round();
     if lyrics_on && lyr_w >= classic::MIN_LYRICS_W {
-        Columns { block_w: classic::snap(w - lyr_w - classic::GAP_LYRICS, scale), lyrics_w: Some(lyr_w) }
+        Columns {
+            block_w: classic::snap(w - lyr_w - classic::GAP_LYRICS, scale),
+            lyrics_w: Some(lyr_w),
+        }
     } else {
-        Columns { block_w: w, lyrics_w: None }
+        Columns {
+            block_w: w,
+            lyrics_w: None,
+        }
     }
 }
 
@@ -188,24 +200,47 @@ fn draw_session(ui: &mut Ui, st: &mut AppState, area: Rect, a: &mut Anim, fr: &F
     let mut anim = false;
 
     // Album art, gently shrinking while paused (Classic's spring).
-    let art_target = if playing { 1.0 } else { classic::ART_PAUSED_SCALE };
+    let art_target = if playing {
+        1.0
+    } else {
+        classic::ART_PAUSED_SCALE
+    };
     if a.art_scale <= 0.0 || fr.opening {
         a.art_scale = art_target;
         a.art_vel = 0.0;
     }
     let dt = classic::step_dt(fr.dt, a.art_vel, a.art_scale, art_target);
-    classic::follow(&mut a.art_scale, &mut a.art_vel, art_target, classic::ART_OMEGA, dt);
+    classic::follow(
+        &mut a.art_scale,
+        &mut a.art_vel,
+        art_target,
+        classic::ART_OMEGA,
+        dt,
+    );
     let art_settled = classic::settle(&mut a.art_scale, &mut a.art_vel, art_target, 0.0005, 0.005);
     anim |= !art_settled;
-    draw_art(ui, m.art.as_ref(), Rect::new(x0, y0, ART, ART), a.art_scale, art_settled.then_some(scale));
+    draw_art(
+        ui,
+        m.art.as_ref(),
+        Rect::new(x0, y0, ART, ART),
+        a.art_scale,
+        art_settled.then_some(scale),
+    );
 
     // The player's name, the title and the artist, in a column that stops
     // short of the equalizer.
     let tx = snap(x0 + ART + GAP_ART);
     let tw = (block.right() - eq_width() - GAP_EQ - tx).max(0.0);
     let source = source_label(&m.app_name, playing);
-    let source_st = TextStyle::caption().weight(Weight::Semibold).color(palette::TEXT_FAINT);
-    tracked(ui, &source, row(tx, tw, y0 + SOURCE_CAP, source_st.size), &source_st);
+    let source_st = TextStyle::caption()
+        .weight(Weight::Semibold)
+        .color(palette::TEXT_FAINT);
+    tracked(
+        ui,
+        &source,
+        row(tx, tw, y0 + SOURCE_CAP, source_st.size),
+        &source_st,
+    );
     let title = match m.title.trim() {
         "" => "Unknown title",
         t => t,
@@ -216,13 +251,22 @@ fn draw_session(ui: &mut Ui, st: &mut AppState, area: Rect, a: &mut Anim, fr: &F
     };
     let title_st = TextStyle::value();
     ui.c.text(title, row(tx, tw, y0 + TITLE_CAP, title_st.size), &title_st);
-    let artist_st = TextStyle::headline().weight(Weight::Regular).color(palette::TEXT_DIM);
-    ui.c.text(artist, row(tx, tw, y0 + ARTIST_CAP, artist_st.size), &artist_st);
+    let artist_st = TextStyle::headline()
+        .weight(Weight::Regular)
+        .color(palette::TEXT_DIM);
+    ui.c.text(
+        artist,
+        row(tx, tw, y0 + ARTIST_CAP, artist_st.size),
+        &artist_st,
+    );
 
     // The progress row. The slots fit this track's longest time, so the bar
     // holds still while the times count.
     let row_cy = y0 + ROW_CY;
-    let times = TextStyle::footnote().weight(Weight::Medium).tabular().color(palette::TEXT_DIM);
+    let times = TextStyle::footnote()
+        .weight(Weight::Medium)
+        .tabular()
+        .color(palette::TEXT_DIM);
     let slot = if has_dur {
         let longest = format!("\u{2212}{}", fmt_duration(tl.duration_s));
         TIME_SLOT.max(ui.c.measure(&longest, &times, 400.0).0.ceil())
@@ -230,9 +274,20 @@ fn draw_session(ui: &mut Ui, st: &mut AppState, area: Rect, a: &mut Anim, fr: &F
         TIME_SLOT
     };
     let bar_x = snap(block.x + slot + TIME_GAP);
-    let bar = Rect::new(bar_x, snap(row_cy - BAR_H / 2.0), (snap(block.right() - slot - TIME_GAP) - bar_x).max(0.0), BAR_H);
+    let bar = Rect::new(
+        bar_x,
+        snap(row_cy - BAR_H / 2.0),
+        (snap(block.right() - slot - TIME_GAP) - bar_x).max(0.0),
+        BAR_H,
+    );
     if has_dur {
-        let scrub = ui.progress_bar(wid("media_seek"), bar, tl.progress_at(now), palette::TEXT, m.can_seek);
+        let scrub = ui.progress_bar(
+            wid("media_seek"),
+            bar,
+            tl.progress_at(now),
+            palette::TEXT,
+            m.can_seek,
+        );
         if scrub.began {
             // A drag starts: the player can get ready for the seek meanwhile.
             acts.push(MediaCmd::Prepare);
@@ -245,8 +300,16 @@ fn draw_session(ui: &mut Ui, st: &mut AppState, area: Rect, a: &mut Anim, fr: &F
         let pos = scrub.held.map_or(pos, |f| f as f64 * tl.duration_s);
         let remaining = (tl.duration_s.floor() - pos.floor()).max(0.0);
         let cap = row_cy - FONT_CAP * times.size / 2.0;
-        ui.c.text(&fmt_duration(pos), row(block.x, slot, cap, times.size), &times);
-        ui.c.text(&format!("\u{2212}{}", fmt_duration(remaining)), row(block.right() - slot, slot, cap, times.size), &times.right());
+        ui.c.text(
+            &fmt_duration(pos),
+            row(block.x, slot, cap, times.size),
+            &times,
+        );
+        ui.c.text(
+            &format!("\u{2212}{}", fmt_duration(remaining)),
+            row(block.right() - slot, slot, cap, times.size),
+            &times.right(),
+        );
     } else {
         // Unknown length (streams, some browsers): a quiet, inert track.
         ui.c.fill_rrect(bar, BAR_H / 2.0, palette::TRACK.mul_alpha(0.6));
@@ -254,14 +317,35 @@ fn draw_session(ui: &mut Ui, st: &mut AppState, area: Rect, a: &mut Anim, fr: &F
 
     // The controls, centred under the player.
     let (cx, cy) = (block.x + block.w / 2.0, y0 + CONTROLS_CY);
-    if control(ui, wid("media_prev"), Point::new(cx - CONTROL_PITCH, cy), SIDE_HIT, Glyph::Back, m.can_prev) {
+    if control(
+        ui,
+        wid("media_prev"),
+        Point::new(cx - CONTROL_PITCH, cy),
+        SIDE_HIT,
+        Glyph::Back,
+        m.can_prev,
+    ) {
         acts.push(MediaCmd::Prev);
     }
     let play = if playing { Glyph::Pause } else { Glyph::Play };
-    if control(ui, wid("media_play"), Point::new(cx, cy), PLAY_HIT, play, m.can_play_pause) {
+    if control(
+        ui,
+        wid("media_play"),
+        Point::new(cx, cy),
+        PLAY_HIT,
+        play,
+        m.can_play_pause,
+    ) {
         acts.push(MediaCmd::PlayPause);
     }
-    if control(ui, wid("media_next"), Point::new(cx + CONTROL_PITCH, cy), SIDE_HIT, Glyph::Forward, m.can_next) {
+    if control(
+        ui,
+        wid("media_next"),
+        Point::new(cx + CONTROL_PITCH, cy),
+        SIDE_HIT,
+        Glyph::Forward,
+        m.can_next,
+    ) {
         acts.push(MediaCmd::Next);
     }
 
@@ -272,8 +356,21 @@ fn draw_session(ui: &mut Ui, st: &mut AppState, area: Rect, a: &mut Anim, fr: &F
     let mut get_ja_readings = false;
     if let Some(lyr_w) = cols.lyrics_w {
         let col = Rect::new(snap(x0 + area.w - lyr_w), y0, lyr_w, H_SESSION);
-        let offer = if pronounce && st.lyrics.wants_ja_readings { addons::ja_offer(st.addon(addons::JAPANESE_READINGS.id)) } else { None };
-        let ctx = LyricsCtx { now, pos: lyric_pos, live: playing && has_dur, can_seek: m.can_seek, scale, track_key: &m.track_key, pronounce, offer };
+        let offer = if pronounce && st.lyrics.wants_ja_readings {
+            addons::ja_offer(st.addon(addons::JAPANESE_READINGS.id))
+        } else {
+            None
+        };
+        let ctx = LyricsCtx {
+            now,
+            pos: lyric_pos,
+            live: playing && has_dur,
+            can_seek: m.can_seek,
+            scale,
+            track_key: &m.track_key,
+            pronounce,
+            offer,
+        };
         let out = classic::draw_lyrics(ui, &st.lyrics, &mut st.ui, col, a, fr, &ctx, &mut acts);
         anim |= out.animating;
         synced_shown = out.synced;
@@ -363,14 +460,27 @@ fn draw_empty(ui: &mut Ui, area: Rect) {
     let tx = classic::snap(x0 + ART + GAP_ART, scale);
     let tw = (area.right() - tx).max(0.0);
     let title = TextStyle::value();
-    ui.c.text("Nothing playing", row(tx, tw, y0 + EMPTY_TITLE_CAP, title.size), &title);
+    ui.c.text(
+        "Nothing playing",
+        row(tx, tw, y0 + EMPTY_TITLE_CAP, title.size),
+        &title,
+    );
     let hint = TextStyle::body().color(palette::TEXT_DIM);
-    ui.c.text("Play music in Spotify, a browser or any media app", row(tx, tw, y0 + EMPTY_HINT_CAP, hint.size), &hint);
+    ui.c.text(
+        "Play music in Spotify, a browser or any media app",
+        row(tx, tw, y0 + EMPTY_HINT_CAP, hint.size),
+        &hint,
+    );
 }
 
 /// A one-line, vertically centred text box whose capitals start at `cap_top`.
 fn row(x: f32, w: f32, cap_top: f32, size: f32) -> Rect {
-    Rect::new(x, cap_top - (FONT_ASCENT - FONT_CAP) * size, w, FONT_LINE * size)
+    Rect::new(
+        x,
+        cap_top - (FONT_ASCENT - FONT_CAP) * size,
+        w,
+        FONT_LINE * size,
+    )
 }
 
 /// The cover (or a blank tile) scaled about its centre by `k`; on whole
@@ -379,7 +489,12 @@ fn draw_art(ui: &mut Ui, art: Option<&Image>, r: Rect, k: f32, px_scale: Option<
     let mut rr = Rect::from_center(r.center(), r.w * k, r.h * k);
     if let Some(s) = px_scale {
         let (x0, y0) = (classic::snap(rr.x, s), classic::snap(rr.y, s));
-        rr = Rect::new(x0, y0, classic::snap(rr.right(), s) - x0, classic::snap(rr.bottom(), s) - y0);
+        rr = Rect::new(
+            x0,
+            y0,
+            classic::snap(rr.right(), s) - x0,
+            classic::snap(rr.bottom(), s) - y0,
+        );
     }
     let radius = ART_RADIUS * k;
     match art {
@@ -396,7 +511,11 @@ fn draw_art(ui: &mut Ui, art: Option<&Image>, r: Rect, k: f32, px_scale: Option<
 fn tile(ui: &mut Ui, r: Rect, radius: f32, k: f32) {
     ui.c.fill_rrect(r, radius, palette::SURFACE);
     let s = TILE_ICON * k;
-    ui.c.icon(Icon::Music, Rect::from_center(r.center(), s, s), palette::TEXT_FAINT);
+    ui.c.icon(
+        Icon::Music,
+        Rect::from_center(r.center(), s, s),
+        palette::TEXT_FAINT,
+    );
 }
 
 fn eq_width() -> f32 {
@@ -425,16 +544,26 @@ const EQ_PAUSED_ALPHA: f32 = 0.45;
 /// Four bars ending at `right`.
 fn equalizer(ui: &mut Ui, right: f32, cy: f32, color: Color, eq: EqState, t: f64) {
     let x0 = right - eq_width();
-    let color = if eq == EqState::Paused { color.mul_alpha(EQ_PAUSED_ALPHA) } else { color };
+    let color = if eq == EqState::Paused {
+        color.mul_alpha(EQ_PAUSED_ALPHA)
+    } else {
+        color
+    };
     for i in 0..EQ_BARS {
         let k = match eq {
-            EqState::Dancing => (0.5 + 0.5 * (t * (5.0 + i as f64 * 1.3) + i as f64 * 1.7).sin()) as f32,
+            EqState::Dancing => {
+                (0.5 + 0.5 * (t * (5.0 + i as f64 * 1.3) + i as f64 * 1.7).sin()) as f32
+            }
             EqState::Still => EQ_STILL[i],
             EqState::Paused => 0.0,
         };
         let h = lerp(EQ_LOW, EQ_HIGH, k);
         let x = x0 + i as f32 * (EQ_BAR_W + EQ_GAP);
-        ui.c.fill_rrect(Rect::new(x, cy - h / 2.0, EQ_BAR_W, h), EQ_BAR_W / 2.0, color);
+        ui.c.fill_rrect(
+            Rect::new(x, cy - h / 2.0, EQ_BAR_W, h),
+            EQ_BAR_W / 2.0,
+            color,
+        );
     }
 }
 
@@ -448,7 +577,11 @@ pub fn eq_color(c: Color) -> Color {
 }
 
 fn to_hsl(c: Color) -> (f32, f32, f32) {
-    let (r, g, b) = (c.r.clamp(0.0, 1.0), c.g.clamp(0.0, 1.0), c.b.clamp(0.0, 1.0));
+    let (r, g, b) = (
+        c.r.clamp(0.0, 1.0),
+        c.g.clamp(0.0, 1.0),
+        c.b.clamp(0.0, 1.0),
+    );
     let (max, min) = (r.max(g).max(b), r.min(g).min(b));
     let l = (max + min) / 2.0;
     let d = max - min;
@@ -502,9 +635,22 @@ fn control(ui: &mut Ui, id: WidgetId, c: Point, hit: f32, g: Glyph, enabled: boo
     }
     let resp = ui.button(id, Rect::from_center(c, hit, hit));
     if resp.pressed || resp.hovered {
-        ui.c.fill_circle(c, hit / 2.0, Color::white(if resp.pressed { PRESS_INK } else { HOVER_INK }));
+        ui.c.fill_circle(
+            c,
+            hit / 2.0,
+            Color::white(if resp.pressed { PRESS_INK } else { HOVER_INK }),
+        );
     }
-    glyph(ui, g, c, if resp.pressed { palette::TEXT.mul_alpha(0.8) } else { palette::TEXT });
+    glyph(
+        ui,
+        g,
+        c,
+        if resp.pressed {
+            palette::TEXT.mul_alpha(0.8)
+        } else {
+            palette::TEXT
+        },
+    );
     resp.clicked
 }
 
@@ -514,9 +660,16 @@ fn glyph(ui: &mut Ui, g: Glyph, c: Point, color: Color) {
     let snap = |v: f32| classic::snap(v, s);
     match g {
         Glyph::Pause => {
-            let (x, y) = (snap(c.x - PAUSE_GAP / 2.0 - PAUSE_BAR_W), snap(c.y - PAUSE_BAR_H / 2.0));
+            let (x, y) = (
+                snap(c.x - PAUSE_GAP / 2.0 - PAUSE_BAR_W),
+                snap(c.y - PAUSE_BAR_H / 2.0),
+            );
             for dx in [0.0, PAUSE_BAR_W + PAUSE_GAP] {
-                ui.c.fill_rrect(Rect::new(x + dx, y, PAUSE_BAR_W, PAUSE_BAR_H), PAUSE_R, color);
+                ui.c.fill_rrect(
+                    Rect::new(x + dx, y, PAUSE_BAR_W, PAUSE_BAR_H),
+                    PAUSE_R,
+                    color,
+                );
             }
         }
         Glyph::Play => {
@@ -532,7 +685,11 @@ fn glyph(ui: &mut Ui, g: Glyph, c: Point, color: Color) {
             let mid = (top + bottom) / 2.0;
             for i in 0..2 {
                 let x = x0 + i as f32 * half;
-                let tri = if g == Glyph::Forward { [(x, top), (x + half, mid), (x, bottom)] } else { [(x + half, top), (x, mid), (x + half, bottom)] };
+                let tri = if g == Glyph::Forward {
+                    [(x, top), (x + half, mid), (x, bottom)]
+                } else {
+                    [(x + half, top), (x, mid), (x + half, bottom)]
+                };
                 ui.c.path(&rounded(&tri, SKIP_ROUND), Some(color), None);
             }
         }
@@ -553,7 +710,11 @@ fn rounded(pts: &[(f32, f32)], r: f32) -> Vec<Seg> {
         let p = pts[i];
         let a = toward(p, pts[(i + n - 1) % n]);
         let b = toward(p, pts[(i + 1) % n]);
-        segs.push(if i == 0 { Seg::MoveTo(a.0, a.1) } else { Seg::LineTo(a.0, a.1) });
+        segs.push(if i == 0 {
+            Seg::MoveTo(a.0, a.1)
+        } else {
+            Seg::LineTo(a.0, a.1)
+        });
         segs.push(Seg::QuadTo(p.0, p.1, b.0, b.1));
     }
     segs.push(Seg::Close);
@@ -572,11 +733,21 @@ mod tests {
             // Classic: (w × share).min(w − art 104 − gap 16 − gap 20 − middle 176).
             let classic_w = (w * classic::LYRICS_SHARE).min(w - 316.0).round();
             assert_eq!(cols.lyrics_w, Some(classic_w), "at {width}");
-            assert!(cols.block_w >= MIN_BLOCK_W - 0.5, "player {} at {width}", cols.block_w);
+            assert!(
+                cols.block_w >= MIN_BLOCK_W - 0.5,
+                "player {} at {width}",
+                cols.block_w
+            );
             assert!((cols.block_w + classic::GAP_LYRICS + classic_w - w).abs() <= 0.5);
         }
         // Lyrics off: the player takes the whole card.
-        assert_eq!(columns(584.0, false, 1.0), Columns { block_w: 584.0, lyrics_w: None });
+        assert_eq!(
+            columns(584.0, false, 1.0),
+            Columns {
+                block_w: 584.0,
+                lyrics_w: None
+            }
+        );
     }
 
     #[test]
@@ -590,7 +761,10 @@ mod tests {
     #[test]
     fn the_player_name_reads_in_capitals() {
         assert_eq!(source_label("Spotify", true), "SPOTIFY");
-        assert_eq!(source_label(" Apple Music ", false), "APPLE MUSIC \u{b7} PAUSED");
+        assert_eq!(
+            source_label(" Apple Music ", false),
+            "APPLE MUSIC \u{b7} PAUSED"
+        );
         assert_eq!(source_label("", false), "PAUSED");
         assert_eq!(source_label("", true), "");
     }
@@ -602,15 +776,25 @@ mod tests {
         // Already bright and vivid: unchanged.
         let pink = Color::hex(0xFF78B0);
         let out = eq_color(pink);
-        assert!((out.r - pink.r).abs() < 0.01 && (out.g - pink.g).abs() < 0.01 && (out.b - pink.b).abs() < 0.01);
+        assert!(
+            (out.r - pink.r).abs() < 0.01
+                && (out.g - pink.g).abs() < 0.01
+                && (out.b - pink.b).abs() < 0.01
+        );
         // Grey stays grey (no hue to lift into).
         let grey = eq_color(Color::rgba(0.3, 0.3, 0.3, 1.0));
-        assert!((grey.r - grey.g).abs() < 1e-4 && (grey.g - grey.b).abs() < 1e-4 && grey.r >= 0.619);
+        assert!(
+            (grey.r - grey.g).abs() < 1e-4 && (grey.g - grey.b).abs() < 1e-4 && grey.r >= 0.619
+        );
         // Round trip.
         let c = Color::hex(0x3478F6);
         let (h, s, l) = to_hsl(c);
         let back = from_hsl(h, s, l);
-        assert!((back.r - c.r).abs() < 1e-3 && (back.g - c.g).abs() < 1e-3 && (back.b - c.b).abs() < 1e-3);
+        assert!(
+            (back.r - c.r).abs() < 1e-3
+                && (back.g - c.g).abs() < 1e-3
+                && (back.b - c.b).abs() < 1e-3
+        );
     }
 
     #[test]
@@ -620,7 +804,10 @@ mod tests {
         assert!(matches!(segs[0], Seg::MoveTo(..)) && matches!(segs[6], Seg::Close));
         for s in &segs {
             if let Seg::LineTo(x, y) | Seg::MoveTo(x, y) | Seg::QuadTo(_, _, x, y) = *s {
-                assert!((0.0..=20.0).contains(&x) && (0.0..=24.0).contains(&y), "{x}, {y}");
+                assert!(
+                    (0.0..=20.0).contains(&x) && (0.0..=24.0).contains(&y),
+                    "{x}, {y}"
+                );
             }
         }
     }

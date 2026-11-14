@@ -168,8 +168,22 @@ pub struct Ui<'a, 'g> {
 }
 
 impl<'a, 'g> Ui<'a, 'g> {
-    pub fn new(c: &'a mut Canvas<'g>, input: &'a mut Input, hits: &'a mut Vec<Hit>, now: f64) -> Self {
-        Self { c, input, hits, now, repaint: false, animating: false, live: false, wants_focus: None }
+    pub fn new(
+        c: &'a mut Canvas<'g>,
+        input: &'a mut Input,
+        hits: &'a mut Vec<Hit>,
+        now: f64,
+    ) -> Self {
+        Self {
+            c,
+            input,
+            hits,
+            now,
+            repaint: false,
+            animating: false,
+            live: false,
+            wants_focus: None,
+        }
     }
 
     /// Ask for one more frame (e.g. after a state change).
@@ -211,7 +225,11 @@ impl<'a, 'g> Ui<'a, 'g> {
 
     /// Register an interactive region and get its state.
     pub fn interact(&mut self, id: WidgetId, r: Rect, cursor: CursorKind) -> Resp {
-        self.hits.push(Hit { id, rect: r, cursor });
+        self.hits.push(Hit {
+            id,
+            rect: r,
+            cursor,
+        });
         let hovered = self.hovered(r);
         let pressed = self.input.down && self.input.pressed_id == Some(id);
         let clicked = self.input.clicked == Some((id, MouseButton::Left));
@@ -227,7 +245,13 @@ impl<'a, 'g> Ui<'a, 'g> {
         } else {
             None
         };
-        Resp { hovered, pressed, clicked, rclicked, drag }
+        Resp {
+            hovered,
+            pressed,
+            clicked,
+            rclicked,
+            drag,
+        }
     }
 
     /// Invisible clickable area.
@@ -236,7 +260,14 @@ impl<'a, 'g> Ui<'a, 'g> {
     }
 
     /// Round icon button with hover/pressed background.
-    pub fn icon_button(&mut self, id: WidgetId, r: Rect, icon: Icon, color: Color, icon_size: f32) -> Resp {
+    pub fn icon_button(
+        &mut self,
+        id: WidgetId,
+        r: Rect,
+        icon: Icon,
+        color: Color,
+        icon_size: f32,
+    ) -> Resp {
         let resp = self.button(id, r);
         let bg = if resp.pressed {
             palette::SURFACE_PRESSED
@@ -249,13 +280,25 @@ impl<'a, 'g> Ui<'a, 'g> {
             self.c.fill_rrect(r, r.h.min(r.w) / 2.0, bg);
         }
         let ir = Rect::from_center(r.center(), icon_size, icon_size);
-        let col = if resp.pressed { color.mul_alpha(0.8) } else { color };
+        let col = if resp.pressed {
+            color.mul_alpha(0.8)
+        } else {
+            color
+        };
         self.c.icon(icon, ir, col);
         resp
     }
 
     /// Filled capsule button with an optional leading icon.
-    pub fn pill_button(&mut self, id: WidgetId, r: Rect, label: &str, icon: Option<Icon>, fill: Color, text: Color) -> Resp {
+    pub fn pill_button(
+        &mut self,
+        id: WidgetId,
+        r: Rect,
+        label: &str,
+        icon: Option<Icon>,
+        fill: Color,
+        text: Color,
+    ) -> Resp {
         let resp = self.button(id, r);
         let f = if resp.pressed {
             Color::lerp(fill, Color::white(1.0), 0.18)
@@ -265,15 +308,23 @@ impl<'a, 'g> Ui<'a, 'g> {
             fill
         };
         self.c.fill_rrect(r, r.h / 2.0, f);
-        let st = TextStyle::new(12.5).weight(Weight::Semibold).color(text).center();
+        let st = TextStyle::new(12.5)
+            .weight(Weight::Semibold)
+            .color(text)
+            .center();
         match icon {
             Some(i) => {
                 let (tw, _) = self.c.measure(label, &st, r.w);
                 let total = 14.0 + if label.is_empty() { 0.0 } else { 5.0 + tw };
                 let x = r.x + (r.w - total) / 2.0;
-                self.c.icon(i, Rect::new(x, r.center().y - 7.0, 14.0, 14.0), text);
+                self.c
+                    .icon(i, Rect::new(x, r.center().y - 7.0, 14.0, 14.0), text);
                 if !label.is_empty() {
-                    self.c.text(label, Rect::new(x + 19.0, r.y, tw + 2.0, r.h), &st.align(Align::Left));
+                    self.c.text(
+                        label,
+                        Rect::new(x + 19.0, r.y, tw + 2.0, r.h),
+                        &st.align(Align::Left),
+                    );
                 }
             }
             None => self.c.text(label, r, &st),
@@ -283,46 +334,112 @@ impl<'a, 'g> Ui<'a, 'g> {
 
     /// Width a [`Ui::pill`] needs for `label` (and an optional icon).
     pub fn pill_width(&mut self, label: &str, icon: bool, small: bool) -> f32 {
-        let (size, isz, pad) = if small { (crate::gfx::ts::FOOTNOTE, 13.0, 12.0) } else { (crate::gfx::ts::BODY, 14.0, 16.0) };
-        let tw = if label.is_empty() { 0.0 } else { self.c.measure(label, &TextStyle::new(size).weight(Weight::Semibold), 400.0).0 };
-        let iw = if icon { isz + if label.is_empty() { 0.0 } else { 6.0 } } else { 0.0 };
+        let (size, isz, pad) = if small {
+            (crate::gfx::ts::FOOTNOTE, 13.0, 12.0)
+        } else {
+            (crate::gfx::ts::BODY, 14.0, 16.0)
+        };
+        let tw = if label.is_empty() {
+            0.0
+        } else {
+            self.c
+                .measure(label, &TextStyle::new(size).weight(Weight::Semibold), 400.0)
+                .0
+        };
+        let iw = if icon {
+            isz + if label.is_empty() { 0.0 } else { 6.0 }
+        } else {
+            0.0
+        };
         (2.0 * pad + iw + tw).ceil()
     }
 
     /// A capsule button from the button system. Height decides the size:
     /// `PILL_SMALL` (28) = 12 pt label / 13 icon, `PILL_REGULAR` (34) = 13 / 14.
-    pub fn pill(&mut self, id: WidgetId, r: Rect, label: &str, icon: Option<Icon>, style: PillStyle) -> Resp {
+    pub fn pill(
+        &mut self,
+        id: WidgetId,
+        r: Rect,
+        label: &str,
+        icon: Option<Icon>,
+        style: PillStyle,
+    ) -> Resp {
         let resp = self.button(id, r);
         let small = r.h <= 30.0;
         let (fill, text) = match style {
             PillStyle::Utility => {
-                let f = if resp.pressed { Color::white(0.22) } else if resp.hovered { Color::white(0.15) } else { palette::SURFACE };
-                (f, if resp.hovered || resp.pressed { palette::TEXT } else { palette::TEXT_DIM })
+                let f = if resp.pressed {
+                    Color::white(0.22)
+                } else if resp.hovered {
+                    Color::white(0.15)
+                } else {
+                    palette::SURFACE
+                };
+                (
+                    f,
+                    if resp.hovered || resp.pressed {
+                        palette::TEXT
+                    } else {
+                        palette::TEXT_DIM
+                    },
+                )
             }
             PillStyle::Neutral => {
-                let f = if resp.pressed { Color::white(0.22) } else if resp.hovered { Color::white(0.15) } else { palette::SURFACE };
+                let f = if resp.pressed {
+                    Color::white(0.22)
+                } else if resp.hovered {
+                    Color::white(0.15)
+                } else {
+                    palette::SURFACE
+                };
                 (f, palette::TEXT)
             }
             PillStyle::Primary(c) => {
-                let a = if resp.pressed { 0.36 } else if resp.hovered { 0.28 } else { 0.20 };
+                let a = if resp.pressed {
+                    0.36
+                } else if resp.hovered {
+                    0.28
+                } else {
+                    0.20
+                };
                 (c.with_alpha(a), c)
             }
             PillStyle::UtilityAccent(c) => {
-                let f = if resp.pressed { Color::white(0.22) } else if resp.hovered { Color::white(0.15) } else { palette::SURFACE };
+                let f = if resp.pressed {
+                    Color::white(0.22)
+                } else if resp.hovered {
+                    Color::white(0.15)
+                } else {
+                    palette::SURFACE
+                };
                 (f, c)
             }
         };
         self.c.fill_rrect(r, r.h / 2.0, fill);
-        let (size, isz) = if small { (crate::gfx::ts::FOOTNOTE, 13.0) } else { (crate::gfx::ts::BODY, 14.0) };
+        let (size, isz) = if small {
+            (crate::gfx::ts::FOOTNOTE, 13.0)
+        } else {
+            (crate::gfx::ts::BODY, 14.0)
+        };
         let st = TextStyle::new(size).weight(Weight::Semibold).color(text);
-        let tw = if label.is_empty() { 0.0 } else { self.c.measure(label, &st, r.w).0 };
-        let iw = if icon.is_some() { isz + if label.is_empty() { 0.0 } else { 6.0 } } else { 0.0 };
+        let tw = if label.is_empty() {
+            0.0
+        } else {
+            self.c.measure(label, &st, r.w).0
+        };
+        let iw = if icon.is_some() {
+            isz + if label.is_empty() { 0.0 } else { 6.0 }
+        } else {
+            0.0
+        };
         let x = r.x + (r.w - iw - tw) / 2.0;
         if let Some(i) = icon {
-            self.c.icon(i, Rect::new(x, r.center().y - isz / 2.0, isz, isz), text);
+            self.c
+                .icon(i, Rect::new(x, r.center().y - isz / 2.0, isz, isz), text);
         }
         if !label.is_empty() {
-            self.c.text(label, Rect::new(x + iw, r.y, tw + 2.0, r.h), &st);
+            self.c
+                .text(label, Rect::new(x + iw, r.y, tw + 2.0, r.h), &st);
         }
         resp
     }
@@ -361,18 +478,49 @@ impl<'a, 'g> Ui<'a, 'g> {
     }
 
     /// Single-line text field. Click to focus, Enter submits, Esc cancels.
-    pub fn text_input(&mut self, id: WidgetId, r: Rect, buf: &mut String, placeholder: &str, max_chars: usize) -> TextInputResp {
+    pub fn text_input(
+        &mut self,
+        id: WidgetId,
+        r: Rect,
+        buf: &mut String,
+        placeholder: &str,
+        max_chars: usize,
+    ) -> TextInputResp {
         self.text_input_styled(id, r, buf, placeholder, max_chars, InputLook::Box)
     }
 
     /// A list-row style field: no box until hovered/focused, a leading icon in
     /// the same column as list checkboxes (centred at x+18, text at x+36), and
     /// an accent focus ring.
-    pub fn text_input_row(&mut self, id: WidgetId, r: Rect, buf: &mut String, placeholder: &str, max_chars: usize, accent: Color, icon: Option<Icon>) -> TextInputResp {
-        self.text_input_styled(id, r, buf, placeholder, max_chars, InputLook::Row { accent, icon })
+    pub fn text_input_row(
+        &mut self,
+        id: WidgetId,
+        r: Rect,
+        buf: &mut String,
+        placeholder: &str,
+        max_chars: usize,
+        accent: Color,
+        icon: Option<Icon>,
+    ) -> TextInputResp {
+        self.text_input_styled(
+            id,
+            r,
+            buf,
+            placeholder,
+            max_chars,
+            InputLook::Row { accent, icon },
+        )
     }
 
-    fn text_input_styled(&mut self, id: WidgetId, r: Rect, buf: &mut String, placeholder: &str, max_chars: usize, look: InputLook) -> TextInputResp {
+    fn text_input_styled(
+        &mut self,
+        id: WidgetId,
+        r: Rect,
+        buf: &mut String,
+        placeholder: &str,
+        max_chars: usize,
+        look: InputLook,
+    ) -> TextInputResp {
         let resp = self.interact(id, r, CursorKind::Text);
         let mut out = TextInputResp::default();
         if resp.clicked && self.input.focused != Some(id) {
@@ -428,7 +576,13 @@ impl<'a, 'g> Ui<'a, 'g> {
         // Draw.
         let inner = match look {
             InputLook::Box => {
-                let bg = if focused { Color::white(0.13) } else if resp.hovered { Color::white(0.1) } else { palette::SURFACE };
+                let bg = if focused {
+                    Color::white(0.13)
+                } else if resp.hovered {
+                    Color::white(0.1)
+                } else {
+                    palette::SURFACE
+                };
                 self.c.fill_rrect(r, 9.0, bg);
                 if focused {
                     self.c.stroke_rrect(r, 9.0, Color::white(0.28), 1.0);
@@ -437,30 +591,56 @@ impl<'a, 'g> Ui<'a, 'g> {
             }
             InputLook::Row { accent, icon } => {
                 if focused || resp.hovered {
-                    self.c.fill_rrect(r, 9.0, if focused { Color::white(0.10) } else { palette::SURFACE });
+                    self.c.fill_rrect(
+                        r,
+                        9.0,
+                        if focused {
+                            Color::white(0.10)
+                        } else {
+                            palette::SURFACE
+                        },
+                    );
                 }
                 if focused {
                     self.c.stroke_rrect(r, 9.0, accent, 1.5);
                 }
                 if let Some(i) = icon {
-                    let col = if buf.is_empty() { palette::TEXT_FAINT } else { accent };
-                    self.c.icon(i, Rect::from_center(Point::new(r.x + 18.0, r.center().y), 16.0, 16.0), col);
+                    let col = if buf.is_empty() {
+                        palette::TEXT_FAINT
+                    } else {
+                        accent
+                    };
+                    self.c.icon(
+                        i,
+                        Rect::from_center(Point::new(r.x + 18.0, r.center().y), 16.0, 16.0),
+                        col,
+                    );
                 }
                 Rect::new(r.x + 36.0, r.y, (r.w - 46.0).max(0.0), r.h)
             }
         };
         let st = TextStyle::new(crate::gfx::ts::BODY);
         if buf.is_empty() {
-            self.c.text(placeholder, inner, &st.color(palette::TEXT_FAINT));
+            self.c
+                .text(placeholder, inner, &st.color(palette::TEXT_FAINT));
         } else {
             self.c.text(buf, inner, &st);
         }
         if focused {
             let before: String = buf.chars().take(self.input.caret).collect();
-            let (w, _) = if before.is_empty() { (0.0, 0.0) } else { self.c.measure(&before, &st, 10_000.0) };
+            let (w, _) = if before.is_empty() {
+                (0.0, 0.0)
+            } else {
+                self.c.measure(&before, &st, 10_000.0)
+            };
             let x = (inner.x + w + 0.5).min(inner.right());
             let cy = r.center().y;
-            self.c.line(Point::new(x, cy - 8.0), Point::new(x, cy + 8.0), Color::white(0.9), 1.5);
+            self.c.line(
+                Point::new(x, cy - 8.0),
+                Point::new(x, cy + 8.0),
+                Color::white(0.9),
+                1.5,
+            );
         }
         out
     }
@@ -468,24 +648,61 @@ impl<'a, 'g> Ui<'a, 'g> {
     /// Horizontal progress bar. When `seekable` it can be clicked or dragged:
     /// while held it shows (and reports) the fraction under the pointer, and
     /// the release reports where to seek, even if the pointer slid off the bar.
-    pub fn progress_bar(&mut self, id: WidgetId, r: Rect, progress: f32, fill: Color, seekable: bool) -> Scrub {
+    pub fn progress_bar(
+        &mut self,
+        id: WidgetId,
+        r: Rect,
+        progress: f32,
+        fill: Color,
+        seekable: bool,
+    ) -> Scrub {
         let hit = Rect::new(r.x, r.y - 6.0, r.w, r.h + 12.0);
-        let resp = if seekable { self.button(id, hit) } else { Resp::default() };
-        let frac = |x: f32| if r.w > 0.0 { ((x - r.x) / r.w).clamp(0.0, 1.0) } else { 0.0 };
-        let held = if resp.pressed { self.input.mouse.map(|m| frac(m.x)) } else { None };
+        let resp = if seekable {
+            self.button(id, hit)
+        } else {
+            Resp::default()
+        };
+        let frac = |x: f32| {
+            if r.w > 0.0 {
+                ((x - r.x) / r.w).clamp(0.0, 1.0)
+            } else {
+                0.0
+            }
+        };
+        let held = if resp.pressed {
+            self.input.mouse.map(|m| frac(m.x))
+        } else {
+            None
+        };
         let began = resp.pressed && self.input.just_pressed;
-        let released = self.input.released.filter(|(rid, _)| seekable && *rid == id).map(|(_, p)| frac(p.x));
-        let thick = if (resp.hovered || held.is_some()) && seekable { r.h + 2.0 } else { r.h };
+        let released = self
+            .input
+            .released
+            .filter(|(rid, _)| seekable && *rid == id)
+            .map(|(_, p)| frac(p.x));
+        let thick = if (resp.hovered || held.is_some()) && seekable {
+            r.h + 2.0
+        } else {
+            r.h
+        };
         let bar = Rect::new(r.x, r.center().y - thick / 2.0, r.w, thick);
         self.c.fill_rrect(bar, thick / 2.0, palette::TRACK);
         let p = held.or(released).unwrap_or(progress).clamp(0.0, 1.0);
         if p > 0.0 {
-            self.c.fill_rrect(Rect::new(bar.x, bar.y, (bar.w * p).max(thick), bar.h), thick / 2.0, fill);
+            self.c.fill_rrect(
+                Rect::new(bar.x, bar.y, (bar.w * p).max(thick), bar.h),
+                thick / 2.0,
+                fill,
+            );
         }
         if released.is_some() {
             self.repaint = true;
         }
-        Scrub { held, released, began }
+        Scrub {
+            held,
+            released,
+            began,
+        }
     }
 
     /// Release keyboard focus (e.g. after submitting).

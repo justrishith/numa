@@ -46,10 +46,10 @@ mod island;
 mod oyen;
 #[cfg(any(windows, target_os = "macos"))]
 mod pages;
-#[cfg(any(windows, target_os = "macos"))]
-mod pill;
 #[cfg(windows)]
 mod paths;
+#[cfg(any(windows, target_os = "macos"))]
+mod pill;
 #[cfg(any(windows, target_os = "macos"))]
 mod png;
 #[cfg(windows)]
@@ -72,9 +72,9 @@ mod tray;
 #[cfg(any(windows, target_os = "macos"))]
 mod ui;
 #[cfg(any(windows, target_os = "macos"))]
-mod version;
-#[cfg(any(windows, target_os = "macos"))]
 mod updates;
+#[cfg(any(windows, target_os = "macos"))]
+mod version;
 #[cfg(windows)]
 mod window;
 

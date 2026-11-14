@@ -24,17 +24,25 @@ impl PhoneDrop {
     /// Start serving and return the link for the QR code. `Err` holds a
     /// sentence for the island.
     pub fn start(sink: EventSink, offer: Vec<PathBuf>) -> Result<(PhoneDrop, String), String> {
-        let ip = lan_ipv4().ok_or_else(|| "This Mac isn't on a Wi-Fi or wired network.".to_string())?;
+        let ip =
+            lan_ipv4().ok_or_else(|| "This Mac isn't on a Wi-Fi or wired network.".to_string())?;
         let inbox = crate::paths::phone_inbox_dir();
-        std::fs::create_dir_all(&inbox).map_err(|e| format!("Couldn't make the folder {} ({e}).", inbox.display()))?;
-        let secret = random_token().ok_or_else(|| "macOS couldn't make a secret link.".to_string())?;
+        std::fs::create_dir_all(&inbox)
+            .map_err(|e| format!("Couldn't make the folder {} ({e}).", inbox.display()))?;
+        let secret =
+            random_token().ok_or_else(|| "macOS couldn't make a secret link.".to_string())?;
         let sink = Mutex::new(sink);
         let send: Arc<dyn Fn(poni_core::phonedrop::Event) + Send + Sync> = Arc::new(move |e| {
             if let Ok(s) = sink.lock() {
                 s.send(AppEvent::Phone(e));
             }
         });
-        let cfg = Config::new(SocketAddr::new(IpAddr::V4(ip), PORT), secret, mac_name(), inbox.clone());
+        let cfg = Config::new(
+            SocketAddr::new(IpAddr::V4(ip), PORT),
+            secret,
+            mac_name(),
+            inbox.clone(),
+        );
         let first = send.clone();
         let server = match Server::start(cfg.clone(), move |e| first(e)) {
             Ok(s) => s,
@@ -43,12 +51,17 @@ impl PhoneDrop {
                 let mut cfg = cfg;
                 cfg.bind.set_port(0);
                 let again = send.clone();
-                Server::start(cfg, move |e| again(e)).map_err(|e| format!("Couldn't open a network port ({e})."))?
+                Server::start(cfg, move |e| again(e))
+                    .map_err(|e| format!("Couldn't open a network port ({e})."))?
             }
         };
         server.set_offer(offer);
         // Never log the link: it carries the secret.
-        pinfo!("phone drop: listening on {}, saving to {}", server.addr(), inbox.display());
+        pinfo!(
+            "phone drop: listening on {}, saving to {}",
+            server.addr(),
+            inbox.display()
+        );
         let url = server.url();
         Ok((PhoneDrop { server }, url))
     }
@@ -80,7 +93,10 @@ impl PhoneDrop {
 /// 16 bytes from the system's random source as an upper-case base32 secret.
 fn random_token() -> Option<String> {
     let mut b = [0u8; 16];
-    std::fs::File::open("/dev/urandom").ok()?.read_exact(&mut b).ok()?;
+    std::fs::File::open("/dev/urandom")
+        .ok()?
+        .read_exact(&mut b)
+        .ok()?;
     Some(token::base32(&b))
 }
 
@@ -93,7 +109,9 @@ extern "C" {
 /// oyenza.app lists it as, `services::oyenza`).
 pub(crate) fn computer_name() -> Option<String> {
     let raw = unsafe { SCDynamicStoreCopyComputerName(std::ptr::null(), std::ptr::null_mut()) };
-    std::ptr::NonNull::new(raw as *mut CFString).map(|p| unsafe { CFRetained::from_raw(p) }.to_string()).filter(|n| !n.trim().is_empty())
+    std::ptr::NonNull::new(raw as *mut CFString)
+        .map(|p| unsafe { CFRetained::from_raw(p) }.to_string())
+        .filter(|n| !n.trim().is_empty())
 }
 
 /// What the page calls this Mac.
@@ -154,7 +172,10 @@ fn rank(name: &str, routed: bool, ip: Ipv4Addr) -> i32 {
         return 0;
     }
     // Apple's own peer-to-peer links never reach a phone's browser.
-    if ["awdl", "llw", "anpi", "ap"].iter().any(|p| name.starts_with(p)) {
+    if ["awdl", "llw", "anpi", "ap"]
+        .iter()
+        .any(|p| name.starts_with(p))
+    {
         return 0;
     }
     let mut s = 1;
@@ -167,7 +188,12 @@ fn rank(name: &str, routed: bool, ip: Ipv4Addr) -> i32 {
     s += match name {
         "en0" => 2,
         n if n.starts_with("en") => 1,
-        n if ["utun", "ipsec", "ppp", "tun", "tap"].iter().any(|p| n.starts_with(p)) => -6,
+        n if ["utun", "ipsec", "ppp", "tun", "tap"]
+            .iter()
+            .any(|p| n.starts_with(p)) =>
+        {
+            -6
+        }
         _ => 0,
     };
     // Carrier-grade NAT (Tailscale's range) is a tunnel, not the room's Wi-Fi.
@@ -189,11 +215,14 @@ pub(super) fn interface_ipv4s() -> Vec<(String, Ipv4Addr)> {
     let mut p = head;
     while !p.is_null() {
         let a = unsafe { &*p };
-        let up = a.ifa_flags & (IFF_UP | IFF_RUNNING) == (IFF_UP | IFF_RUNNING) && a.ifa_flags & IFF_LOOPBACK == 0;
+        let up = a.ifa_flags & (IFF_UP | IFF_RUNNING) == (IFF_UP | IFF_RUNNING)
+            && a.ifa_flags & IFF_LOOPBACK == 0;
         if up && !a.ifa_addr.is_null() && !a.ifa_name.is_null() {
             let sa = unsafe { &*a.ifa_addr };
             if sa.sin_family == AF_INET {
-                let name = unsafe { CStr::from_ptr(a.ifa_name) }.to_string_lossy().into_owned();
+                let name = unsafe { CStr::from_ptr(a.ifa_name) }
+                    .to_string_lossy()
+                    .into_owned();
                 out.push((name, Ipv4Addr::from(u32::from_be(sa.sin_addr))));
             }
         }

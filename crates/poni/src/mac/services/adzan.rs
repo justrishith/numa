@@ -28,11 +28,21 @@ pub struct AdzanPlayer {
 impl AdzanPlayer {
     /// Start the recording at `path`. An error means nothing plays (the
     /// caller plays the tone instead).
-    pub fn play(&mut self, mtm: MainThreadMarker, path: &Path, sink: &EventSink) -> Result<(), String> {
+    pub fn play(
+        &mut self,
+        mtm: MainThreadMarker,
+        path: &Path,
+        sink: &EventSink,
+    ) -> Result<(), String> {
         self.stop();
-        let sound = NSSound::initWithContentsOfFile_byReference(<NSSound as AnyThread>::alloc(), &NSString::from_str(&path.to_string_lossy()), true)
-            .ok_or_else(|| "can't open the recording".to_string())?;
-        let delegate: Retained<AdzanDelegate> = unsafe { msg_send![AdzanDelegate::alloc(mtm), init] };
+        let sound = NSSound::initWithContentsOfFile_byReference(
+            <NSSound as AnyThread>::alloc(),
+            &NSString::from_str(&path.to_string_lossy()),
+            true,
+        )
+        .ok_or_else(|| "can't open the recording".to_string())?;
+        let delegate: Retained<AdzanDelegate> =
+            unsafe { msg_send![AdzanDelegate::alloc(mtm), init] };
         sound.setDelegate(Some(ProtocolObject::from_ref(&*delegate)));
         if let Ok(mut s) = SINK.lock() {
             *s = Some(sink.clone());

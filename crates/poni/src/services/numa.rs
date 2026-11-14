@@ -1,19 +1,23 @@
-//! NUMA's bridge from a finished WAV to the local NUMA Core.
+//! NUMA's bridge from a finished WAV to the local NUMA Gateway (port 8900).
+//!
+//! The gateway owns speech-to-text, the OpenCode coding lane and text-to-speech.
+//! Poni only records, ships bytes and draws whatever comes back. Nothing here
+//! talks to the retired `numa-core.mjs` edge on 8899.
 
 use crate::events::{AppEvent, EventSink};
 use std::path::PathBuf;
 use std::time::Duration;
 
-const CORE_TRANSCRIBE: &str = "http://127.0.0.1:8899/v1/audio/transcriptions";
-const CORE_CHAT: &str = "http://127.0.0.1:8899/v1/chat/completions";
-const CORE_SPEECH: &str = "http://127.0.0.1:8899/v1/audio/speech";
+const GATEWAY_TRANSCRIBE: &str = "http://127.0.0.1:8900/v1/audio";
+const GATEWAY_ASK: &str = "http://127.0.0.1:8900/v1/ask";
+const GATEWAY_SPEECH: &str = "http://127.0.0.1:8900/v1/speech";
 
-/// Largest clip accepted from Core (about eleven minutes of 24 kHz mono PCM).
+/// Largest clip accepted from the gateway (about eleven minutes of 24 kHz mono PCM).
 const MAX_SPEECH_BYTES: u64 = 32 * 1024 * 1024;
 
-/// Speak a NUMA response using Deepgram Aura audio returned by NUMA Core. The
-/// audio arrives as bytes and is played straight from memory, so nothing is
-/// written to disk. The Deepgram key stays in Core.
+/// Speak a NUMA response using the WAV returned by the gateway. The audio
+/// arrives as bytes and is played straight from memory, so nothing is written
+/// to disk. The Deepgram key stays in the gateway.
 #[cfg(target_os = "windows")]
 pub fn speak(text: String) {
     if text.trim().is_empty() {
@@ -22,7 +26,7 @@ pub fn speak(text: String) {
     std::thread::Builder::new()
         .name("numa-speech".into())
         .spawn(move || {
-            crate::pinfo!("numa speech: requesting Aura audio");
+            crate::pinfo!("numa speech: requesting audio from gateway");
             let result = (|| {
                 let body = serde_json::json!({ "input": text });
                 let client = crate::services::http::Client::new("OyenzaStudio/NUMA")
@@ -32,7 +36,7 @@ pub fn speak(text: String) {
                 let (status, audio) = client
                     .send_for_bytes(
                         crate::services::http::Method::Post,
-                        CORE_SPEECH,
+                        GATEWAY_SPEECH,
                         &[("Accept", "audio/wav")],
                         Some(&body.to_string()),
                         Duration::from_secs(120),
@@ -41,7 +45,7 @@ pub fn speak(text: String) {
                     .map_err(|e| e.to_string())?;
                 if !(200..300).contains(&status) {
                     let detail = String::from_utf8_lossy(&audio).trim().to_owned();
-                    return Err(format!("NUMA TTS returned HTTP {status}: {detail}"));
+                    return Err(format!("NUMA speech returned HTTP {status}: {detail}"));
                 }
                 crate::pinfo!("numa speech: playing {} bytes from memory", audio.len());
                 play_wav_memory(&audio)
@@ -59,7 +63,7 @@ pub fn speak(text: String) {
 fn play_wav_memory(wav: &[u8]) -> Result<(), String> {
     use windows::Win32::Media::Audio::{PlaySoundW, SND_MEMORY, SND_NODEFAULT};
     if wav.len() < 44 {
-        return Err("NUMA TTS returned too little audio".into());
+        return Err("NUMA speech returned too little audio".into());
     }
     // SAFETY: PlaySound only reads inside `wav`, which outlives this call
     // because the call is synchronous (no SND_ASYNC).
@@ -84,6 +88,7 @@ pub fn transcribe(path: PathBuf, sink: EventSink) {
     std::thread::Builder::new()
         .name("numa-transcribe".into())
         .spawn(move || {
+            crate::pinfo!("numa transcription: sending recording to gateway");
             let result = (|| {
                 let bytes =
                     std::fs::read(&path).map_err(|e| format!("can't read recording ({e})"))?;
@@ -91,52 +96,11 @@ pub fn transcribe(path: PathBuf, sink: EventSink) {
                     .map_err(|e| e.to_string())?;
                 let response = client
                     .post_bytes(
-                        CORE_TRANSCRIBE,
+                        GATEWAY_TRANSCRIBE,
                         &[("Accept", "application/json")],
                         &bytes,
                         "audio/wav",
-                        Duration::from_secs(20),
-                    )
-                    .map_err(|e| e.to_string())?;
-                if !(200..300).contains(&response.status) {
-                    return Err(format!("NUMA Core returned HTTP {}", response.status));
-                }
-                let json: serde_json::Value = serde_json::from_str(&response.body)
-                    .map_err(|e| format!("invalid Core response ({e})"))?;
-                json.get("text")
-                    .and_then(serde_json::Value::as_str)
-                    .map(str::trim)
-                    .filter(|s| !s.is_empty())
-                    .map(str::to_owned)
-                    .ok_or_else(|| "NUMA Core returned no transcript".into())
-            })();
-            let _ = std::fs::remove_file(path);
-            sink.send(match result {
-                Ok(text) => AppEvent::NumaTranscript(text),
-                Err(error) => AppEvent::NumaFailed(error),
-            });
-        })
-        .ok();
-}
-
-/// Ask NUMA Core to route a transcript through the configured action agent.
-pub fn ask(text: String, sink: EventSink) {
-    std::thread::Builder::new()
-        .name("numa-action".into())
-        .spawn(move || {
-            let result = (|| {
-                let body = serde_json::json!({
-                    "messages": [{ "role": "user", "content": text }],
-                });
-                let client = crate::services::http::Client::new("OyenzaStudio/NUMA")
-                    .map_err(|e| e.to_string())?;
-                let response = client
-                    .send(
-                        crate::services::http::Method::Post,
-                        CORE_CHAT,
-                        &[("Accept", "application/json")],
-                        Some(&body.to_string()),
-                        Duration::from_secs(60),
+                        Duration::from_secs(30),
                     )
                     .map_err(|e| e.to_string())?;
                 if !(200..300).contains(&response.status) {
@@ -149,21 +113,119 @@ pub fn ask(text: String, sink: EventSink) {
                         })
                         .unwrap_or_else(|| response.body.clone());
                     return Err(format!(
-                        "NUMA Core returned HTTP {}: {detail}",
+                        "NUMA gateway returned HTTP {}: {detail}",
                         response.status
                     ));
                 }
                 let json: serde_json::Value = serde_json::from_str(&response.body)
-                    .map_err(|e| format!("invalid Core response ({e})"))?;
-                if let Some(action) = json.get("numa_action").and_then(serde_json::Value::as_str) {
-                    sink.send(AppEvent::NumaMediaKey(action.to_owned()));
+                    .map_err(|e| format!("invalid gateway response ({e})"))?;
+                // An empty transcript is a real answer, not a transport error:
+                // the gateway already retried once. Poni decides what to say.
+                json.get("text")
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::trim)
+                    .map(str::to_owned)
+                    .ok_or_else(|| "NUMA gateway returned no text field".into())
+            })();
+            let _ = std::fs::remove_file(path);
+            if let Err(error) = &result {
+                crate::pwarn!("numa transcription failed: {error}");
+            }
+            sink.send(match result {
+                Ok(text) => AppEvent::NumaTranscript(text),
+                Err(error) => AppEvent::NumaFailed(error),
+            });
+        })
+        .ok();
+}
+
+/// The gateway's approval endpoints, under the executions root.
+const GATEWAY_EXECUTIONS: &str = "http://127.0.0.1:8900/v1/executions";
+
+/// Answer a gateway run that asked for permission: `approve` grants it,
+/// otherwise it is cancelled. The event stream confirms the new state, so
+/// this only reports transport trouble; the UI never waits on the answer.
+pub fn decide(id: String, approve: bool) {
+    let what = if approve { "approved" } else { "cancelled" };
+    std::thread::Builder::new()
+        .name("numa-decide".into())
+        .spawn(move || {
+            let url = format!(
+                "{GATEWAY_EXECUTIONS}/{id}/{}",
+                if approve { "approve" } else { "cancel" }
+            );
+            let result = (|| {
+                let client = crate::services::http::Client::new("OyenzaStudio/NUMA")
+                    .map_err(|e| e.to_string())?;
+                let response = client
+                    .send(
+                        crate::services::http::Method::Post,
+                        &url,
+                        &[("Accept", "application/json")],
+                        None,
+                        Duration::from_secs(15),
+                    )
+                    .map_err(|e| e.to_string())?;
+                if (200..300).contains(&response.status) {
+                    Ok(())
+                } else {
+                    Err(format!(
+                        "NUMA gateway returned HTTP {}: {}",
+                        response.status,
+                        response.body.trim()
+                    ))
                 }
-                json.pointer("/choices/0/message/content")
+            })();
+            match result {
+                Ok(()) => crate::pinfo!("numa: execution {id} {what}"),
+                Err(error) => crate::pwarn!("numa {what} failed: {error}"),
+            }
+        })
+        .ok();
+}
+
+/// Ask the gateway to carry out a request. Coding work runs in an OpenCode
+/// session behind the gateway, so the budget has to cover real tool loops
+/// rather than a single completion.
+pub fn ask(text: String, sink: EventSink) {
+    std::thread::Builder::new()
+        .name("numa-action".into())
+        .spawn(move || {
+            let result = (|| {
+                let body = serde_json::json!({ "text": text });
+                let client = crate::services::http::Client::new("OyenzaStudio/NUMA")
+                    .map_err(|e| e.to_string())?;
+                let response = client
+                    .send(
+                        crate::services::http::Method::Post,
+                        GATEWAY_ASK,
+                        &[("Accept", "application/json")],
+                        Some(&body.to_string()),
+                        Duration::from_secs(300),
+                    )
+                    .map_err(|e| e.to_string())?;
+                if !(200..300).contains(&response.status) {
+                    let detail = serde_json::from_str::<serde_json::Value>(&response.body)
+                        .ok()
+                        .and_then(|json| {
+                            json.get("error")
+                                .and_then(serde_json::Value::as_str)
+                                .map(str::to_owned)
+                        })
+                        .unwrap_or_else(|| response.body.clone());
+                    return Err(format!(
+                        "NUMA gateway returned HTTP {}: {detail}",
+                        response.status
+                    ));
+                }
+                let json: serde_json::Value = serde_json::from_str(&response.body)
+                    .map_err(|e| format!("invalid gateway response ({e})"))?;
+                json.get("reply")
                     .and_then(serde_json::Value::as_str)
                     .map(str::trim)
                     .filter(|s| !s.is_empty())
                     .map(str::to_owned)
-                    .ok_or_else(|| "NUMA Core returned no response".into())
+                    .ok_or_else(|| "NUMA gateway returned no reply".into())
             })();
             sink.send(match result {
                 Ok(text) => AppEvent::NumaResponse(text),
@@ -171,32 +233,4 @@ pub fn ask(text: String, sink: EventSink) {
             });
         })
         .ok();
-}
-
-/// Inject one approved Windows media key directly through user32. This is
-/// intentionally a tiny allowlisted boundary: NUMA can request only the
-/// media actions produced by `numa-core`, never arbitrary keyboard input.
-#[cfg(target_os = "windows")]
-pub fn send_media_key(action: &str) {
-    let Some(key) = (match action {
-        "play_pause" => Some(0xB3),
-        "next" => Some(0xB0),
-        "prev" => Some(0xB1),
-        "volume_up" => Some(0xAF),
-        "volume_down" => Some(0xAE),
-        "mute" | "unmute" => Some(0xAD),
-        _ => None,
-    }) else {
-        return;
-    };
-    unsafe {
-        keybd_event(key, 0, 0, 0);
-        keybd_event(key, 0, 2, 0);
-    }
-}
-
-#[cfg(target_os = "windows")]
-#[link(name = "user32")]
-unsafe extern "system" {
-    fn keybd_event(key: u8, scan: u8, flags: u32, extra: usize);
 }

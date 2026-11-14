@@ -31,10 +31,17 @@ use crate::gfx::{TextStyle, Weight};
 use crate::icons::Icon;
 use crate::pages::PageKind;
 use crate::state::{AppState, InferenceLink, Reading};
-use crate::ui::{wid, wid_n, CursorKind, Input, KeyInput, PillStyle, Ui, WidgetId, PILL_GAP, PILL_SMALL};
-use poni_core::datetime::{civil_from_days, fmt_clock, fmt_date_short, LocalDateTime, MONTH_SHORT, WEEKDAY_SHORT};
+use crate::ui::{
+    wid, wid_n, CursorKind, Input, KeyInput, PillStyle, Ui, WidgetId, PILL_GAP, PILL_SMALL,
+};
+use poni_core::datetime::{
+    civil_from_days, fmt_clock, fmt_date_short, LocalDateTime, MONTH_SHORT, WEEKDAY_SHORT,
+};
 use poni_core::geom::{palette, Color, Point, Rect};
-use studio_usage::{self as usage, oyenza, DayUse, KeyAsk, Money, ProviderId, Snapshot, Source, Spend, Trouble, Window};
+use studio_usage::{
+    self as usage, oyenza, DayUse, KeyAsk, Money, ProviderId, Snapshot, Source, Spend, Trouble,
+    Window,
+};
 
 /// The System page's height: the window never grows for this page, and the
 /// cards scroll inside it.
@@ -208,26 +215,69 @@ pub fn draw(ui: &mut Ui, st: &mut AppState, area: Rect) {
 /// Services (Done while the list shows) on the right.
 fn top(ui: &mut Ui, st: &mut AppState, r: Rect) {
     let services = st.ui.usage.services;
-    let (label, icon, style) = if services { ("Done", None, PillStyle::Neutral) } else { ("Services", Some(Icon::Sliders), PillStyle::Utility) };
+    let (label, icon, style) = if services {
+        ("Done", None, PillStyle::Neutral)
+    } else {
+        ("Services", Some(Icon::Sliders), PillStyle::Utility)
+    };
     let pw = ui.pill_width(label, icon.is_some(), true);
-    let pill = Rect::new(r.right() - pw, r.center().y - PILL_SMALL / 2.0, pw, PILL_SMALL);
-    if ui.pill(wid("usage.services"), pill, label, icon, style).clicked {
+    let pill = Rect::new(
+        r.right() - pw,
+        r.center().y - PILL_SMALL / 2.0,
+        pw,
+        PILL_SMALL,
+    );
+    if ui
+        .pill(wid("usage.services"), pill, label, icon, style)
+        .clicked
+    {
         if services {
             ui.blur();
         }
         st.ui.usage.switch(!services);
     }
     let busy = st.usage.refreshing;
-    let refresh = Rect::new(pill.x - PILL_GAP - PILL_SMALL, pill.y, PILL_SMALL, PILL_SMALL);
-    if ui.icon_button(wid("usage.refresh"), refresh, Icon::Reset, if busy { palette::DISABLED } else { palette::TEXT_DIM }, 15.0).clicked && !busy {
+    let refresh = Rect::new(
+        pill.x - PILL_GAP - PILL_SMALL,
+        pill.y,
+        PILL_SMALL,
+        PILL_SMALL,
+    );
+    if ui
+        .icon_button(
+            wid("usage.refresh"),
+            refresh,
+            Icon::Reset,
+            if busy {
+                palette::DISABLED
+            } else {
+                palette::TEXT_DIM
+            },
+            15.0,
+        )
+        .clicked
+        && !busy
+    {
         st.cmd(Command::Usage(UsageCmd::Refresh));
     }
 
     // Label then switch, as Settings' rows; the whole of it toggles.
     let words = "Tell me before I run out";
     let lw = ui.c.measure(words, &TextStyle::body(), 400.0).0.ceil();
-    let row = Rect::new(r.x, r.y, (lw + 10.0 + SWITCH_W).min((refresh.x - 16.0 - r.x).max(0.0)), r.h);
-    if super::settings::switch_row(ui, wid("usage.notices"), row, words, Some(st.settings.usage.notices), st.accent) {
+    let row = Rect::new(
+        r.x,
+        r.y,
+        (lw + 10.0 + SWITCH_W).min((refresh.x - 16.0 - r.x).max(0.0)),
+        r.h,
+    );
+    if super::settings::switch_row(
+        ui,
+        wid("usage.notices"),
+        row,
+        words,
+        Some(st.settings.usage.notices),
+        st.accent,
+    ) {
         st.settings.usage.notices = !st.settings.usage.notices;
         st.cmd(Command::SaveSettings);
     }
@@ -235,12 +285,22 @@ fn top(ui: &mut Ui, st: &mut AppState, r: Rect) {
     let status = if busy {
         CHECKING.to_string()
     } else {
-        st.usage.readings.values().map(|r| r.checked_at).max().map(|t| format!("Updated {}", clock_at(st, t))).unwrap_or_default()
+        st.usage
+            .readings
+            .values()
+            .map(|r| r.checked_at)
+            .max()
+            .map(|t| format!("Updated {}", clock_at(st, t)))
+            .unwrap_or_default()
     };
     let x = row.right() + 16.0;
     let room = refresh.x - 8.0 - x;
     if !status.is_empty() && room > 40.0 {
-        ui.c.text(&status, Rect::new(x, r.y, room, r.h), &TextStyle::footnote().color(palette::TEXT_FAINT).right());
+        ui.c.text(
+            &status,
+            Rect::new(x, r.y, room, r.h),
+            &TextStyle::footnote().color(palette::TEXT_FAINT).right(),
+        );
     }
 }
 
@@ -260,7 +320,9 @@ pub fn shown(st: &AppState, id: ProviderId) -> bool {
     match st.usage.readings.get(&id) {
         Some(r) => !matches!(r.trouble, Some(Trouble::NotFound | Trouble::NeedsKey)),
         // A key just typed, before its first reading.
-        None => usage::provider(id).takes_key().is_some_and(|k| st.usage.keys.contains(k.secret)),
+        None => usage::provider(id)
+            .takes_key()
+            .is_some_and(|k| st.usage.keys.contains(k.secret)),
     }
 }
 
@@ -306,11 +368,19 @@ enum Part {
     /// A trouble while older numbers still show, and what fixes it.
     Warn(String, Option<Act>),
     /// No numbers: why, and the one thing that fixes it.
-    Trouble { title: String, line: String, act: Option<Act> },
+    Trouble {
+        title: String,
+        line: String,
+        act: Option<Act>,
+    },
     /// "Checking…", "Getting a code…".
     Quiet(String),
     /// Oyenza Inference's connect code, waiting for its approval.
-    Code { code: String, url: String, expires_at: i64 },
+    Code {
+        code: String,
+        url: String,
+        expires_at: i64,
+    },
     /// A plan ran out: Oyenza Inference carries on.
     Nudge,
 }
@@ -336,7 +406,10 @@ enum Does {
 
 impl Act {
     fn new(label: impl Into<String>, does: Does) -> Option<Act> {
-        Some(Act { label: label.into(), does })
+        Some(Act {
+            label: label.into(),
+            does,
+        })
     }
 }
 
@@ -352,33 +425,68 @@ fn parts(st: &AppState, id: ProviderId) -> Vec<Part> {
     if id == ProviderId::Oyenza {
         match &st.usage.inference {
             InferenceLink::Starting => return vec![Part::Quiet(oyenza::STARTING.into())],
-            InferenceLink::Code { code, url, expires_at } => return vec![Part::Code { code: code.clone(), url: url.clone(), expires_at: *expires_at }],
+            InferenceLink::Code {
+                code,
+                url,
+                expires_at,
+            } => {
+                return vec![Part::Code {
+                    code: code.clone(),
+                    url: url.clone(),
+                    expires_at: *expires_at,
+                }]
+            }
             InferenceLink::Failed(why) => {
                 let (title, line) = oyenza::connect_failure_text(why);
-                return vec![Part::Trouble { title: title.into(), line: line.into(), act: Act::new(oyenza::CONNECT_AGAIN, Does::Connect) }];
+                return vec![Part::Trouble {
+                    title: title.into(),
+                    line: line.into(),
+                    act: Act::new(oyenza::CONNECT_AGAIN, Does::Connect),
+                }];
             }
             InferenceLink::Off | InferenceLink::On { .. } => {}
         }
     }
-    let Some(r) = st.usage.readings.get(&id) else { return vec![Part::Quiet(CHECKING.into())] };
+    let Some(r) = st.usage.readings.get(&id) else {
+        return vec![Part::Quiet(CHECKING.into())];
+    };
     // "Not asked online yet" only means the online answer is on its way.
     let trouble = r.trouble.as_ref().filter(|t| **t != Trouble::NeedsOnline);
     let Some(snap) = numbers(id, r) else {
         return match trouble {
             Some(t) => {
                 let w = words(id, t);
-                vec![Part::Trouble { title: w.title, line: w.line, act: w.act }]
+                vec![Part::Trouble {
+                    title: w.title,
+                    line: w.line,
+                    act: w.act,
+                }]
             }
             None => vec![Part::Quiet(CHECKING.into())],
         };
     };
     let now = st.unix;
-    let mut out: Vec<Part> = snap.windows.iter().map(|w| Part::Limit(w.at(now))).collect();
-    out.extend(snap.spend.iter().filter(|s| s.cap.as_ref().is_some_and(|c| c.micros > 0)).cloned().map(Part::Capped));
+    let mut out: Vec<Part> = snap
+        .windows
+        .iter()
+        .map(|w| Part::Limit(w.at(now)))
+        .collect();
+    out.extend(
+        snap.spend
+            .iter()
+            .filter(|s| s.cap.as_ref().is_some_and(|c| c.micros > 0))
+            .cloned()
+            .map(Part::Capped),
+    );
     if let Some(b) = &snap.balance {
         out.push(Part::Balance(b.clone()));
     }
-    let open: Vec<Spend> = snap.spend.iter().filter(|s| !s.cap.as_ref().is_some_and(|c| c.micros > 0)).cloned().collect();
+    let open: Vec<Spend> = snap
+        .spend
+        .iter()
+        .filter(|s| !s.cap.as_ref().is_some_and(|c| c.micros > 0))
+        .cloned()
+        .collect();
     if !open.is_empty() {
         out.push(Part::Spends(open));
     }
@@ -404,7 +512,15 @@ fn parts(st: &AppState, id: ProviderId) -> Vec<Part> {
     }
     // A plan that ran out points to Oyenza Inference, unless the person hid it.
     let out_now = snap.windows.iter().any(|w| w.at(now).used >= 1.0);
-    if out_now && id != ProviderId::Oyenza && !st.settings.usage.hidden.iter().any(|k| k == ProviderId::Oyenza.key()) {
+    if out_now
+        && id != ProviderId::Oyenza
+        && !st
+            .settings
+            .usage
+            .hidden
+            .iter()
+            .any(|k| k == ProviderId::Oyenza.key())
+    {
         out.push(Part::Nudge);
     }
     out
@@ -424,16 +540,31 @@ struct Words {
 fn words(id: ProviderId, t: &Trouble) -> Words {
     let name = id.name();
     let key = usage::provider(id).takes_key().is_some();
-    let w = |title: String, line: String, short: String, act: Option<Act>| Words { title, line, short, act };
+    let w = |title: String, line: String, short: String, act: Option<Act>| Words {
+        title,
+        line,
+        short,
+        act,
+    };
     let again = || Act::new("Try again", Does::Refresh);
     if id == ProviderId::Oyenza {
         match t {
             Trouble::NeedsKey | Trouble::NotFound => {
-                return w("Not connected".into(), oyenza::CONNECT_LINE.into(), "Not connected".into(), Act::new(oyenza::CONNECT, Does::Connect))
+                return w(
+                    "Not connected".into(),
+                    oyenza::CONNECT_LINE.into(),
+                    "Not connected".into(),
+                    Act::new(oyenza::CONNECT, Does::Connect),
+                )
             }
             Trouble::Refused => {
                 let (title, line) = oyenza::refused_text(oyenza::Refusal::Key);
-                return w(title.into(), line.into(), title.into(), Act::new(oyenza::CONNECT_AGAIN, Does::Connect));
+                return w(
+                    title.into(),
+                    line.into(),
+                    title.into(),
+                    Act::new(oyenza::CONNECT_AGAIN, Does::Connect),
+                );
             }
             Trouble::Disabled => {
                 let (title, line) = oyenza::refused_text(oyenza::Refusal::Disabled);
@@ -443,24 +574,79 @@ fn words(id: ProviderId, t: &Trouble) -> Words {
         }
     }
     match t {
-        Trouble::NotFound => w("Not on this computer".into(), format!("Sign in to {name} here and its plan shows up"), "Not on this computer".into(), None),
-        Trouble::SignedOut => w("Not signed in".into(), format!("Sign in to {name} on this computer"), format!("Signed out of {name}"), None),
-        Trouble::Expired => w("Sign-in expired".into(), format!("Open {name} once to refresh"), format!("Open {name} once to refresh"), None),
-        Trouble::NeedsKey => w("Needs a key".into(), format!("Add your {name} key to see your plan"), "Needs a key".into(), Act::new("Add key", Does::Key)),
-        Trouble::Refused if key => w("Key not accepted".into(), format!("{name} refused the key. Check it, or make a new one"), "Key not accepted".into(), Act::new("Change key", Does::Key)),
-        Trouble::Refused => w("Sign-in not accepted".into(), format!("Sign in to {name} again on this computer"), format!("Sign in to {name} again"), None),
+        Trouble::NotFound => w(
+            "Not on this computer".into(),
+            format!("Sign in to {name} here and its plan shows up"),
+            "Not on this computer".into(),
+            None,
+        ),
+        Trouble::SignedOut => w(
+            "Not signed in".into(),
+            format!("Sign in to {name} on this computer"),
+            format!("Signed out of {name}"),
+            None,
+        ),
+        Trouble::Expired => w(
+            "Sign-in expired".into(),
+            format!("Open {name} once to refresh"),
+            format!("Open {name} once to refresh"),
+            None,
+        ),
+        Trouble::NeedsKey => w(
+            "Needs a key".into(),
+            format!("Add your {name} key to see your plan"),
+            "Needs a key".into(),
+            Act::new("Add key", Does::Key),
+        ),
+        Trouble::Refused if key => w(
+            "Key not accepted".into(),
+            format!("{name} refused the key. Check it, or make a new one"),
+            "Key not accepted".into(),
+            Act::new("Change key", Does::Key),
+        ),
+        Trouble::Refused => w(
+            "Sign-in not accepted".into(),
+            format!("Sign in to {name} again on this computer"),
+            format!("Sign in to {name} again"),
+            None,
+        ),
         Trouble::Disabled => {
             let page = usage_page(id);
             let act = Act::new(format!("Open {}", host(page)), Does::Url(page.into()));
-            w("Account switched off".into(), format!("{name} switched this account off"), "Account switched off".into(), act)
+            w(
+                "Account switched off".into(),
+                format!("{name} switched this account off"),
+                "Account switched off".into(),
+                act,
+            )
         }
         Trouble::Busy { retry_after_s } => {
             let when = soon(*retry_after_s);
-            w("Asked too often".into(), format!("Trying again {when}"), format!("Asked too often, trying again {when}"), None)
+            w(
+                "Asked too often".into(),
+                format!("Trying again {when}"),
+                format!("Asked too often, trying again {when}"),
+                None,
+            )
         }
-        Trouble::Offline => w(format!("Can't reach {name}"), "The numbers come back once you're online".into(), "Offline".into(), again()),
-        Trouble::Unreadable(_) => w("Couldn't read the numbers".into(), format!("{name} answered in a way this version doesn't know"), "Couldn't read the latest numbers".into(), again()),
-        Trouble::Denied => w("Keychain said no".into(), "Choose Allow when macOS asks about “security”".into(), "Keychain said no".into(), again()),
+        Trouble::Offline => w(
+            format!("Can't reach {name}"),
+            "The numbers come back once you're online".into(),
+            "Offline".into(),
+            again(),
+        ),
+        Trouble::Unreadable(_) => w(
+            "Couldn't read the numbers".into(),
+            format!("{name} answered in a way this version doesn't know"),
+            "Couldn't read the latest numbers".into(),
+            again(),
+        ),
+        Trouble::Denied => w(
+            "Keychain said no".into(),
+            "Choose Allow when macOS asks about “security”".into(),
+            "Keychain said no".into(),
+            again(),
+        ),
         // Never said (it only means "not asked online yet"): kept for completeness.
         Trouble::NeedsOnline => w(CHECKING.into(), String::new(), CHECKING.into(), None),
     }
@@ -478,7 +664,9 @@ fn usage_page(id: ProviderId) -> &'static str {
         ProviderId::Copilot => "https://github.com/settings/copilot",
         ProviderId::Kimi => "https://www.kimi.com/code/console",
         ProviderId::Zai => "https://z.ai/manage-apikey/coding-plan/personal/my-plan",
-        ProviderId::MiniMax => "https://platform.minimax.io/user-center/payment/coding-plan?cycle_type=3",
+        ProviderId::MiniMax => {
+            "https://platform.minimax.io/user-center/payment/coding-plan?cycle_type=3"
+        }
         ProviderId::OpenRouter => "https://openrouter.ai/activity",
         ProviderId::Oyenza => oyenza::BASE,
     }
@@ -506,7 +694,8 @@ fn part_h(ui: &mut Ui, p: &Part, w: f32) -> f32 {
             19.0 + lh.ceil() + if act.is_some() { 8.0 + PILL_SMALL } else { 2.0 }
         }
         Part::Code { code, url, .. } => {
-            let (_, ah) = ui.c.measure(&oyenza::approve_text(code, url), &trouble_line(), w);
+            let (_, ah) =
+                ui.c.measure(&oyenza::approve_text(code, url), &trouble_line(), w);
             ah.ceil() + 4.0 + CODE_BOX_H + 8.0 + PILL_SMALL
         }
     }
@@ -519,7 +708,10 @@ fn trouble_line() -> TextStyle {
 // ---------------------------------------------------------------- the cards
 
 fn cards(ui: &mut Ui, st: &mut AppState, view: Rect, dt: f32, moving: &mut bool) {
-    let ids: Vec<ProviderId> = ProviderId::ALL.into_iter().filter(|id| shown(st, *id)).collect();
+    let ids: Vec<ProviderId> = ProviderId::ALL
+        .into_iter()
+        .filter(|id| shown(st, *id))
+        .collect();
     if ids.is_empty() {
         empty(ui, st, view);
         return;
@@ -537,7 +729,11 @@ fn cards(ui: &mut Ui, st: &mut AppState, view: Rect, dt: f32, moving: &mut bool)
         .iter()
         .map(|&id| {
             let parts = parts(st, id);
-            let h = PAD_Y + HEAD_H + HEAD_GAP + parts.iter().map(|p| part_h(ui, p, inner)).sum::<f32>() + PAD_Y;
+            let h = PAD_Y
+                + HEAD_H
+                + HEAD_GAP
+                + parts.iter().map(|p| part_h(ui, p, inner)).sum::<f32>()
+                + PAD_Y;
             Card { id, parts, h }
         })
         .collect();
@@ -545,13 +741,17 @@ fn cards(ui: &mut Ui, st: &mut AppState, view: Rect, dt: f32, moving: &mut bool)
     let mut tops = vec![0.0f32; cols];
     let mut at = Vec::with_capacity(cards.len());
     for c in &cards {
-        let col = (0..cols).min_by(|a, b| tops[*a].total_cmp(&tops[*b])).unwrap_or(0);
+        let col = (0..cols)
+            .min_by(|a, b| tops[*a].total_cmp(&tops[*b]))
+            .unwrap_or(0);
         at.push((col, tops[col]));
         tops[col] += c.h + GAP;
     }
     let content_h = tops.iter().copied().fold(0.0, f32::max) - GAP;
     let reveal = st.ui.usage.reveal.take();
-    let target = reveal.and_then(|id| cards.iter().position(|c| c.id == id)).map(|i| (at[i].1, cards[i].h));
+    let target = reveal
+        .and_then(|id| cards.iter().position(|c| c.id == id))
+        .map(|i| (at[i].1, cards[i].h));
     let scroll = scroll_to(ui, &mut st.ui.usage, view, content_h, target, dt, moving);
 
     let pill_card = super::card::pill_card(st, Rect::new(view.x, view.y - BODY_Y, view.w, HEIGHT));
@@ -559,7 +759,12 @@ fn cards(ui: &mut Ui, st: &mut AppState, view: Rect, dt: f32, moving: &mut bool)
     ui.c.clip(view);
     for (i, c) in cards.iter().enumerate() {
         let (col, y) = at[i];
-        let r = Rect::new(view.x + col as f32 * (card_w + GAP), view.y + y - scroll, card_w, c.h);
+        let r = Rect::new(
+            view.x + col as f32 * (card_w + GAP),
+            view.y + y - scroll,
+            card_w,
+            c.h,
+        );
         if r.bottom() < view.y || r.y > view.bottom() {
             continue;
         }
@@ -572,9 +777,21 @@ fn cards(ui: &mut Ui, st: &mut AppState, view: Rect, dt: f32, moving: &mut bool)
     }
 }
 
-fn draw_card(ui: &mut Ui, st: &AppState, c: &Card, r: Rect, view: Rect, pill_card: Option<(Rect, f32)>, acts: &mut Vec<(ProviderId, Does)>) {
+fn draw_card(
+    ui: &mut Ui,
+    st: &AppState,
+    c: &Card,
+    r: Rect,
+    view: Rect,
+    pill_card: Option<(Rect, f32)>,
+    acts: &mut Vec<(ProviderId, Does)>,
+) {
     super::card::fill_box(ui, pill_card, r, CARD_R, palette::SURFACE);
-    let snap = st.usage.readings.get(&c.id).and_then(|rd| numbers(c.id, rd));
+    let snap = st
+        .usage
+        .readings
+        .get(&c.id)
+        .and_then(|rd| numbers(c.id, rd));
     let x = r.x + PAD_X;
     let w = r.w - 2.0 * PAD_X;
     head(ui, st, c.id, snap, Rect::new(x, r.y + PAD_Y, w, HEAD_H));
@@ -583,7 +800,8 @@ fn draw_card(ui: &mut Ui, st: &AppState, c: &Card, r: Rect, view: Rect, pill_car
         let h = part_h(ui, p, w);
         let pr = Rect::new(x, y, w, h);
         // Widget ids: the service's place in the list, then the line's.
-        let n = ((ProviderId::ALL.iter().position(|p| *p == c.id).unwrap_or(0) as u64) << 8) | i as u64;
+        let n =
+            ((ProviderId::ALL.iter().position(|p| *p == c.id).unwrap_or(0) as u64) << 8) | i as u64;
         if let Some(does) = draw_part(ui, st, p, pr, view, n) {
             acts.push((c.id, does));
         }
@@ -594,14 +812,26 @@ fn draw_card(ui: &mut Ui, st: &AppState, c: &Card, r: Rect, view: Rect, pill_car
 /// Mark, name and plan on the left, the masked account on the right while
 /// there's room for it.
 fn head(ui: &mut Ui, st: &AppState, id: ProviderId, snap: Option<&Snapshot>, r: Rect) {
-    mark(ui, id, Rect::new(r.x, r.center().y - MARK / 2.0, MARK, MARK), palette::TEXT);
+    mark(
+        ui,
+        id,
+        Rect::new(r.x, r.center().y - MARK / 2.0, MARK, MARK),
+        palette::TEXT,
+    );
     let x = r.x + MARK + 7.0;
     let name_st = TextStyle::body().weight(Weight::Semibold);
-    let nw = ui.c.measure(id.name(), &name_st, 1000.0).0.ceil().min((r.right() - x).max(0.0));
+    let nw =
+        ui.c.measure(id.name(), &name_st, 1000.0)
+            .0
+            .ceil()
+            .min((r.right() - x).max(0.0));
     ui.c.text(id.name(), Rect::new(x, r.y, nw + 1.0, r.h), &name_st);
     let mut used = x + nw;
     let dim = TextStyle::footnote().color(palette::TEXT_DIM);
-    if let Some(plan) = snap.and_then(|s| s.plan.as_deref()).filter(|p| !p.trim().is_empty()) {
+    if let Some(plan) = snap
+        .and_then(|s| s.plan.as_deref())
+        .filter(|p| !p.trim().is_empty())
+    {
         let pw = ui.c.measure(plan, &dim, 1000.0).0.ceil();
         let px = used + 7.0;
         if px + 30.0 <= r.right() {
@@ -619,7 +849,11 @@ fn head(ui: &mut Ui, st: &AppState, id: ProviderId, snap: Option<&Snapshot>, r: 
     if let Some(a) = account.filter(|a| !a.trim().is_empty()) {
         let aw = ui.c.measure(a, &dim, 1000.0).0.ceil();
         if aw <= r.right() - used - 12.0 {
-            ui.c.text(a, Rect::new(r.right() - aw - 1.0, r.y, aw + 1.0, r.h), &dim.right());
+            ui.c.text(
+                a,
+                Rect::new(r.right() - aw - 1.0, r.y, aw + 1.0, r.h),
+                &dim.right(),
+            );
         }
     }
 }
@@ -628,7 +862,13 @@ fn head(ui: &mut Ui, st: &AppState, id: ProviderId, snap: Option<&Snapshot>, r: 
 fn draw_part(ui: &mut Ui, st: &AppState, p: &Part, r: Rect, view: Rect, n: u64) -> Option<Does> {
     match p {
         Part::Limit(w) => {
-            let when = w.resets_at.map(|at| if ui.hovered(r) && inside(view, r) { (in_words(at - st.unix), None) } else { resets_words(st, at) });
+            let when = w.resets_at.map(|at| {
+                if ui.hovered(r) && inside(view, r) {
+                    (in_words(at - st.unix), None)
+                } else {
+                    resets_words(st, at)
+                }
+            });
             let right = match w.count {
                 Some((used, of)) if of > 0 => format!("{} of {}", group(used), group(of)),
                 _ => pct(w.used),
@@ -639,7 +879,11 @@ fn draw_part(ui: &mut Ui, st: &AppState, p: &Part, r: Rect, view: Rect, n: u64) 
         Part::Capped(s) => {
             let cap = s.cap.as_ref().map_or(1, |c| c.micros.max(1));
             let used = (s.money.micros as f64 / cap as f64) as f32;
-            let right = format!("{} of {}", s.money.fmt(), s.cap.as_ref().map(Money::fmt).unwrap_or_default());
+            let right = format!(
+                "{} of {}",
+                s.money.fmt(),
+                s.cap.as_ref().map(Money::fmt).unwrap_or_default()
+            );
             limit(ui, st, r, &s.label, None, &right, used);
             None
         }
@@ -648,7 +892,11 @@ fn draw_part(ui: &mut Ui, st: &AppState, p: &Part, r: Rect, view: Rect, n: u64) 
             let value_st = TextStyle::headline().weight(Weight::Semibold).tabular();
             let vw = ui.c.measure(&value, &value_st, r.w).0.ceil();
             ui.c.text(&value, Rect::new(r.x, r.y, vw + 1.0, 20.0), &value_st);
-            ui.c.text(&word, Rect::new(r.x + vw + 6.0, r.y + 1.0, (r.w - vw - 6.0).max(0.0), 20.0), &TextStyle::footnote().color(palette::TEXT_DIM));
+            ui.c.text(
+                &word,
+                Rect::new(r.x + vw + 6.0, r.y + 1.0, (r.w - vw - 6.0).max(0.0), 20.0),
+                &TextStyle::footnote().color(palette::TEXT_DIM),
+            );
             None
         }
         Part::Spends(list) => {
@@ -656,14 +904,33 @@ fn draw_part(ui: &mut Ui, st: &AppState, p: &Part, r: Rect, view: Rect, n: u64) 
             let cw = (r.w - (n as f32 - 1.0) * GAP) / n as f32;
             for (i, s) in list.iter().take(n).enumerate() {
                 let cx = r.x + i as f32 * (cw + GAP);
-                ui.c.text(&s.label, Rect::new(cx, r.y, cw, 14.0), &TextStyle::caption().color(palette::TEXT_DIM));
-                ui.c.text(&s.money.fmt(), Rect::new(cx, r.y + 14.0, cw, 16.0), &TextStyle::footnote().weight(Weight::Semibold).tabular());
+                ui.c.text(
+                    &s.label,
+                    Rect::new(cx, r.y, cw, 14.0),
+                    &TextStyle::caption().color(palette::TEXT_DIM),
+                );
+                ui.c.text(
+                    &s.money.fmt(),
+                    Rect::new(cx, r.y + 14.0, cw, 16.0),
+                    &TextStyle::footnote().weight(Weight::Semibold).tabular(),
+                );
             }
             None
         }
         Part::Tokens(t) => {
-            ui.c.text("Tokens today", Rect::new(r.x, r.y, r.w, 15.0), &TextStyle::footnote().color(palette::TEXT_DIM));
-            ui.c.text(&tokens(*t), Rect::new(r.x, r.y, r.w, 15.0), &TextStyle::footnote().weight(Weight::Semibold).tabular().right());
+            ui.c.text(
+                "Tokens today",
+                Rect::new(r.x, r.y, r.w, 15.0),
+                &TextStyle::footnote().color(palette::TEXT_DIM),
+            );
+            ui.c.text(
+                &tokens(*t),
+                Rect::new(r.x, r.y, r.w, 15.0),
+                &TextStyle::footnote()
+                    .weight(Weight::Semibold)
+                    .tabular()
+                    .right(),
+            );
             None
         }
         Part::Days(days) => {
@@ -671,11 +938,19 @@ fn draw_part(ui: &mut Ui, st: &AppState, p: &Part, r: Rect, view: Rect, n: u64) 
             None
         }
         Part::Note(text) => {
-            ui.c.text(text, Rect::new(r.x, r.y, r.w, 14.0), &TextStyle::caption().color(palette::TEXT_DIM));
+            ui.c.text(
+                text,
+                Rect::new(r.x, r.y, r.w, 14.0),
+                &TextStyle::caption().color(palette::TEXT_DIM),
+            );
             None
         }
         Part::Quiet(text) => {
-            ui.c.text(text, Rect::new(r.x, r.y, r.w, 15.0), &TextStyle::footnote().color(palette::TEXT_DIM));
+            ui.c.text(
+                text,
+                Rect::new(r.x, r.y, r.w, 15.0),
+                &TextStyle::footnote().color(palette::TEXT_DIM),
+            );
             None
         }
         Part::Warn(text, act) => {
@@ -683,31 +958,67 @@ fn draw_part(ui: &mut Ui, st: &AppState, p: &Part, r: Rect, view: Rect, n: u64) 
             let mut end = line.right();
             let mut out = None;
             if let Some(a) = act {
-                let (clicked, x) = link(ui, wid_n("usage.warn", n), line, view, &a.label, st.accent, true);
+                let (clicked, x) = link(
+                    ui,
+                    wid_n("usage.warn", n),
+                    line,
+                    view,
+                    &a.label,
+                    st.accent,
+                    true,
+                );
                 if clicked {
                     out = Some(a.does.clone());
                 }
                 end = x - 10.0;
             }
-            ui.c.text(text, Rect::new(line.x, line.y, (end - line.x).max(0.0), line.h), &TextStyle::footnote().color(palette::ORANGE));
+            ui.c.text(
+                text,
+                Rect::new(line.x, line.y, (end - line.x).max(0.0), line.h),
+                &TextStyle::footnote().color(palette::ORANGE),
+            );
             out
         }
         Part::Nudge => {
             let line = Rect::new(r.x, r.y + 3.0, r.w, 16.0);
-            let does = if connected(st) { Does::Url(oyenza::BASE.into()) } else { Does::Connect };
+            let does = if connected(st) {
+                Does::Url(oyenza::BASE.into())
+            } else {
+                Does::Connect
+            };
             let label_st = TextStyle::footnote().weight(Weight::Semibold);
-            let lw = ui.c.measure(oyenza::NUDGE, &label_st, r.w).0.ceil().min(line.w - 18.0);
+            let lw =
+                ui.c.measure(oyenza::NUDGE, &label_st, r.w)
+                    .0
+                    .ceil()
+                    .min(line.w - 18.0);
             let hit = Rect::new(line.x - 4.0, line.y - 3.0, lw + 26.0, line.h + 6.0);
-            let resp = if inside(view, hit) { ui.button(wid_n("usage.nudge", n), hit) } else { Default::default() };
+            let resp = if inside(view, hit) {
+                ui.button(wid_n("usage.nudge", n), hit)
+            } else {
+                Default::default()
+            };
             let color = if resp.hovered { palette::TEXT } else { OYENZA };
-            ui.c.text(oyenza::NUDGE, Rect::new(line.x, line.y, lw + 1.0, line.h), &label_st.color(color));
-            ui.c.icon(Icon::Open, Rect::new(line.x + lw + 5.0, line.center().y - 6.0, 12.0, 12.0), color);
+            ui.c.text(
+                oyenza::NUDGE,
+                Rect::new(line.x, line.y, lw + 1.0, line.h),
+                &label_st.color(color),
+            );
+            ui.c.icon(
+                Icon::Open,
+                Rect::new(line.x + lw + 5.0, line.center().y - 6.0, 12.0, 12.0),
+                color,
+            );
             resp.clicked.then_some(does)
         }
         Part::Trouble { title, line, act } => {
             ui.c.text(title, Rect::new(r.x, r.y, r.w, 17.0), &TextStyle::body());
             let (_, lh) = ui.c.measure(line, &trouble_line(), r.w);
-            ui.c.text(line, Rect::new(r.x, r.y + 19.0, r.w, lh.ceil() + 1.0), &trouble_line());
+            ui.c.text(
+                line,
+                Rect::new(r.x, r.y + 19.0, r.w, lh.ceil() + 1.0),
+                &trouble_line(),
+            );
             let a = act.as_ref()?;
             let style = match a.does {
                 Does::Refresh | Does::Url(_) => PillStyle::Utility,
@@ -717,15 +1028,28 @@ fn draw_part(ui: &mut Ui, st: &AppState, p: &Part, r: Rect, view: Rect, n: u64) 
             let icon = matches!(a.does, Does::Url(_)).then_some(Icon::Open);
             let pw = ui.pill_width(&a.label, icon.is_some(), true).min(r.w);
             let pill = Rect::new(r.x, r.y + 19.0 + lh.ceil() + 8.0, pw, PILL_SMALL);
-            pill_in(ui, view, wid_n("usage.fix", n), pill, &a.label, icon, style).then(|| a.does.clone())
+            pill_in(ui, view, wid_n("usage.fix", n), pill, &a.label, icon, style)
+                .then(|| a.does.clone())
         }
-        Part::Code { code, url, expires_at } => connect_code(ui, st, r, view, code, url, *expires_at),
+        Part::Code {
+            code,
+            url,
+            expires_at,
+        } => connect_code(ui, st, r, view, code, url, *expires_at),
     }
 }
 
 /// A limit's words (its name, when it resets) and how much is used, over
 /// its bar. `when`: the long form, and a shorter one for a narrow card.
-fn limit(ui: &mut Ui, st: &AppState, r: Rect, label: &str, when: Option<(String, Option<String>)>, right: &str, used: f32) {
+fn limit(
+    ui: &mut Ui,
+    st: &AppState,
+    r: Rect,
+    label: &str,
+    when: Option<(String, Option<String>)>,
+    right: &str,
+    used: f32,
+) {
     let near = (st.settings.usage.near_pct as f32 / 100.0).clamp(0.05, 1.0);
     let fill = if used >= 1.0 {
         palette::RED
@@ -734,7 +1058,15 @@ fn limit(ui: &mut Ui, st: &AppState, r: Rect, label: &str, when: Option<(String,
     } else {
         Color::white(0.86)
     };
-    let right_st = TextStyle::footnote().weight(Weight::Semibold).tabular().right().color(if used >= 1.0 { palette::RED } else { palette::TEXT });
+    let right_st = TextStyle::footnote()
+        .weight(Weight::Semibold)
+        .tabular()
+        .right()
+        .color(if used >= 1.0 {
+            palette::RED
+        } else {
+            palette::TEXT
+        });
     let rw = ui.c.measure(right, &right_st, r.w).0.ceil();
     ui.c.text(right, Rect::new(r.x, r.y, r.w, WORDS_H), &right_st);
     let room = (r.w - rw - 10.0).max(0.0);
@@ -757,7 +1089,11 @@ fn limit(ui: &mut Ui, st: &AppState, r: Rect, label: &str, when: Option<(String,
     ui.c.fill_rrect(bar, BAR_H / 2.0, palette::TRACK);
     let k = used.clamp(0.0, 1.0);
     if k > 0.0 {
-        ui.c.fill_rrect(Rect::new(bar.x, bar.y, (bar.w * k).max(BAR_H), BAR_H), BAR_H / 2.0, fill);
+        ui.c.fill_rrect(
+            Rect::new(bar.x, bar.y, (bar.w * k).max(BAR_H), BAR_H),
+            BAR_H / 2.0,
+            fill,
+        );
     }
 }
 
@@ -766,15 +1102,33 @@ fn day_bars(ui: &mut Ui, days: &[DayUse], r: Rect) {
     let label = format!("{} days", days.len());
     let label_st = TextStyle::caption().color(palette::TEXT_DIM);
     let lw = ui.c.measure(&label, &label_st, 200.0).0.ceil();
-    let bars = Rect::new(r.x + lw + 10.0, r.y + 2.0, (r.w - lw - 10.0).max(0.0), r.h - 8.0);
+    let bars = Rect::new(
+        r.x + lw + 10.0,
+        r.y + 2.0,
+        (r.w - lw - 10.0).max(0.0),
+        r.h - 8.0,
+    );
     ui.c.text(&label, Rect::new(r.x, bars.y, lw + 1.0, bars.h), &label_st);
-    let vals: Vec<f64> = days.iter().map(|d| d.money.as_ref().map(|m| m.micros.max(0) as f64).or(d.requests.map(|n| n as f64)).unwrap_or(0.0)).collect();
+    let vals: Vec<f64> = days
+        .iter()
+        .map(|d| {
+            d.money
+                .as_ref()
+                .map(|m| m.micros.max(0) as f64)
+                .or(d.requests.map(|n| n as f64))
+                .unwrap_or(0.0)
+        })
+        .collect();
     let max = vals.iter().copied().fold(0.0, f64::max);
     let n = vals.len().max(1) as f32;
     let gap = 3.0;
     let bw = ((bars.w - gap * (n - 1.0)) / n).max(1.0);
     for (i, v) in vals.iter().enumerate() {
-        let h = if max > 0.0 && *v > 0.0 { (bars.h * (*v / max) as f32).max(3.0) } else { 2.0 };
+        let h = if max > 0.0 && *v > 0.0 {
+            (bars.h * (*v / max) as f32).max(3.0)
+        } else {
+            2.0
+        };
         let color = if i + 1 == vals.len() {
             Color::white(0.86)
         } else if *v > 0.0 {
@@ -783,17 +1137,33 @@ fn day_bars(ui: &mut Ui, days: &[DayUse], r: Rect) {
             Color::white(0.16)
         };
         let x = bars.x + i as f32 * (bw + gap);
-        ui.c.fill_rrect(Rect::new(x, bars.bottom() - h, bw, h), (bw / 2.0).min(1.5), color);
+        ui.c.fill_rrect(
+            Rect::new(x, bars.bottom() - h, bw, h),
+            (bw / 2.0).min(1.5),
+            color,
+        );
     }
 }
 
 /// Oyenza Inference's code on its card: where to approve it, the code, the
 /// approve page, Cancel, and until when it works.
-fn connect_code(ui: &mut Ui, st: &AppState, r: Rect, view: Rect, code: &str, url: &str, expires_at: i64) -> Option<Does> {
+fn connect_code(
+    ui: &mut Ui,
+    st: &AppState,
+    r: Rect,
+    view: Rect,
+    code: &str,
+    url: &str,
+    expires_at: i64,
+) -> Option<Does> {
     // "Approve KPJX-TMNQ on inference.oyenza.com", on two lines on a narrow card.
     let approve = oyenza::approve_text(code, url);
     let (_, ah) = ui.c.measure(&approve, &trouble_line(), r.w);
-    ui.c.text(&approve, Rect::new(r.x, r.y, r.w, ah.ceil() + 1.0), &trouble_line());
+    ui.c.text(
+        &approve,
+        Rect::new(r.x, r.y, r.w, ah.ceil() + 1.0),
+        &trouble_line(),
+    );
     let code_r = Rect::new(r.x, r.y + ah.ceil() + 4.0, r.w, CODE_BOX_H);
     ui.c.fill_rrect(code_r, 10.0, Color::white(0.07));
     ui.c.text(code, code_r, &TextStyle::display().tabular().center());
@@ -806,11 +1176,27 @@ fn connect_code(ui: &mut Ui, st: &AppState, r: Rect, view: Rect, code: &str, url
     let open_w = ui.pill_width(&open_label, true, true);
     let open = Rect::new(r.x, y, open_w, PILL_SMALL);
     let mut out = None;
-    if pill_in(ui, view, wid("usage.code-open"), open, &open_label, Some(Icon::Open), PillStyle::Primary(OYENZA)) {
+    if pill_in(
+        ui,
+        view,
+        wid("usage.code-open"),
+        open,
+        &open_label,
+        Some(Icon::Open),
+        PillStyle::Primary(OYENZA),
+    ) {
         out = Some(Does::Url(url.to_string()));
     }
     let cancel = Rect::new(open.right() + PILL_GAP, y, cancel_w, PILL_SMALL);
-    if pill_in(ui, view, wid("usage.code-cancel"), cancel, "Cancel", None, PillStyle::Utility) {
+    if pill_in(
+        ui,
+        view,
+        wid("usage.code-cancel"),
+        cancel,
+        "Cancel",
+        None,
+        PillStyle::Utility,
+    ) {
         out = Some(Does::CancelConnect);
     }
     let until = format!("Works until {}", clock_at(st, expires_at));
@@ -828,15 +1214,33 @@ fn connect_code(ui: &mut Ui, st: &AppState, r: Rect, view: Rect, code: &str, url
 fn empty(ui: &mut Ui, st: &mut AppState, r: Rect) {
     const BADGE: f32 = 52.0;
     let looking = st.usage.readings.is_empty();
-    let title = if looking { "Looking for your AI tools…" } else { "No AI plans found on this computer" };
+    let title = if looking {
+        "Looking for your AI tools…"
+    } else {
+        "No AI plans found on this computer"
+    };
     // Looked for here: every service with something to read on the computer
     // (OpenCode Go and Kimi Code too, though they also take a key); a key:
     // every service that takes one. The worker's own rule decides which is which.
-    let dirs = usage::Dirs::sample(if cfg!(target_os = "macos") { usage::Os::Mac } else { usage::Os::Windows });
-    let ids = ProviderId::ALL.into_iter().filter(|id| *id != ProviderId::Oyenza);
-    let found: Vec<ProviderId> = ids.clone().filter(|id| !usage::pace::typed_key_only(&usage::provider(*id).wants(&dirs), false)).collect();
-    let keyed: Vec<ProviderId> = ids.filter(|id| usage::provider(*id).takes_key().is_some()).collect();
-    let mut body = format!("Studio looks for {} on this computer.", names(&found, "and"));
+    let dirs = usage::Dirs::sample(if cfg!(target_os = "macos") {
+        usage::Os::Mac
+    } else {
+        usage::Os::Windows
+    });
+    let ids = ProviderId::ALL
+        .into_iter()
+        .filter(|id| *id != ProviderId::Oyenza);
+    let found: Vec<ProviderId> = ids
+        .clone()
+        .filter(|id| !usage::pace::typed_key_only(&usage::provider(*id).wants(&dirs), false))
+        .collect();
+    let keyed: Vec<ProviderId> = ids
+        .filter(|id| usage::provider(*id).takes_key().is_some())
+        .collect();
+    let mut body = format!(
+        "Studio looks for {} on this computer.",
+        names(&found, "and")
+    );
     if !keyed.is_empty() {
         body.push_str(&format!(" Add a key for {}.", names(&keyed, "or")));
     }
@@ -850,7 +1254,11 @@ fn empty(ui: &mut Ui, st: &mut AppState, r: Rect) {
     let mut y = r.y + ((r.h - block) / 2.0).max(0.0);
     let c = Point::new(r.x + BADGE / 2.0, r.y + r.h / 2.0);
     ui.c.fill_circle(c, BADGE / 2.0, st.accent.with_alpha(0.18));
-    ui.c.icon(PageKind::Ai.icon(), Rect::from_center(c, 24.0, 24.0), st.accent);
+    ui.c.icon(
+        PageKind::Ai.icon(),
+        Rect::from_center(c, 24.0, 24.0),
+        st.accent,
+    );
     ui.c.text(title, Rect::new(x, y, w, th + 1.0), &title_st);
     y += th + 4.0;
     ui.c.text(&body, Rect::new(x, y, w, bh + 1.0), &body_st);
@@ -860,7 +1268,16 @@ fn empty(ui: &mut Ui, st: &mut AppState, r: Rect) {
     y += bh + 12.0;
     let add_w = ui.pill_width("Add a key", true, true);
     let add = Rect::new(x, y, add_w, PILL_SMALL);
-    if ui.pill(wid("usage.empty-add"), add, "Add a key", Some(Icon::Plus), PillStyle::Primary(st.accent)).clicked {
+    if ui
+        .pill(
+            wid("usage.empty-add"),
+            add,
+            "Add a key",
+            Some(Icon::Plus),
+            PillStyle::Primary(st.accent),
+        )
+        .clicked
+    {
         let first = keyed.first().copied();
         st.ui.usage.switch(true);
         if let Some(id) = first {
@@ -870,7 +1287,17 @@ fn empty(ui: &mut Ui, st: &mut AppState, r: Rect) {
     let label = "Connect Oyenza Inference";
     let cw = ui.pill_width(label, false, true);
     let connect = Rect::new(add.right() + PILL_GAP, y, cw, PILL_SMALL);
-    if connect.right() <= r.right() + 0.5 && ui.pill(wid("usage.empty-connect"), connect, label, None, PillStyle::Utility).clicked {
+    if connect.right() <= r.right() + 0.5
+        && ui
+            .pill(
+                wid("usage.empty-connect"),
+                connect,
+                label,
+                None,
+                PillStyle::Utility,
+            )
+            .clicked
+    {
         act(ui, st, ProviderId::Oyenza, Does::Connect);
     }
 }
@@ -880,7 +1307,11 @@ fn names(ids: &[ProviderId], last_word: &str) -> String {
     match ids {
         [] => String::new(),
         [one] => one.name().to_string(),
-        [rest @ .., last] => format!("{} {last_word} {}", rest.iter().map(|p| p.name()).collect::<Vec<_>>().join(", "), last.name()),
+        [rest @ .., last] => format!(
+            "{} {last_word} {}",
+            rest.iter().map(|p| p.name()).collect::<Vec<_>>().join(", "),
+            last.name()
+        ),
     }
 }
 
@@ -892,7 +1323,11 @@ fn list(ui: &mut Ui, st: &mut AppState, view: Rect, dt: f32, moving: &mut bool) 
     let intro = "Each sign-in is read on this computer and goes only to its own service. Oyenza never sees your other plans.";
     let intro_st = TextStyle::caption().color(palette::TEXT_DIM).wrap().top();
     let intro_h = ui.c.measure(intro, &intro_st, view.w).1.ceil();
-    let editing = st.ui.usage.editing.filter(|id| usage::provider(*id).takes_key().is_some());
+    let editing = st
+        .ui
+        .usage
+        .editing
+        .filter(|id| usage::provider(*id).takes_key().is_some());
     let mut rows = Vec::with_capacity(ProviderId::ALL.len());
     let mut y = intro_h + INTRO_GAP;
     for id in ProviderId::ALL {
@@ -901,7 +1336,9 @@ fn list(ui: &mut Ui, st: &mut AppState, view: Rect, dt: f32, moving: &mut bool) 
     }
     let content_h = y;
     let reveal = st.ui.usage.reveal.take();
-    let target = reveal.and_then(|id| rows.iter().find(|r| r.0 == id)).map(|&(id, y)| (y, ROW_H + if editing == Some(id) { EDIT_H } else { 0.0 }));
+    let target = reveal
+        .and_then(|id| rows.iter().find(|r| r.0 == id))
+        .map(|&(id, y)| (y, ROW_H + if editing == Some(id) { EDIT_H } else { 0.0 }));
     let scroll = scroll_to(ui, &mut st.ui.usage, view, content_h, target, dt, moving);
 
     let wide = Rect::new(view.x - 8.0, view.y, view.w + 16.0, view.h);
@@ -918,12 +1355,24 @@ fn list(ui: &mut Ui, st: &mut AppState, view: Rect, dt: f32, moving: &mut bool) 
             continue;
         }
         if i > 0 {
-            ui.c.line(Point::new(r.x, r.y + 0.5), Point::new(r.right(), r.y + 0.5), Color::white(0.07), 1.0);
+            ui.c.line(
+                Point::new(r.x, r.y + 0.5),
+                Point::new(r.right(), r.y + 0.5),
+                Color::white(0.07),
+                1.0,
+            );
         }
         acts.extend(row(ui, st, id, r, view).into_iter().map(|d| (id, d)));
         if editing == Some(id) {
             if let Some(ask) = usage::provider(id).takes_key() {
-                key_editor(ui, st, id, ask, Rect::new(r.x, r.bottom(), r.w, EDIT_H), view);
+                key_editor(
+                    ui,
+                    st,
+                    id,
+                    ask,
+                    Rect::new(r.x, r.bottom(), r.w, EDIT_H),
+                    view,
+                );
             }
         }
     }
@@ -940,17 +1389,39 @@ fn row(ui: &mut Ui, st: &mut AppState, id: ProviderId, r: Rect, view: Rect) -> O
     let idx = ProviderId::ALL.iter().position(|p| *p == id).unwrap_or(0) as u64;
     let on = shown(st, id);
     let cy = r.center().y;
-    mark(ui, id, Rect::new(r.x, cy - 9.0, 18.0, 18.0), if on { palette::TEXT } else { palette::TEXT_DIM });
+    mark(
+        ui,
+        id,
+        Rect::new(r.x, cy - 9.0, 18.0, 18.0),
+        if on { palette::TEXT } else { palette::TEXT_DIM },
+    );
     let name_r = Rect::new(r.x + NAME_X, r.y, NAME_W - 8.0, r.h);
-    ui.c.text(id.name(), name_r, &TextStyle::body().color(if on { palette::TEXT } else { palette::TEXT_DIM }));
+    ui.c.text(
+        id.name(),
+        name_r,
+        &TextStyle::body().color(if on { palette::TEXT } else { palette::TEXT_DIM }),
+    );
 
     // The switch, then the buttons right to left.
-    let sw = Rect::new(r.right() - SWITCH_W, cy - SWITCH_H / 2.0, SWITCH_W, SWITCH_H);
+    let sw = Rect::new(
+        r.right() - SWITCH_W,
+        cy - SWITCH_H / 2.0,
+        SWITCH_W,
+        SWITCH_H,
+    );
     let hit = sw.inset(-8.0, -5.0);
-    let resp = if inside(view, hit) { ui.button(wid_n("usage.switch", idx), hit) } else { Default::default() };
+    let resp = if inside(view, hit) {
+        ui.button(wid_n("usage.switch", idx), hit)
+    } else {
+        Default::default()
+    };
     super::settings::draw_switch(ui.c, sw, on, st.accent);
     if resp.clicked {
-        st.cmd(Command::Usage(if on { UsageCmd::Hide(id) } else { UsageCmd::Show(id) }));
+        st.cmd(Command::Usage(if on {
+            UsageCmd::Hide(id)
+        } else {
+            UsageCmd::Show(id)
+        }));
     }
     let mut right = sw.x - 12.0;
     let mut out = None;
@@ -960,7 +1431,15 @@ fn row(ui: &mut Ui, st: &mut AppState, id: ProviderId, r: Rect, view: Rect) -> O
         if pill.x < name_r.right() {
             break;
         }
-        if pill_in(ui, view, wid_n("usage.row-act", (idx << 4) | j as u64), pill, &label, icon, style) {
+        if pill_in(
+            ui,
+            view,
+            wid_n("usage.row-act", (idx << 4) | j as u64),
+            pill,
+            &label,
+            icon,
+            style,
+        ) {
             out = Some(does);
         }
         right = pill.x - PILL_GAP;
@@ -970,13 +1449,23 @@ fn row(ui: &mut Ui, st: &mut AppState, id: ProviderId, r: Rect, view: Rect) -> O
     let sx = r.x + NAME_X + NAME_W;
     let status_r = Rect::new(sx, r.y, (right - 4.0 - sx).max(0.0), r.h);
     match &st.usage.inference {
-        InferenceLink::Code { code, expires_at, .. } if id == ProviderId::Oyenza => {
+        InferenceLink::Code {
+            code, expires_at, ..
+        } if id == ProviderId::Oyenza => {
             let code_st = TextStyle::headline().weight(Weight::Semibold).tabular();
-            let cw = ui.c.measure(code, &code_st, status_r.w).0.ceil().min(status_r.w);
+            let cw =
+                ui.c.measure(code, &code_st, status_r.w)
+                    .0
+                    .ceil()
+                    .min(status_r.w);
             ui.c.text(code, Rect::new(status_r.x, r.y, cw + 1.0, r.h), &code_st);
             let until = format!("until {}", clock_at(st, *expires_at));
             let ux = status_r.x + cw + 8.0;
-            ui.c.text(&until, Rect::new(ux, r.y, (status_r.right() - ux).max(0.0), r.h), &TextStyle::footnote().color(palette::TEXT_DIM));
+            ui.c.text(
+                &until,
+                Rect::new(ux, r.y, (status_r.right() - ux).max(0.0), r.h),
+                &TextStyle::footnote().color(palette::TEXT_DIM),
+            );
         }
         _ => {
             let (text, color) = status(st, id);
@@ -990,18 +1479,51 @@ fn row(ui: &mut Ui, st: &mut AppState, id: ProviderId, r: Rect, view: Rect) -> O
 /// while its field is open; none for a service found without one), or
 /// Oyenza Inference's connection.
 fn row_buttons(st: &AppState, id: ProviderId) -> Vec<(String, Option<Icon>, PillStyle, Does)> {
-    let b = |label: &str, icon: Option<Icon>, style: PillStyle, does: Does| (label.to_string(), icon, style, does);
+    let b = |label: &str, icon: Option<Icon>, style: PillStyle, does: Does| {
+        (label.to_string(), icon, style, does)
+    };
     if id == ProviderId::Oyenza {
         return match &st.usage.inference {
-            InferenceLink::Starting => vec![b("Cancel", None, PillStyle::Utility, Does::CancelConnect)],
-            InferenceLink::Code { url, .. } => vec![b("Open", Some(Icon::Open), PillStyle::Primary(OYENZA), Does::Url(url.clone())), b("Cancel", None, PillStyle::Utility, Does::CancelConnect)],
-            InferenceLink::Failed(_) => vec![b(oyenza::CONNECT_AGAIN, None, PillStyle::Primary(OYENZA), Does::Connect)],
-            _ if connected(st) => vec![b(oyenza::DISCONNECT, None, PillStyle::Utility, Does::Disconnect)],
-            _ => vec![b(oyenza::CONNECT, None, PillStyle::Primary(OYENZA), Does::Connect)],
+            InferenceLink::Starting => {
+                vec![b("Cancel", None, PillStyle::Utility, Does::CancelConnect)]
+            }
+            InferenceLink::Code { url, .. } => vec![
+                b(
+                    "Open",
+                    Some(Icon::Open),
+                    PillStyle::Primary(OYENZA),
+                    Does::Url(url.clone()),
+                ),
+                b("Cancel", None, PillStyle::Utility, Does::CancelConnect),
+            ],
+            InferenceLink::Failed(_) => vec![b(
+                oyenza::CONNECT_AGAIN,
+                None,
+                PillStyle::Primary(OYENZA),
+                Does::Connect,
+            )],
+            _ if connected(st) => vec![b(
+                oyenza::DISCONNECT,
+                None,
+                PillStyle::Utility,
+                Does::Disconnect,
+            )],
+            _ => vec![b(
+                oyenza::CONNECT,
+                None,
+                PillStyle::Primary(OYENZA),
+                Does::Connect,
+            )],
         };
     }
-    let Some(ask) = usage::provider(id).takes_key() else { return Vec::new() };
-    let found = st.usage.readings.get(&id).is_some_and(|r| numbers(id, r).is_some());
+    let Some(ask) = usage::provider(id).takes_key() else {
+        return Vec::new();
+    };
+    let found = st
+        .usage
+        .readings
+        .get(&id)
+        .is_some_and(|r| numbers(id, r).is_some());
     if st.ui.usage.editing == Some(id) {
         vec![b("Cancel", None, PillStyle::Utility, Does::Key)]
     } else if st.usage.keys.contains(ask.secret) {
@@ -1009,7 +1531,12 @@ fn row_buttons(st: &AppState, id: ProviderId) -> Vec<(String, Option<Icon>, Pill
     } else if found {
         Vec::new()
     } else {
-        vec![b("Add key", Some(Icon::Plus), PillStyle::Utility, Does::Key)]
+        vec![b(
+            "Add key",
+            Some(Icon::Plus),
+            PillStyle::Utility,
+            Does::Key,
+        )]
     }
 }
 
@@ -1022,19 +1549,38 @@ fn status(st: &AppState, id: ProviderId) -> (String, Color) {
             InferenceLink::Code { code, .. } => (code.clone(), palette::TEXT),
             InferenceLink::Failed(why) => (oyenza::connect_failure_text(why).0.into(), warn),
             InferenceLink::On { account } => (oyenza::connected_text(account), dim),
-            InferenceLink::Off => match st.usage.readings.get(&id).and_then(|r| r.trouble.clone()) {
-                Some(t @ (Trouble::Refused | Trouble::Disabled)) => (words(id, &t).short, warn),
-                _ if connected(st) => ("Connected".into(), dim),
-                _ => ("Not connected".into(), dim),
-            },
+            InferenceLink::Off => {
+                match st.usage.readings.get(&id).and_then(|r| r.trouble.clone()) {
+                    Some(t @ (Trouble::Refused | Trouble::Disabled)) => (words(id, &t).short, warn),
+                    _ if connected(st) => ("Connected".into(), dim),
+                    _ => ("Not connected".into(), dim),
+                }
+            }
         };
     }
-    let kept = usage::provider(id).takes_key().is_some_and(|k| st.usage.keys.contains(k.secret));
+    let kept = usage::provider(id)
+        .takes_key()
+        .is_some_and(|k| st.usage.keys.contains(k.secret));
     match st.usage.readings.get(&id) {
-        Some(r) => match (numbers(id, r), r.trouble.as_ref().filter(|t| **t != Trouble::NeedsOnline)) {
+        Some(r) => match (
+            numbers(id, r),
+            r.trouble.as_ref().filter(|t| **t != Trouble::NeedsOnline),
+        ) {
             (Some(s), None) => {
-                let found = [s.plan.as_deref(), s.account.as_deref()].into_iter().flatten().filter(|t| !t.trim().is_empty()).collect::<Vec<_>>().join(" · ");
-                (if found.is_empty() { "Found".into() } else { found }, dim)
+                let found = [s.plan.as_deref(), s.account.as_deref()]
+                    .into_iter()
+                    .flatten()
+                    .filter(|t| !t.trim().is_empty())
+                    .collect::<Vec<_>>()
+                    .join(" · ");
+                (
+                    if found.is_empty() {
+                        "Found".into()
+                    } else {
+                        found
+                    },
+                    dim,
+                )
             }
             (_, Some(Trouble::NeedsKey)) if !kept => ("No key yet".into(), dim),
             (_, Some(Trouble::NotFound)) => ("Not on this computer".into(), dim),
@@ -1043,7 +1589,15 @@ fn status(st: &AppState, id: ProviderId) -> (String, Color) {
         },
         None if kept => ("Key added".into(), dim),
         None if usage::provider(id).takes_key().is_some() => ("No key yet".into(), dim),
-        None => (if st.usage.refreshing { CHECKING } else { "Not checked yet" }.into(), dim),
+        None => (
+            if st.usage.refreshing {
+                CHECKING
+            } else {
+                "Not checked yet"
+            }
+            .into(),
+            dim,
+        ),
     }
 }
 
@@ -1053,8 +1607,17 @@ fn key_editor(ui: &mut Ui, st: &mut AppState, id: ProviderId, ask: KeyAsk, r: Re
     let x = r.x + NAME_X;
     let kept = st.usage.keys.contains(ask.secret);
     let save_w = ui.pill_width("Save", false, true);
-    let remove_w = if kept { ui.pill_width("Remove", false, true) + PILL_GAP } else { 0.0 };
-    let field = Rect::new(x, r.y + 2.0, (r.right() - x - save_w - PILL_GAP - remove_w).max(60.0), FIELD_H);
+    let remove_w = if kept {
+        ui.pill_width("Remove", false, true) + PILL_GAP
+    } else {
+        0.0
+    };
+    let field = Rect::new(
+        x,
+        r.y + 2.0,
+        (r.right() - x - save_w - PILL_GAP - remove_w).max(60.0),
+        FIELD_H,
+    );
     let fid = wid("usage.key-field");
     let accent = st.accent;
     let s = &mut st.ui.usage;
@@ -1068,11 +1631,24 @@ fn key_editor(ui: &mut Ui, st: &mut AppState, id: ProviderId, ask: KeyAsk, r: Re
     let empty = s.key.trim().is_empty();
     let py = field.center().y - PILL_SMALL / 2.0;
     let save = Rect::new(field.right() + PILL_GAP, py, save_w, PILL_SMALL);
-    let style = if empty { PillStyle::Utility } else { PillStyle::Primary(accent) };
+    let style = if empty {
+        PillStyle::Utility
+    } else {
+        PillStyle::Primary(accent)
+    };
     let mut saved = pill_in(ui, view, wid("usage.key-save"), save, "Save", None, style) && !empty;
     saved |= submitted && !empty;
     let remove = Rect::new(save.right() + PILL_GAP, py, remove_w - PILL_GAP, PILL_SMALL);
-    let removed = kept && pill_in(ui, view, wid("usage.key-remove"), remove, "Remove", None, PillStyle::Utility);
+    let removed = kept
+        && pill_in(
+            ui,
+            view,
+            wid("usage.key-remove"),
+            remove,
+            "Remove",
+            None,
+            PillStyle::Utility,
+        );
 
     // Where to make one: the service's own page.
     let make = format!("Make one at {}", host(ask.url));
@@ -1083,7 +1659,10 @@ fn key_editor(ui: &mut Ui, st: &mut AppState, id: ProviderId, ask: KeyAsk, r: Re
 
     if saved {
         let key: String = std::mem::take(&mut st.ui.usage.key).trim().to_string();
-        st.cmd(Command::Usage(UsageCmd::SetKey { secret: ask.secret, key }));
+        st.cmd(Command::Usage(UsageCmd::SetKey {
+            secret: ask.secret,
+            key,
+        }));
         if !shown(st, id) {
             st.cmd(Command::Usage(UsageCmd::Show(id)));
         }
@@ -1101,13 +1680,25 @@ fn key_editor(ui: &mut Ui, st: &mut AppState, id: ProviderId, ask: KeyAsk, r: Re
 /// A one-line field that shows what's typed as dots, for a key: it takes
 /// no spaces or control characters, and its caret stays at the end (a key
 /// is pasted or typed, never edited in the middle). Returns (Enter, Esc).
-fn key_field(ui: &mut Ui, id: WidgetId, r: Rect, buf: &mut String, hint: &str, accent: Color, focus_now: bool) -> (bool, bool) {
+fn key_field(
+    ui: &mut Ui,
+    id: WidgetId,
+    r: Rect,
+    buf: &mut String,
+    hint: &str,
+    accent: Color,
+    focus_now: bool,
+) -> (bool, bool) {
     let resp = ui.interact(id, r, CursorKind::Text);
     let keys = ui.key_focus(id, resp.clicked || focus_now);
     let (mut submitted, mut cancelled) = (false, false);
     for k in keys {
         match k {
-            KeyInput::Char(c) if !c.is_control() && !c.is_whitespace() && buf.chars().count() < KEY_MAX => buf.push(c),
+            KeyInput::Char(c)
+                if !c.is_control() && !c.is_whitespace() && buf.chars().count() < KEY_MAX =>
+            {
+                buf.push(c)
+            }
             KeyInput::Backspace | KeyInput::Delete => {
                 buf.pop();
             }
@@ -1136,14 +1727,22 @@ fn key_field(ui: &mut Ui, id: WidgetId, r: Rect, buf: &mut String, hint: &str, a
     } else {
         // As many dots as there are characters, up to what the field holds.
         let dot = ui.c.measure("•", &st, 100.0).0.max(1.0);
-        let n = buf.chars().count().min((inner.w / dot).floor().max(1.0) as usize);
+        let n = buf
+            .chars()
+            .count()
+            .min((inner.w / dot).floor().max(1.0) as usize);
         let dots = "•".repeat(n);
         ui.c.text(&dots, inner, &st);
         caret_x = (inner.x + ui.c.measure(&dots, &st, 10_000.0).0 + 1.0).min(inner.right());
     }
     if focused {
         let cy = r.center().y;
-        ui.c.line(Point::new(caret_x, cy - 8.0), Point::new(caret_x, cy + 8.0), Color::white(0.9), 1.5);
+        ui.c.line(
+            Point::new(caret_x, cy - 8.0),
+            Point::new(caret_x, cy + 8.0),
+            Color::white(0.9),
+            1.5,
+        );
     }
     (submitted, cancelled)
 }
@@ -1175,10 +1774,19 @@ fn act(ui: &mut Ui, st: &mut AppState, id: ProviderId, does: Does) {
         Does::Connect => {
             // Its card shows the code: bring it into view, shown even if it was hidden.
             st.cmd(Command::Usage(UsageCmd::Connect));
-            if st.settings.usage.hidden.iter().any(|k| k == ProviderId::Oyenza.key()) {
+            if st
+                .settings
+                .usage
+                .hidden
+                .iter()
+                .any(|k| k == ProviderId::Oyenza.key())
+            {
                 st.cmd(Command::Usage(UsageCmd::Show(ProviderId::Oyenza)));
             }
-            if matches!(st.usage.inference, InferenceLink::Off | InferenceLink::Failed(_)) {
+            if matches!(
+                st.usage.inference,
+                InferenceLink::Off | InferenceLink::Failed(_)
+            ) {
                 st.usage.inference = InferenceLink::Starting;
             }
             if !st.ui.usage.services {
@@ -1199,7 +1807,15 @@ fn act(ui: &mut Ui, st: &mut AppState, id: ProviderId, does: Does) {
 /// A pill that takes clicks only while it's wholly in `view` (the scrolled
 /// list); cut by an edge, it keeps its look but can't be clicked, so it
 /// never takes a click meant for something above or below the list.
-fn pill_in(ui: &mut Ui, view: Rect, id: WidgetId, r: Rect, label: &str, icon: Option<Icon>, style: PillStyle) -> bool {
+fn pill_in(
+    ui: &mut Ui,
+    view: Rect,
+    id: WidgetId,
+    r: Rect,
+    label: &str,
+    icon: Option<Icon>,
+    style: PillStyle,
+) -> bool {
     if inside(view, r) {
         return ui.pill(id, r, label, icon, style).clicked;
     }
@@ -1213,13 +1829,34 @@ fn pill_in(ui: &mut Ui, view: Rect, id: WidgetId, r: Rect, label: &str, icon: Op
 /// A short link at the left or right end of `line`, in `color` (brighter
 /// under the pointer), taking clicks only while it's in `view`. Returns
 /// whether it was clicked, and where its text starts.
-fn link(ui: &mut Ui, id: WidgetId, line: Rect, view: Rect, label: &str, color: Color, at_right: bool) -> (bool, f32) {
+fn link(
+    ui: &mut Ui,
+    id: WidgetId,
+    line: Rect,
+    view: Rect,
+    label: &str,
+    color: Color,
+    at_right: bool,
+) -> (bool, f32) {
     let st = TextStyle::footnote().weight(Weight::Semibold);
     let w = ui.c.measure(label, &st, line.w).0.ceil().min(line.w);
-    let r = Rect::new(if at_right { line.right() - w } else { line.x }, line.y, w, line.h);
+    let r = Rect::new(
+        if at_right { line.right() - w } else { line.x },
+        line.y,
+        w,
+        line.h,
+    );
     let hit = r.inset(-5.0, -4.0);
-    let resp = if inside(view, hit) { ui.button(id, hit) } else { Default::default() };
-    ui.c.text(label, Rect::new(r.x, r.y, r.w + 1.0, r.h), &st.color(if resp.hovered { palette::TEXT } else { color }));
+    let resp = if inside(view, hit) {
+        ui.button(id, hit)
+    } else {
+        Default::default()
+    };
+    ui.c.text(
+        label,
+        Rect::new(r.x, r.y, r.w + 1.0, r.h),
+        &st.color(if resp.hovered { palette::TEXT } else { color }),
+    );
     (resp.clicked, r.x)
 }
 
@@ -1232,7 +1869,15 @@ fn inside(view: Rect, r: Rect) -> bool {
 /// to show `target` (top, height) when asked; returns the scroll to draw at.
 /// The wheel is only taken when there's something to scroll: otherwise the
 /// app uses it to switch pages.
-fn scroll_to(ui: &mut Ui, s: &mut UsageUi, view: Rect, content_h: f32, target: Option<(f32, f32)>, dt: f32, moving: &mut bool) -> f32 {
+fn scroll_to(
+    ui: &mut Ui,
+    s: &mut UsageUi,
+    view: Rect,
+    content_h: f32,
+    target: Option<(f32, f32)>,
+    dt: f32,
+    moving: &mut bool,
+) -> f32 {
     let max = (content_h - view.h).max(0.0);
     if max > 0.0 {
         let notches = ui.wheel_in(view);
@@ -1246,7 +1891,11 @@ fn scroll_to(ui: &mut Ui, s: &mut UsageUi, view: Rect, content_h: f32, target: O
         }
     }
     s.scroll = s.scroll.clamp(0.0, max);
-    s.shown_scroll = if s.still { s.scroll } else { glide(s.shown_scroll.clamp(0.0, max), s.scroll, dt, 0.25, moving) };
+    s.shown_scroll = if s.still {
+        s.scroll
+    } else {
+        glide(s.shown_scroll.clamp(0.0, max), s.scroll, dt, 0.25, moving)
+    };
     s.shown_scroll
 }
 
@@ -1282,8 +1931,15 @@ fn fades(ui: &mut Ui, view: Rect, scroll: f32, max: f32) {
         for k in 0..STEPS {
             // k = 0 is the strip at the edge.
             let a = 0.92 * (1.0 - (k as f32 + 0.5) / STEPS as f32).powf(1.4);
-            let y = if top { view.y + k as f32 * step } else { view.bottom() - (k as f32 + 1.0) * step };
-            ui.c.fill_rect(Rect::new(view.x, y, view.w, step), palette::ISLAND.with_alpha(a));
+            let y = if top {
+                view.y + k as f32 * step
+            } else {
+                view.bottom() - (k as f32 + 1.0) * step
+            };
+            ui.c.fill_rect(
+                Rect::new(view.x, y, view.w, step),
+                palette::ISLAND.with_alpha(a),
+            );
         }
     }
 }
@@ -1326,8 +1982,15 @@ fn money_words(m: &Money) -> (String, String) {
         return (m.fmt(), word.into());
     }
     let v = m.micros as f64 / 1e6;
-    let n = if v.abs() >= 100.0 { group(v.abs().round() as u64) } else { format!("{:.2}", v.abs()) };
-    (format!("{}{n}", if v < 0.0 { "-" } else { "" }), format!("{} {word}", m.currency.trim().to_lowercase()))
+    let n = if v.abs() >= 100.0 {
+        group(v.abs().round() as u64)
+    } else {
+        format!("{:.2}", v.abs())
+    };
+    (
+        format!("{}{n}", if v < 0.0 { "-" } else { "" }),
+        format!("{} {word}", m.currency.trim().to_lowercase()),
+    )
 }
 
 /// Local time minus UTC, in seconds (to the quarter hour, as the app's
@@ -1340,12 +2003,22 @@ fn offset_s(st: &AppState) -> i64 {
 fn local_of(t: i64) -> LocalDateTime {
     let (year, month, day) = civil_from_days(t.div_euclid(86_400));
     let s = t.rem_euclid(86_400);
-    LocalDateTime { year, month, day, hour: (s / 3600) as u8, minute: (s / 60 % 60) as u8, second: (s % 60) as u8 }
+    LocalDateTime {
+        year,
+        month,
+        day,
+        hour: (s / 3600) as u8,
+        minute: (s / 60 % 60) as u8,
+        second: (s % 60) as u8,
+    }
 }
 
 /// "14:20" (or "2:20 PM"), to the nearest minute.
 fn clock_at(st: &AppState, unix: i64) -> String {
-    fmt_clock(&local_of((unix + 30).div_euclid(60) * 60 + offset_s(st)), st.settings.use_24h)
+    fmt_clock(
+        &local_of((unix + 30).div_euclid(60) * 60 + offset_s(st)),
+        st.settings.use_24h,
+    )
 }
 
 /// When a limit resets, on this computer's clock, as the heads-up notices
@@ -1364,7 +2037,14 @@ fn resets_words(st: &AppState, at: i64) -> (String, Option<String>) {
             let wd = WEEKDAY_SHORT[local.weekday() as usize % 7];
             (format!("resets {wd} {clock}"), Some(format!("resets {wd}")))
         }
-        _ => (format!("resets {}", fmt_date_short(&local)), Some(format!("resets {} {}", local.day, MONTH_SHORT[(local.month.clamp(1, 12) - 1) as usize]))),
+        _ => (
+            format!("resets {}", fmt_date_short(&local)),
+            Some(format!(
+                "resets {} {}",
+                local.day,
+                MONTH_SHORT[(local.month.clamp(1, 12) - 1) as usize]
+            )),
+        ),
     }
 }
 
@@ -1440,7 +2120,16 @@ pub enum Picture {
 
 #[cfg_attr(target_os = "macos", allow(dead_code))]
 impl Picture {
-    pub const ALL: [Picture; 8] = [Picture::Plans, Picture::Troubles, Picture::Empty, Picture::Looking, Picture::Connect, Picture::Inference, Picture::Services, Picture::Key];
+    pub const ALL: [Picture; 8] = [
+        Picture::Plans,
+        Picture::Troubles,
+        Picture::Empty,
+        Picture::Looking,
+        Picture::Connect,
+        Picture::Inference,
+        Picture::Services,
+        Picture::Key,
+    ];
 
     /// The picture's file name: "page-ai", "page-ai-troubles", ...
     pub fn name(self) -> &'static str {
@@ -1478,29 +2167,83 @@ pub fn picture(st: &mut AppState, shows: Picture, now: f64) {
         s.windows = windows;
         s
     };
-    let five = |used: f32, at: i64| Window::new(Session, "5-hour", used).resets(Some(at)).length(Some(5 * 3600));
-    let week = |label: &str, used: f32, at: i64| Window::new(Weekly, label, used).resets(Some(at)).length(Some(7 * 86_400));
-    let codex = || snap(Codex, "Plus", vec![five(0.62, t + 2 * H + 20 * 60), week("Weekly", 0.31, t + 2 * DAY + 21 * H)]);
-    let claude = || snap(Claude, "Max 5x", vec![five(0.84, t + H + 10 * 60), week("Weekly", 0.46, t + 4 * DAY + 3 * H), week("Weekly · Opus", 0.22, t + 4 * DAY + 3 * H)]);
+    let five = |used: f32, at: i64| {
+        Window::new(Session, "5-hour", used)
+            .resets(Some(at))
+            .length(Some(5 * 3600))
+    };
+    let week = |label: &str, used: f32, at: i64| {
+        Window::new(Weekly, label, used)
+            .resets(Some(at))
+            .length(Some(7 * 86_400))
+    };
+    let codex = || {
+        snap(
+            Codex,
+            "Plus",
+            vec![
+                five(0.62, t + 2 * H + 20 * 60),
+                week("Weekly", 0.31, t + 2 * DAY + 21 * H),
+            ],
+        )
+    };
+    let claude = || {
+        snap(
+            Claude,
+            "Max 5x",
+            vec![
+                five(0.84, t + H + 10 * 60),
+                week("Weekly", 0.46, t + 4 * DAY + 3 * H),
+                week("Weekly · Opus", 0.22, t + 4 * DAY + 3 * H),
+            ],
+        )
+    };
     let opencode = || {
-        let mut s = snap(OpenCode, "Go", vec![five(0.18, t + 3 * H + 50 * 60), week("Weekly", 0.52, t + DAY + 6 * H), Window::new(Monthly, "Monthly", 0.34).resets(Some(t + 19 * DAY))]);
+        let mut s = snap(
+            OpenCode,
+            "Go",
+            vec![
+                five(0.18, t + 3 * H + 50 * 60),
+                week("Weekly", 0.52, t + DAY + 6 * H),
+                Window::new(Monthly, "Monthly", 0.34).resets(Some(t + 19 * DAY)),
+            ],
+        );
         s.account = None;
         s
     };
     let inference = |st: &AppState| {
-        let usd = [0.10, 0.32, 0.0, 0.18, 0.64, 0.41, 0.22, 0.05, 0.38, 0.71, 0.55, 0.12, 0.90, 0.42];
+        let usd = [
+            0.10, 0.32, 0.0, 0.18, 0.64, 0.41, 0.22, 0.05, 0.38, 0.71, 0.55, 0.12, 0.90, 0.42,
+        ];
         let mut s = snap(Oyenza, "Pay as you go", Vec::new());
         s.balance = Some(Money::usd(18.4));
         let sum = |d: &[f64]| d.iter().sum::<f64>();
         s.spend = vec![
-            Spend { label: "Today".into(), money: Money::usd(usd[13]), cap: None },
-            Spend { label: "7 days".into(), money: Money::usd(sum(&usd[7..])), cap: None },
-            Spend { label: "30 days".into(), money: Money::usd(sum(&usd) + 6.3), cap: None },
+            Spend {
+                label: "Today".into(),
+                money: Money::usd(usd[13]),
+                cap: None,
+            },
+            Spend {
+                label: "7 days".into(),
+                money: Money::usd(sum(&usd[7..])),
+                cap: None,
+            },
+            Spend {
+                label: "30 days".into(),
+                money: Money::usd(sum(&usd) + 6.3),
+                cap: None,
+            },
         ];
         s.days = usd
             .iter()
             .enumerate()
-            .map(|(i, v)| DayUse { day: st.local.add_days(i as i64 - 13).day_key(), money: Some(Money::usd(*v)), requests: Some((v * 90.0) as u64), tokens: None })
+            .map(|(i, v)| DayUse {
+                day: st.local.add_days(i as i64 - 13).day_key(),
+                money: Some(Money::usd(*v)),
+                requests: Some((v * 90.0) as u64),
+                tokens: None,
+            })
             .collect();
         s
     };
@@ -1509,7 +2252,11 @@ pub fn picture(st: &mut AppState, shows: Picture, now: f64) {
     st.settings.usage = poni_core::settings::UsageSettings::default();
     st.ui.usage = UsageUi::default();
     let put = |st: &mut AppState, id: ProviderId, outcome: Result<Snapshot, Trouble>| {
-        let r = st.usage.readings.entry(id).or_insert(Reading { snapshot: None, trouble: None, checked_at: unix - 40 });
+        let r = st.usage.readings.entry(id).or_insert(Reading {
+            snapshot: None,
+            trouble: None,
+            checked_at: unix - 40,
+        });
         match outcome {
             Ok(s) => r.snapshot = Some(s),
             Err(t) => r.trouble = Some(t),
@@ -1518,7 +2265,11 @@ pub fn picture(st: &mut AppState, shows: Picture, now: f64) {
     // Every service answers a refresh: those not on this computer say so.
     if shows != Picture::Looking {
         for id in ProviderId::ALL {
-            let none = if usage::provider(id).takes_key().is_some() || id == Oyenza { Trouble::NeedsKey } else { Trouble::NotFound };
+            let none = if usage::provider(id).takes_key().is_some() || id == Oyenza {
+                Trouble::NeedsKey
+            } else {
+                Trouble::NotFound
+            };
             put(st, id, Err(none));
         }
     }
@@ -1531,18 +2282,57 @@ pub fn picture(st: &mut AppState, shows: Picture, now: f64) {
     match shows {
         Picture::Plans | Picture::Services | Picture::Key => {
             let inf = inference(st);
-            readings(st, vec![(Codex, Ok(codex())), (Claude, Ok(claude())), (OpenCode, Ok(opencode())), (Oyenza, Ok(inf))]);
-            st.usage.inference = InferenceLink::On { account: "a•••@example.com".into() };
+            readings(
+                st,
+                vec![
+                    (Codex, Ok(codex())),
+                    (Claude, Ok(claude())),
+                    (OpenCode, Ok(opencode())),
+                    (Oyenza, Ok(inf)),
+                ],
+            );
+            st.usage.inference = InferenceLink::On {
+                account: "a•••@example.com".into(),
+            };
             st.usage.keys.insert(oyenza::SECRET);
             st.settings.usage.notices = shows == Picture::Plans;
         }
         Picture::Troubles => {
-            let mut old = snap(Codex, "Plus", vec![five(0.38, t + H + 40 * 60), week("Weekly", 0.12, t + 5 * DAY)]);
+            let mut old = snap(
+                Codex,
+                "Plus",
+                vec![
+                    five(0.38, t + H + 40 * 60),
+                    week("Weekly", 0.12, t + 5 * DAY),
+                ],
+            );
             old.as_of = unix - 2 * H - 5 * 60;
             old.source = Source::Local;
-            let out = snap(Claude, "Pro", vec![five(1.0, t + 50 * 60), week("Weekly", 0.71, t + 2 * DAY + 9 * H)]);
-            let copilot = snap(Copilot, "Pro", vec![Window::new(Monthly, "Premium requests", 0.4).resets(Some(t + 12 * DAY)).counted(120, 300)]);
-            readings(st, vec![(Codex, Ok(old)), (Claude, Ok(out)), (Gemini, Err(Trouble::Offline)), (Copilot, Ok(copilot)), (OpenRouter, Err(Trouble::Refused))]);
+            let out = snap(
+                Claude,
+                "Pro",
+                vec![
+                    five(1.0, t + 50 * 60),
+                    week("Weekly", 0.71, t + 2 * DAY + 9 * H),
+                ],
+            );
+            let copilot = snap(
+                Copilot,
+                "Pro",
+                vec![Window::new(Monthly, "Premium requests", 0.4)
+                    .resets(Some(t + 12 * DAY))
+                    .counted(120, 300)],
+            );
+            readings(
+                st,
+                vec![
+                    (Codex, Ok(old)),
+                    (Claude, Ok(out)),
+                    (Gemini, Err(Trouble::Offline)),
+                    (Copilot, Ok(copilot)),
+                    (OpenRouter, Err(Trouble::Refused)),
+                ],
+            );
             if let Some(r) = st.usage.readings.get_mut(&Codex) {
                 r.trouble = Some(Trouble::Expired);
             }
@@ -1560,12 +2350,18 @@ pub fn picture(st: &mut AppState, shows: Picture, now: f64) {
             readings(st, vec![(Codex, Ok(codex()))]);
             // A code just asked for: good for ten minutes from now, on a whole minute.
             let expires_at = (unix + 10 * 60).div_euclid(60) * 60;
-            st.usage.inference = InferenceLink::Code { code: "KPJX-TMNQ".into(), url: format!("{}/app/connect?code=KPJXTMNQ", oyenza::BASE), expires_at };
+            st.usage.inference = InferenceLink::Code {
+                code: "KPJX-TMNQ".into(),
+                url: format!("{}/app/connect?code=KPJXTMNQ", oyenza::BASE),
+                expires_at,
+            };
         }
         Picture::Inference => {
             let inf = inference(st);
             readings(st, vec![(Codex, Ok(codex())), (Oyenza, Ok(inf))]);
-            st.usage.inference = InferenceLink::On { account: "a•••@example.com".into() };
+            st.usage.inference = InferenceLink::On {
+                account: "a•••@example.com".into(),
+            };
             st.usage.keys.insert(oyenza::SECRET);
         }
     }
@@ -1591,25 +2387,61 @@ mod tests {
         let mut st = AppState::new(Settings::default(), Store::default());
         // Tue 27 Oct 2026, 12:00 in Jakarta (UTC+7).
         st.unix = 1_793_077_200;
-        st.local = LocalDateTime { year: 2026, month: 10, day: 27, hour: 12, minute: 0, second: 0 };
+        st.local = LocalDateTime {
+            year: 2026,
+            month: 10,
+            day: 27,
+            hour: 12,
+            minute: 0,
+            second: 0,
+        };
         st
     }
 
-    fn read(st: &mut AppState, id: ProviderId, snapshot: Option<Snapshot>, trouble: Option<Trouble>) {
-        st.usage.readings.insert(id, Reading { snapshot, trouble, checked_at: st.unix });
+    fn read(
+        st: &mut AppState,
+        id: ProviderId,
+        snapshot: Option<Snapshot>,
+        trouble: Option<Trouble>,
+    ) {
+        st.usage.readings.insert(
+            id,
+            Reading {
+                snapshot,
+                trouble,
+                checked_at: st.unix,
+            },
+        );
     }
 
     #[test]
     fn a_service_not_here_has_no_card_unless_the_person_added_it() {
         let mut st = state();
         read(&mut st, ProviderId::Codex, None, Some(Trouble::NotFound));
-        read(&mut st, ProviderId::OpenRouter, None, Some(Trouble::NeedsKey));
+        read(
+            &mut st,
+            ProviderId::OpenRouter,
+            None,
+            Some(Trouble::NeedsKey),
+        );
         assert!(!shown(&st, ProviderId::Codex) && !shown(&st, ProviderId::OpenRouter));
         st.settings.usage.added.push("openrouter".into());
         assert!(shown(&st, ProviderId::OpenRouter));
         // Its card says what's missing, with the button that fixes it.
         let p = parts(&st, ProviderId::OpenRouter);
-        assert!(matches!(&p[..], [Part::Trouble { act: Some(Act { does: Does::Key, .. }), .. }]), "{p:?}");
+        assert!(
+            matches!(
+                &p[..],
+                [Part::Trouble {
+                    act: Some(Act {
+                        does: Does::Key,
+                        ..
+                    }),
+                    ..
+                }]
+            ),
+            "{p:?}"
+        );
         // Hidden wins over everything.
         let snap = Snapshot::new(ProviderId::Claude, st.unix, Source::Online);
         read(&mut st, ProviderId::Claude, Some(snap), None);
@@ -1618,45 +2450,87 @@ mod tests {
         assert!(!shown(&st, ProviderId::Claude));
         // Gone since (uninstalled, key removed): the old numbers go with it.
         let snap = Snapshot::new(ProviderId::Codex, st.unix - 600, Source::Online);
-        read(&mut st, ProviderId::Codex, Some(snap), Some(Trouble::NotFound));
+        read(
+            &mut st,
+            ProviderId::Codex,
+            Some(snap),
+            Some(Trouble::NotFound),
+        );
         assert!(!shown(&st, ProviderId::Codex));
     }
 
     #[test]
     fn not_asked_online_yet_is_never_a_trouble() {
         let mut st = state();
-        read(&mut st, ProviderId::OpenRouter, None, Some(Trouble::NeedsOnline));
+        read(
+            &mut st,
+            ProviderId::OpenRouter,
+            None,
+            Some(Trouble::NeedsOnline),
+        );
         assert!(shown(&st, ProviderId::OpenRouter));
-        assert_eq!(parts(&st, ProviderId::OpenRouter), [Part::Quiet(CHECKING.into())]);
+        assert_eq!(
+            parts(&st, ProviderId::OpenRouter),
+            [Part::Quiet(CHECKING.into())]
+        );
         let mut s = Snapshot::new(ProviderId::OpenRouter, st.unix - 30, Source::Online);
         s.balance = Some(Money::usd(4.2));
-        read(&mut st, ProviderId::OpenRouter, Some(s), Some(Trouble::NeedsOnline));
+        read(
+            &mut st,
+            ProviderId::OpenRouter,
+            Some(s),
+            Some(Trouble::NeedsOnline),
+        );
         let p = parts(&st, ProviderId::OpenRouter);
-        assert_eq!(p, [Part::Balance(Money::usd(4.2))], "no warning, no note for fresh numbers");
+        assert_eq!(
+            p,
+            [Part::Balance(Money::usd(4.2))],
+            "no warning, no note for fresh numbers"
+        );
     }
 
     #[test]
     fn old_or_local_numbers_say_where_they_came_from() {
         let mut st = state();
         let mut s = Snapshot::new(ProviderId::Codex, st.unix - 2 * 3600, Source::Local);
-        s.windows.push(Window::new(usage::WindowKind::Session, "5-hour", 0.4));
-        read(&mut st, ProviderId::Codex, Some(s.clone()), Some(Trouble::Expired));
+        s.windows
+            .push(Window::new(usage::WindowKind::Session, "5-hour", 0.4));
+        read(
+            &mut st,
+            ProviderId::Codex,
+            Some(s.clone()),
+            Some(Trouble::Expired),
+        );
         let p = parts(&st, ProviderId::Codex);
-        assert!(p.contains(&Part::Note("From Codex's log, 2 h ago".into())), "{p:?}");
-        assert!(p.contains(&Part::Warn("Open Codex once to refresh".into(), None)), "{p:?}");
+        assert!(
+            p.contains(&Part::Note("From Codex's log, 2 h ago".into())),
+            "{p:?}"
+        );
+        assert!(
+            p.contains(&Part::Warn("Open Codex once to refresh".into(), None)),
+            "{p:?}"
+        );
         s.source = Source::Online;
         s.as_of = st.unix - 3 * 86_400;
         read(&mut st, ProviderId::Codex, Some(s), Some(Trouble::Offline));
         let p = parts(&st, ProviderId::Codex);
-        assert!(p.contains(&Part::Note("Updated 3 days ago".into())), "{p:?}");
-        assert!(matches!(p.last(), Some(Part::Warn(w, Some(Act { does: Does::Refresh, .. }))) if w == "Offline"), "{p:?}");
+        assert!(
+            p.contains(&Part::Note("Updated 3 days ago".into())),
+            "{p:?}"
+        );
+        assert!(
+            matches!(p.last(), Some(Part::Warn(w, Some(Act { does: Does::Refresh, .. }))) if w == "Offline"),
+            "{p:?}"
+        );
     }
 
     #[test]
     fn a_used_up_plan_points_to_oyenza_inference() {
         let mut st = state();
         let mut s = Snapshot::new(ProviderId::Claude, st.unix, Source::Online);
-        s.windows.push(Window::new(usage::WindowKind::Session, "5-hour", 1.0).resets(Some(st.unix + 600)));
+        s.windows.push(
+            Window::new(usage::WindowKind::Session, "5-hour", 1.0).resets(Some(st.unix + 600)),
+        );
         read(&mut st, ProviderId::Claude, Some(s.clone()), None);
         assert_eq!(parts(&st, ProviderId::Claude).last(), Some(&Part::Nudge));
         // Not once the reset has passed, nor when the person hid Oyenza Inference.
@@ -1673,22 +2547,43 @@ mod tests {
     fn oyenza_inference_follows_its_connection() {
         let mut st = state();
         read(&mut st, ProviderId::Oyenza, None, Some(Trouble::NeedsKey));
-        assert!(!shown(&st, ProviderId::Oyenza), "not connected, not added: in the Services list only");
-        st.usage.inference = InferenceLink::Code { code: "KPJX-TMNQ".into(), url: "https://inference.oyenza.com/app/connect?code=KPJXTMNQ".into(), expires_at: st.unix + 600 };
+        assert!(
+            !shown(&st, ProviderId::Oyenza),
+            "not connected, not added: in the Services list only"
+        );
+        st.usage.inference = InferenceLink::Code {
+            code: "KPJX-TMNQ".into(),
+            url: "https://inference.oyenza.com/app/connect?code=KPJXTMNQ".into(),
+            expires_at: st.unix + 600,
+        };
         assert!(shown(&st, ProviderId::Oyenza));
-        assert!(matches!(&parts(&st, ProviderId::Oyenza)[..], [Part::Code { .. }]));
+        assert!(matches!(
+            &parts(&st, ProviderId::Oyenza)[..],
+            [Part::Code { .. }]
+        ));
         st.usage.inference = InferenceLink::Failed(oyenza::EXPIRED.into());
         let p = parts(&st, ProviderId::Oyenza);
-        assert!(matches!(&p[..], [Part::Trouble { title, act: Some(Act { does: Does::Connect, .. }), .. }] if title == "Code expired"), "{p:?}");
+        assert!(
+            matches!(&p[..], [Part::Trouble { title, act: Some(Act { does: Does::Connect, .. }), .. }] if title == "Code expired"),
+            "{p:?}"
+        );
         // Disconnected in the dashboard: its old balance goes, Connect again comes.
-        st.usage.inference = InferenceLink::On { account: "a•••@example.com".into() };
+        st.usage.inference = InferenceLink::On {
+            account: "a•••@example.com".into(),
+        };
         let mut s = Snapshot::new(ProviderId::Oyenza, st.unix, Source::Online);
         s.balance = Some(Money::usd(4.2));
         read(&mut st, ProviderId::Oyenza, Some(s), Some(Trouble::Refused));
         let p = parts(&st, ProviderId::Oyenza);
-        assert!(matches!(&p[..], [Part::Trouble { title, act: Some(Act { does: Does::Connect, .. }), .. }] if title == "No longer connected"), "{p:?}");
+        assert!(
+            matches!(&p[..], [Part::Trouble { title, act: Some(Act { does: Does::Connect, .. }), .. }] if title == "No longer connected"),
+            "{p:?}"
+        );
         read(&mut st, ProviderId::Oyenza, None, Some(Trouble::Disabled));
-        assert!(matches!(&parts(&st, ProviderId::Oyenza)[..], [Part::Trouble { act: None, .. }]));
+        assert!(matches!(
+            &parts(&st, ProviderId::Oyenza)[..],
+            [Part::Trouble { act: None, .. }]
+        ));
     }
 
     #[test]
@@ -1700,8 +2595,12 @@ mod tests {
             Trouble::NeedsKey,
             Trouble::Refused,
             Trouble::Disabled,
-            Trouble::Busy { retry_after_s: Some(300) },
-            Trouble::Busy { retry_after_s: None },
+            Trouble::Busy {
+                retry_after_s: Some(300),
+            },
+            Trouble::Busy {
+                retry_after_s: None,
+            },
             Trouble::Offline,
             Trouble::Unreadable("HTTP 404".into()),
             Trouble::Denied,
@@ -1710,32 +2609,94 @@ mod tests {
             for t in &all {
                 let w = words(id, t);
                 for text in [&w.title, &w.line, &w.short] {
-                    assert!(!text.is_empty() && !text.contains('—') && !text.contains('–'), "{id:?} {t:?}: {text:?}");
+                    assert!(
+                        !text.is_empty() && !text.contains('—') && !text.contains('–'),
+                        "{id:?} {t:?}: {text:?}"
+                    );
                     // The service's own wording never leaks through (it can be anything).
                     assert!(!text.contains("HTTP"), "{id:?} {t:?}: {text:?}");
                 }
             }
         }
-        assert_eq!(words(ProviderId::Codex, &Trouble::Busy { retry_after_s: Some(300) }).line, "Trying again in 5 min");
-        assert_eq!(words(ProviderId::Copilot, &Trouble::Disabled).act.map(|a| a.label), Some("Open github.com".into()));
+        assert_eq!(
+            words(
+                ProviderId::Codex,
+                &Trouble::Busy {
+                    retry_after_s: Some(300)
+                }
+            )
+            .line,
+            "Trying again in 5 min"
+        );
+        assert_eq!(
+            words(ProviderId::Copilot, &Trouble::Disabled)
+                .act
+                .map(|a| a.label),
+            Some("Open github.com".into())
+        );
     }
 
     #[test]
     fn times_and_numbers_read_plainly() {
         let st = state();
         // 12:00 in Jakarta now: 14:20 today, Thursday 09:00, a week on.
-        assert_eq!(resets_words(&st, st.unix + 2 * 3600 + 20 * 60), ("resets 14:20".into(), None));
-        assert_eq!(resets_words(&st, st.unix + 45 * 3600), ("resets Thu 09:00".into(), Some("resets Thu".into())));
-        assert_eq!(resets_words(&st, st.unix + 8 * 86_400).1, Some("resets 4 Nov".into()));
+        assert_eq!(
+            resets_words(&st, st.unix + 2 * 3600 + 20 * 60),
+            ("resets 14:20".into(), None)
+        );
+        assert_eq!(
+            resets_words(&st, st.unix + 45 * 3600),
+            ("resets Thu 09:00".into(), Some("resets Thu".into()))
+        );
+        assert_eq!(
+            resets_words(&st, st.unix + 8 * 86_400).1,
+            Some("resets 4 Nov".into())
+        );
         assert_eq!(in_words(2 * 3600 + 10 * 60), "in 2 h 10 min");
         assert_eq!(in_words(40 * 60 - 5), "in 40 min");
         assert_eq!(in_words(3 * 86_400 + 3600), "in 3 days");
-        assert_eq!((ago(30), ago(5 * 60), ago(2 * 3600 + 59), ago(30 * 3600), ago(4 * 86_400)), ("just now".into(), "5 min ago".into(), "2 h ago".into(), "yesterday".into(), "4 days ago".into()));
-        assert_eq!((pct(0.62), pct(0.8 - 1e-7), pct(1.4)), ("62%".into(), "80%".into(), "140%".into()));
-        assert_eq!((group(1_250), tokens(1_234_567), tokens(820_400)), ("1,250".into(), "1.2M".into(), "820K".into()));
-        assert_eq!(money_words(&Money::usd(4.2)), ("$4.20".into(), "left".into()));
-        assert_eq!(money_words(&Money { micros: 1_250_000_000, currency: "credits".into() }), ("1,250".into(), "credits left".into()));
-        assert_eq!((host("https://www.github.com/settings/copilot"), host("https://openrouter.ai/settings/keys?x=1")), ("github.com", "openrouter.ai"));
+        assert_eq!(
+            (
+                ago(30),
+                ago(5 * 60),
+                ago(2 * 3600 + 59),
+                ago(30 * 3600),
+                ago(4 * 86_400)
+            ),
+            (
+                "just now".into(),
+                "5 min ago".into(),
+                "2 h ago".into(),
+                "yesterday".into(),
+                "4 days ago".into()
+            )
+        );
+        assert_eq!(
+            (pct(0.62), pct(0.8 - 1e-7), pct(1.4)),
+            ("62%".into(), "80%".into(), "140%".into())
+        );
+        assert_eq!(
+            (group(1_250), tokens(1_234_567), tokens(820_400)),
+            ("1,250".into(), "1.2M".into(), "820K".into())
+        );
+        assert_eq!(
+            money_words(&Money::usd(4.2)),
+            ("$4.20".into(), "left".into())
+        );
+        assert_eq!(
+            money_words(&Money {
+                micros: 1_250_000_000,
+                currency: "credits".into()
+            }),
+            ("1,250".into(), "credits left".into())
+        );
+        assert_eq!(
+            (
+                host("https://www.github.com/settings/copilot"),
+                host("https://openrouter.ai/settings/keys?x=1")
+            ),
+            ("github.com", "openrouter.ai")
+        );
         let mut st12 = state();
         st12.settings.use_24h = false;
         assert_eq!(clock_at(&st12, st12.unix + 2 * 3600 + 20 * 60), "2:20 PM");
@@ -1745,8 +2706,16 @@ mod tests {
     fn a_key_is_offered_only_where_it_helps() {
         let mut st = state();
         let id = ProviderId::OpenRouter;
-        let secret = usage::provider(id).takes_key().expect("OpenRouter takes a key").secret;
-        let labels = |st: &AppState| row_buttons(st, id).into_iter().map(|b| b.0).collect::<Vec<_>>();
+        let secret = usage::provider(id)
+            .takes_key()
+            .expect("OpenRouter takes a key")
+            .secret;
+        let labels = |st: &AppState| {
+            row_buttons(st, id)
+                .into_iter()
+                .map(|b| b.0)
+                .collect::<Vec<_>>()
+        };
         read(&mut st, id, None, Some(Trouble::NeedsKey));
         assert_eq!(labels(&st), ["Add key"]);
         // Found without a typed key (its variable): nothing to add.
@@ -1759,9 +2728,23 @@ mod tests {
         st.ui.usage.editing = Some(id);
         assert_eq!(labels(&st), ["Cancel"]);
         // Oyenza Inference: its connection instead.
-        assert_eq!(row_buttons(&st, ProviderId::Oyenza).into_iter().map(|b| b.0).collect::<Vec<_>>(), [oyenza::CONNECT]);
-        st.usage.inference = InferenceLink::On { account: "a•••@example.com".into() };
-        assert_eq!(row_buttons(&st, ProviderId::Oyenza).into_iter().map(|b| b.0).collect::<Vec<_>>(), [oyenza::DISCONNECT]);
+        assert_eq!(
+            row_buttons(&st, ProviderId::Oyenza)
+                .into_iter()
+                .map(|b| b.0)
+                .collect::<Vec<_>>(),
+            [oyenza::CONNECT]
+        );
+        st.usage.inference = InferenceLink::On {
+            account: "a•••@example.com".into(),
+        };
+        assert_eq!(
+            row_buttons(&st, ProviderId::Oyenza)
+                .into_iter()
+                .map(|b| b.0)
+                .collect::<Vec<_>>(),
+            [oyenza::DISCONNECT]
+        );
     }
 
     #[test]
@@ -1769,7 +2752,10 @@ mod tests {
         let mut st = state();
         st.ui.usage.key = "sk-or-v1-secret".into();
         let shown = format!("{:?}", st.ui);
-        assert!(!shown.contains("secret") && shown.contains("<15 chars>"), "{shown}");
+        assert!(
+            !shown.contains("secret") && shown.contains("<15 chars>"),
+            "{shown}"
+        );
     }
 
     #[test]
@@ -1777,10 +2763,15 @@ mod tests {
         for p in Picture::ALL {
             let mut st = state();
             picture(&mut st, p, 1.0);
-            let ids: Vec<ProviderId> = ProviderId::ALL.into_iter().filter(|id| shown(&st, *id)).collect();
+            let ids: Vec<ProviderId> = ProviderId::ALL
+                .into_iter()
+                .filter(|id| shown(&st, *id))
+                .collect();
             use ProviderId::*;
             let want: &[ProviderId] = match p {
-                Picture::Plans | Picture::Services | Picture::Key => &[Codex, Claude, OpenCode, Oyenza],
+                Picture::Plans | Picture::Services | Picture::Key => {
+                    &[Codex, Claude, OpenCode, Oyenza]
+                }
                 Picture::Troubles => &[Codex, Claude, Gemini, Copilot, OpenRouter],
                 Picture::Empty | Picture::Looking => &[],
                 Picture::Connect | Picture::Inference => &[Codex, Oyenza],

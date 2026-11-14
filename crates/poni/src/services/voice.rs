@@ -34,16 +34,23 @@ impl VoicePlayer {
         self.stop();
         // A file URI needs the whole path (the self-test's home is relative).
         let path = std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf());
-        let uri = Uri::CreateUri(&HSTRING::from(super::adzan::file_uri(&path))).map_err(|e| format!("bad path ({e})"))?;
+        let uri = Uri::CreateUri(&HSTRING::from(super::adzan::file_uri(&path)))
+            .map_err(|e| format!("bad path ({e})"))?;
         let player = MediaPlayer::new().map_err(|e| format!("no media player ({e})"))?;
         // No media session: Oyen isn't a song.
         if let Ok(cm) = player.CommandManager() {
             let _ = cm.SetIsEnabled(false);
         }
-        let source = MediaSource::CreateFromUri(&uri).map_err(|e| format!("can't open the clip ({e})"))?;
-        player.SetSource(&source).map_err(|e| format!("can't open the clip ({e})"))?;
+        let source =
+            MediaSource::CreateFromUri(&uri).map_err(|e| format!("can't open the clip ({e})"))?;
+        player
+            .SetSource(&source)
+            .map_err(|e| format!("can't open the clip ({e})"))?;
         // Each clip has its own flags: a stopped clip's late report can't end the next one.
-        let (ended, failed) = (Arc::new(AtomicBool::new(false)), Arc::new(AtomicBool::new(false)));
+        let (ended, failed) = (
+            Arc::new(AtomicBool::new(false)),
+            Arc::new(AtomicBool::new(false)),
+        );
         let (done, sent) = (ended.clone(), sink.clone());
         let _ = player.MediaEnded(&TypedEventHandler::new(move |_, _| {
             done.store(true, Ordering::SeqCst);
@@ -51,14 +58,19 @@ impl VoicePlayer {
             Ok(())
         }));
         let (done, broke, sent) = (ended.clone(), failed.clone(), sink.clone());
-        let _ = player.MediaFailed(&TypedEventHandler::new(move |_, args: &Option<windows::Media::Playback::MediaPlayerFailedEventArgs>| {
-            let code = args.as_ref().and_then(|a| a.ExtendedErrorCode().ok()).map_or(0, |h| h.0 as u32);
-            crate::pwarn!("ielts: a clip didn't play ({code:#010x})");
-            broke.store(true, Ordering::SeqCst);
-            done.store(true, Ordering::SeqCst);
-            sent.send(AppEvent::VoiceEnded);
-            Ok(())
-        }));
+        let _ = player.MediaFailed(&TypedEventHandler::new(
+            move |_, args: &Option<windows::Media::Playback::MediaPlayerFailedEventArgs>| {
+                let code = args
+                    .as_ref()
+                    .and_then(|a| a.ExtendedErrorCode().ok())
+                    .map_or(0, |h| h.0 as u32);
+                crate::pwarn!("ielts: a clip didn't play ({code:#010x})");
+                broke.store(true, Ordering::SeqCst);
+                done.store(true, Ordering::SeqCst);
+                sent.send(AppEvent::VoiceEnded);
+                Ok(())
+            },
+        ));
         player.Play().map_err(|e| format!("can't play ({e})"))?;
         self.player = Some(player);
         self.ended = ended;

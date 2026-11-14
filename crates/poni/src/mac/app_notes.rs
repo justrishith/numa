@@ -59,7 +59,11 @@ impl App {
     /// Take notes: the microphone and the Mac's sound start recording.
     fn notes_start(&mut self) {
         // Studio Pro only: the page shows its Pro card instead of the button.
-        if self.notes_rec.is_some() || self.st.notes.live() || self.notes_take.is_some() || self.st.studio_pro() == Some(false) {
+        if self.notes_rec.is_some()
+            || self.st.notes.live()
+            || self.notes_take.is_some()
+            || self.st.studio_pro() == Some(false)
+        {
             return;
         }
         // Whatever an earlier meeting left (the app closed on it) goes first.
@@ -68,7 +72,11 @@ impl App {
         let started = self.st.local;
         match services::notes::Recording::start(&paths::notes_audio_dir(), &started, &self.sink) {
             Ok((rec, mic, pc)) => {
-                pinfo!("notes: listening (microphone {}, the Mac's sound {})", if mic { "on" } else { "off" }, if pc { "on" } else { "off" });
+                pinfo!(
+                    "notes: listening (microphone {}, the Mac's sound {})",
+                    if mic { "on" } else { "off" },
+                    if pc { "on" } else { "off" }
+                );
                 self.notes_started = started;
                 self.st.notes.started(now, mic, pc);
                 self.notes_rec = Some(rec);
@@ -83,7 +91,9 @@ impl App {
 
     /// Stop: the meeting is over, its notes get written.
     pub(super) fn notes_stop(&mut self) {
-        let Some(rec) = self.notes_rec.take() else { return };
+        let Some(rec) = self.notes_rec.take() else {
+            return;
+        };
         match rec.stop() {
             Ok(take) if take.secs >= 1.0 && !take.parts.is_empty() => {
                 self.notes_take = Some(take);
@@ -97,16 +107,30 @@ impl App {
             }
             Err(issue) => {
                 self.st.ui.notes_kept = false;
-                self.st.notes.failed(Problem::Capture(if issue == CaptureIssue::MicDenied { issue } else { CaptureIssue::Failed }));
+                self.st
+                    .notes
+                    .failed(Problem::Capture(if issue == CaptureIssue::MicDenied {
+                        issue
+                    } else {
+                        CaptureIssue::Failed
+                    }));
             }
         }
     }
 
     /// Hand the kept meeting over (again, for Try again).
     fn notes_send(&mut self) {
-        let Some(take) = self.notes_take.clone() else { return };
+        let Some(take) = self.notes_take.clone() else {
+            return;
+        };
         self.st.notes.stopped(take.parts.len() as u32, take.secs);
-        let job = services::notes::Job { take, started: self.notes_started, lang: poni_core::notes::Lang::Auto, api: None, out: paths::notes_dir() };
+        let job = services::notes::Job {
+            take,
+            started: self.notes_started,
+            lang: poni_core::notes::Lang::Auto,
+            api: None,
+            out: paths::notes_dir(),
+        };
         services::notes::send(job, &self.sink);
     }
 
@@ -118,8 +142,16 @@ impl App {
         }
         let now = self.st.now;
         let end = match &r {
-            Reply::Saved(s) => Some(("Your notes are ready".to_string(), s.notes.title.clone(), true)),
-            Reply::Failed(p) => Some((p.title().to_string(), "Open Notes to try again".to_string(), false)),
+            Reply::Saved(s) => Some((
+                "Your notes are ready".to_string(),
+                s.notes.title.clone(),
+                true,
+            )),
+            Reply::Failed(p) => Some((
+                p.title().to_string(),
+                "Open Notes to try again".to_string(),
+                false,
+            )),
             _ => None,
         };
         let saved = matches!(r, Reply::Saved(_));
@@ -131,8 +163,19 @@ impl App {
         }
         if let Some((title, subtitle, good)) = end {
             if !(self.expanded && self.st.page == PageKind::Notes) {
-                let color = if good { crate::oyen::ORANGE } else { palette::TEXT_DIM };
-                self.st.notify(Icon::Notes, color, title, subtitle, 8.0, Some(crate::state::NoticeAction::OpenPage(PageKind::Notes)));
+                let color = if good {
+                    crate::oyen::ORANGE
+                } else {
+                    palette::TEXT_DIM
+                };
+                self.st.notify(
+                    Icon::Notes,
+                    color,
+                    title,
+                    subtitle,
+                    8.0,
+                    Some(crate::state::NoticeAction::OpenPage(PageKind::Notes)),
+                );
             }
         }
     }
@@ -148,7 +191,10 @@ impl App {
     /// recording waits on the page for Write it up or Throw away.
     pub(super) fn notes_restore(&mut self) {
         if let Some((take, started)) = services::notes::kept() {
-            pinfo!("notes: a meeting of {:.0} s from before wasn't written up; it's kept", take.secs);
+            pinfo!(
+                "notes: a meeting of {:.0} s from before wasn't written up; it's kept",
+                take.secs
+            );
             self.notes_started = started;
             self.st.notes.secs = take.secs;
             self.notes_take = Some(take);

@@ -17,9 +17,9 @@ pub mod focus;
 pub mod health;
 pub mod ielts;
 pub mod media;
-pub mod numa;
 pub mod notes;
 pub mod notifications;
+pub mod numa;
 pub mod oyenza;
 pub mod prayer;
 pub mod record;
@@ -52,7 +52,12 @@ pub const PAD: f32 = 18.0;
 /// The header row inside the expanded island `body`. Fixed size, so changing
 /// [`HEADER_H`] only moves the content, never the tabs.
 pub fn header_rect(body: Rect) -> Rect {
-    Rect::new(body.x + PAD - 6.0, body.y + 6.0, body.w - 2.0 * PAD + 12.0, HEADER_ROW_H)
+    Rect::new(
+        body.x + PAD - 6.0,
+        body.y + 6.0,
+        body.w - 2.0 * PAD + 12.0,
+        HEADER_ROW_H,
+    )
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -107,7 +112,7 @@ pub enum PageKind {
 impl PageKind {
     /// The tab row's order: the island's own pages, Oyenza, then the
     /// add-ons' pages and the "+".
-    pub const ALL: [PageKind; 19] = [
+    pub const ALL: [PageKind; 20] = [
         PageKind::Media,
         PageKind::Today,
         PageKind::Shelf,
@@ -157,8 +162,15 @@ impl PageKind {
 
     pub fn from_key(s: &str) -> PageKind {
         // Health took the Water page's place in the tab row.
-        let s = if s.trim().eq_ignore_ascii_case("water") { "health" } else { s.trim() };
-        Self::ALL.into_iter().find(|p| p.key().eq_ignore_ascii_case(s)).unwrap_or(PageKind::Media)
+        let s = if s.trim().eq_ignore_ascii_case("water") {
+            "health"
+        } else {
+            s.trim()
+        };
+        Self::ALL
+            .into_iter()
+            .find(|p| p.key().eq_ignore_ascii_case(s))
+            .unwrap_or(PageKind::Media)
     }
 
     pub fn title(self) -> &'static str {
@@ -223,12 +235,18 @@ impl PageKind {
 
     /// Has a tab in the header's row (Settings has the gear instead).
     pub fn tabbed(self) -> bool {
-        self != PageKind::Settings
+        !matches!(self, PageKind::Settings | PageKind::Oyenza)
     }
 
     /// The island's own pages, which Settings can take off the row. AI and
     /// Oyenza stay; the add-ons' pages come and go with their switches.
-    pub const HIDEABLE: [PageKind; 5] = [PageKind::Media, PageKind::Today, PageKind::Shelf, PageKind::Tasks, PageKind::Focus];
+    pub const HIDEABLE: [PageKind; 5] = [
+        PageKind::Media,
+        PageKind::Today,
+        PageKind::Shelf,
+        PageKind::Tasks,
+        PageKind::Focus,
+    ];
 
     pub fn hideable(self) -> bool {
         Self::HIDEABLE.contains(&self)
@@ -277,7 +295,11 @@ pub fn step_tab(p: PageKind, st: &AppState, forward: bool) -> PageKind {
     let tabs = tabs(st);
     let n = tabs.len();
     let i = tabs.iter().position(|t| *t == p).unwrap_or(0);
-    tabs[if forward { (i + 1) % n } else { (i + n - 1) % n }]
+    tabs[if forward {
+        (i + 1) % n
+    } else {
+        (i + n - 1) % n
+    }]
 }
 
 pub fn content_height(p: PageKind, st: &AppState) -> f32 {
@@ -356,7 +378,13 @@ const TABS_END: f32 = 0.6;
 /// During a page switch the old page fades out sliding away while the new
 /// one fades in; the old page is drawn without input (it can't be clicked).
 /// `body` is the island at its final size, so nothing reflows while it opens.
-pub fn draw_expanded(ui: &mut Ui, st: &mut AppState, body: Rect, page: PageKind, transition: Option<PageTransition>) {
+pub fn draw_expanded(
+    ui: &mut Ui,
+    st: &mut AppState,
+    body: Rect,
+    page: PageKind,
+    transition: Option<PageTransition>,
+) {
     if crate::pill::expanded::draw(ui, st, body, page, transition) {
         return;
     }
@@ -373,7 +401,12 @@ pub fn draw_expanded(ui: &mut Ui, st: &mut AppState, body: Rect, page: PageKind,
 /// The page content's rect inside the expanded island `body`: below the
 /// header band, `PAD` in from the sides and the bottom.
 pub(crate) fn content_area(body: Rect) -> Rect {
-    Rect::new(body.x + PAD, body.y + HEADER_H, body.w - 2.0 * PAD, (body.h - HEADER_H - PAD).max(0.0))
+    Rect::new(
+        body.x + PAD,
+        body.y + HEADER_H,
+        body.w - 2.0 * PAD,
+        (body.h - HEADER_H - PAD).max(0.0),
+    )
 }
 
 /// The active page in [`content_area`], clipped to the island below the
@@ -381,12 +414,24 @@ pub(crate) fn content_area(body: Rect) -> Rect {
 /// [`draw_expanded`] filters it) the old page fades out sliding away while
 /// the new one fades in. Every theme's frame draws its pages with this, so
 /// a switch moves the same in all of them.
-pub(crate) fn draw_pages(ui: &mut Ui, st: &mut AppState, body: Rect, header: Rect, page: PageKind, tr: Option<PageTransition>) {
+pub(crate) fn draw_pages(
+    ui: &mut Ui,
+    st: &mut AppState,
+    body: Rect,
+    header: Rect,
+    page: PageKind,
+    tr: Option<PageTransition>,
+) {
     let area = content_area(body);
     // Content may reach a little above `area` (text boxes whose cap height,
     // not their line box, sits on the content top) but never into the tabs.
     let clip_top = header.bottom() + 2.0;
-    ui.c.clip(Rect::new(body.x, clip_top, body.w, (body.bottom() - clip_top).max(0.0)));
+    ui.c.clip(Rect::new(
+        body.x,
+        clip_top,
+        body.w,
+        (body.bottom() - clip_top).max(0.0),
+    ));
     match tr {
         Some(tr) => {
             // Overlapping smoothstep fades: the summed opacity stays at or
@@ -508,11 +553,25 @@ pub(crate) struct Tip {
 }
 
 /// Tab slots (x, width) of `tabs`, with `active` showing its label.
-fn tab_layout(ui: &mut Ui, x0: f32, tabs: &[PageKind], active: PageKind, label_st: &TextStyle, scale: f32) -> Vec<(f32, f32)> {
+fn tab_layout(
+    ui: &mut Ui,
+    x0: f32,
+    tabs: &[PageKind],
+    active: PageKind,
+    label_st: &TextStyle,
+    scale: f32,
+) -> Vec<(f32, f32)> {
     let mut x = x0;
     tabs.iter()
         .map(|&p| {
-            let w = if p == active { snap(TAB_LABEL_X + ui.c.measure(p.title(), label_st, 200.0).0 + TAB_LABEL_END, scale) } else { TAB_W };
+            let w = if p == active {
+                snap(
+                    TAB_LABEL_X + ui.c.measure(p.title(), label_st, 200.0).0 + TAB_LABEL_END,
+                    scale,
+                )
+            } else {
+                TAB_W
+            };
             let slot = (snap(x, scale), w);
             x += w + TAB_GAP;
             slot
@@ -523,7 +582,13 @@ fn tab_layout(ui: &mut Ui, x0: f32, tabs: &[PageKind], active: PageKind, label_s
 /// Tabs on the left; pin, date and clock on the right. During a page switch
 /// the tabs re-flow, the selection pill slides and the labels cross-fade.
 /// Returns the hover label to paint once the page is drawn.
-pub(crate) fn draw_header(ui: &mut Ui, st: &mut AppState, r: Rect, page: PageKind, tr: Option<PageTransition>) -> Option<Tip> {
+pub(crate) fn draw_header(
+    ui: &mut Ui,
+    st: &mut AppState,
+    r: Rect,
+    page: PageKind,
+    tr: Option<PageTransition>,
+) -> Option<Tip> {
     let scale = ui.c.scale().max(0.5);
     let cy = r.center().y;
     let label_st = TextStyle::body().weight(Weight::Semibold);
@@ -531,9 +596,21 @@ pub(crate) fn draw_header(ui: &mut Ui, st: &mut AppState, r: Rect, page: PageKin
     let e = tr.map_or(1.0, |t| ease_out_cubic(t.t / TABS_END));
     let row = self::tabs(st);
     let lay_from = tab_layout(ui, r.x, &row, from, &label_st, scale);
-    let lay_to = if from == page { lay_from.clone() } else { tab_layout(ui, r.x, &row, page, &label_st, scale) };
-    let tabs: Vec<Rect> =
-        (0..row.len()).map(|i| Rect::new(lerp(lay_from[i].0, lay_to[i].0, e), cy - TAB_H / 2.0, lerp(lay_from[i].1, lay_to[i].1, e), TAB_H)).collect();
+    let lay_to = if from == page {
+        lay_from.clone()
+    } else {
+        tab_layout(ui, r.x, &row, page, &label_st, scale)
+    };
+    let tabs: Vec<Rect> = (0..row.len())
+        .map(|i| {
+            Rect::new(
+                lerp(lay_from[i].0, lay_to[i].0, e),
+                cy - TAB_H / 2.0,
+                lerp(lay_from[i].1, lay_to[i].1, e),
+                TAB_H,
+            )
+        })
+        .collect();
     // A page that isn't in the row (Oyenza right after signing out) counts as the first tab.
     let place = |p: PageKind| row.iter().position(|t| *t == p).unwrap_or(0);
     let (fi, pi) = (place(from), place(page));
@@ -544,10 +621,20 @@ pub(crate) fn draw_header(ui: &mut Ui, st: &mut AppState, r: Rect, page: PageKin
 
     // Selection pill, gliding from the old tab to the new one. To or from
     // Settings it stays on its tab and fades while the gear takes it.
-    let (a, b) = (if from.tabbed() { fi } else { pi }, if page.tabbed() { pi } else { fi });
-    let pill = Rect::new(lerp(lay_from[a].0, lay_to[b].0, e), cy - TAB_H / 2.0, lerp(lay_from[a].1, lay_to[b].1, e), TAB_H);
+    let (a, b) = (
+        if from.tabbed() { fi } else { pi },
+        if page.tabbed() { pi } else { fi },
+    );
+    let pill = Rect::new(
+        lerp(lay_from[a].0, lay_to[b].0, e),
+        cy - TAB_H / 2.0,
+        lerp(lay_from[a].1, lay_to[b].1, e),
+        TAB_H,
+    );
     if gear_k < 1.0 {
-        ui.c.with_alpha(1.0 - gear_k, |c| c.fill_rrect(pill, TAB_H / 2.0, Color::white(0.14)));
+        ui.c.with_alpha(1.0 - gear_k, |c| {
+            c.fill_rrect(pill, TAB_H / 2.0, Color::white(0.14))
+        });
     }
 
     // Each opening of the island is Oyen's arrival in his tab.
@@ -566,10 +653,24 @@ pub(crate) fn draw_header(ui: &mut Ui, st: &mut AppState, r: Rect, page: PageKin
         if p == PageKind::Numa {
             draw_oyen_tab(ui, st, r, tr);
         } else {
-            let k = if active { e } else if from.tabbed() && i == fi { 1.0 - e } else { 0.0 };
-            let ic = if resp.hovered { palette::TEXT } else { Color::lerp(palette::TEXT_FAINT, palette::TEXT, k) };
+            let k = if active {
+                e
+            } else if from.tabbed() && i == fi {
+                1.0 - e
+            } else {
+                0.0
+            };
+            let ic = if resp.hovered {
+                palette::TEXT
+            } else {
+                Color::lerp(palette::TEXT_FAINT, palette::TEXT, k)
+            };
             let ix = snap(tr.x + (TAB_W - TAB_ICON) / 2.0, scale);
-            ui.c.icon(p.icon(), Rect::new(ix, snap(cy - TAB_ICON / 2.0, scale), TAB_ICON, TAB_ICON), ic);
+            ui.c.icon(
+                p.icon(),
+                Rect::new(ix, snap(cy - TAB_ICON / 2.0, scale), TAB_ICON, TAB_ICON),
+                ic,
+            );
         }
         if resp.clicked && !active {
             st.cmd(Command::SetPage(p));
@@ -592,7 +693,11 @@ pub(crate) fn draw_header(ui: &mut Ui, st: &mut AppState, r: Rect, page: PageKin
     let time = fmt_clock(&st.local, st.settings.use_24h);
     let time_st = TextStyle::body().weight(Weight::Semibold).tabular().right();
     let tw = ui.c.measure(&time, &time_st, 200.0).0;
-    ui.c.text(&time, Rect::new(right - tw - 4.0, r.y, tw + 4.0, r.h), &time_st);
+    ui.c.text(
+        &time,
+        Rect::new(right - tw - 4.0, r.y, tw + 4.0, r.h),
+        &time_st,
+    );
     let mut left = right - tw;
 
     let shows_date = |p: PageKind| if p == PageKind::Today { 0.0 } else { 1.0 };
@@ -607,12 +712,25 @@ pub(crate) fn draw_header(ui: &mut Ui, st: &mut AppState, r: Rect, page: PageKin
         left = lerp(left, date_left, date_k);
     }
 
-    let gear_r = Rect::new(snap(left - PIN_GAP - GEAR, scale), cy - GEAR / 2.0, GEAR, GEAR);
-    let pin_r = Rect::new(snap(gear_r.x - GEAR_GAP - PIN, scale), cy - PIN / 2.0, PIN, PIN);
+    let gear_r = Rect::new(
+        snap(left - PIN_GAP - GEAR, scale),
+        cy - GEAR / 2.0,
+        GEAR,
+        GEAR,
+    );
+    let pin_r = Rect::new(
+        snap(gear_r.x - GEAR_GAP - PIN, scale),
+        cy - PIN / 2.0,
+        PIN,
+        PIN,
+    );
     let oyen_cx = pin_r.x - OYEN_GAP - OYEN_W / 2.0;
     if crate::oyen::on(st.settings.theme) && oyen_cx - OYEN_W / 2.0 > tabs_end + 12.0 {
         // Eyes on the cursor while it is over the island; asleep at night.
-        let look = ui.input.mouse.map(|p| ((p.x - r.center().x) / (r.w / 2.0)).clamp(-1.0, 1.0));
+        let look = ui
+            .input
+            .mouse
+            .map(|p| ((p.x - r.center().x) / (r.w / 2.0)).clamp(-1.0, 1.0));
         let (frame, moving) = crate::oyen::rest(st.now, st.local.hour < 5, look);
         if moving {
             ui.request_anim();
@@ -621,7 +739,11 @@ pub(crate) fn draw_header(ui: &mut Ui, st: &mut AppState, r: Rect, page: PageKin
     }
     if pin_r.x > tabs_end + 8.0 {
         let pinned = st.pinned;
-        let (icon, color) = if pinned { (Icon::PinFill, st.accent) } else { (Icon::Pin, palette::TEXT_FAINT) };
+        let (icon, color) = if pinned {
+            (Icon::PinFill, st.accent)
+        } else {
+            (Icon::Pin, palette::TEXT_FAINT)
+        };
         let resp = ui.icon_button(wid("pin"), pin_r, icon, color, 15.0);
         if resp.hovered {
             hover = Some((PIN_SLOT, pin_r));
@@ -636,7 +758,9 @@ pub(crate) fn draw_header(ui: &mut Ui, st: &mut AppState, r: Rect, page: PageKin
     // window with every setting.
     if gear_r.x > tabs_end + 8.0 {
         if gear_k > 0.0 {
-            ui.c.with_alpha(gear_k, |c| c.fill_rrect(gear_r, GEAR / 2.0, Color::white(0.14)));
+            ui.c.with_alpha(gear_k, |c| {
+                c.fill_rrect(gear_r, GEAR / 2.0, Color::white(0.14))
+            });
         }
         let color = Color::lerp(palette::TEXT_FAINT, palette::TEXT, gear_k);
         let resp = ui.icon_button(wid(GEAR_ID), gear_r, Icon::Gear, color, 16.0);
@@ -645,7 +769,12 @@ pub(crate) fn draw_header(ui: &mut Ui, st: &mut AppState, r: Rect, page: PageKin
         }
         if resp.clicked {
             if page == PageKind::Settings {
-                let back = st.ui.before_settings.take().filter(|p| row.contains(p)).unwrap_or(row[0]);
+                let back = st
+                    .ui
+                    .before_settings
+                    .take()
+                    .filter(|p| row.contains(p))
+                    .unwrap_or(row[0]);
                 st.cmd(Command::SetPage(back));
             } else {
                 st.ui.before_settings = Some(page);
@@ -677,7 +806,11 @@ pub(crate) fn draw_header(ui: &mut Ui, st: &mut AppState, r: Rect, page: PageKin
         None if st.pinned => "Unpin",
         None => "Keep open",
     };
-    Some(Tip { anchor, text, alpha })
+    Some(Tip {
+        anchor,
+        text,
+        alpha,
+    })
 }
 
 /// The Oyenza tab's icon: Oyen himself, the Oyenza mark, in his own colours
@@ -685,9 +818,22 @@ pub(crate) fn draw_header(ui: &mut Ui, st: &mut AppState, r: Rect, page: PageKin
 /// while it is over the tab `row`.
 fn draw_oyen_tab(ui: &mut Ui, st: &AppState, row: Rect, tab: Rect) {
     let c = Point::new(tab.x + TAB_W / 2.0, row.center().y);
-    let look = ui.input.mouse.filter(|m| row.contains(*m)).map(|m| ((m.x - c.x) / (row.w / 2.0)).clamp(-1.0, 1.0));
+    let look = ui
+        .input
+        .mouse
+        .filter(|m| row.contains(*m))
+        .map(|m| ((m.x - c.x) / (row.w / 2.0)).clamp(-1.0, 1.0));
     let clip = Rect::new(tab.x, tab.y, TAB_W, tab.h);
-    if crate::oyen::tab(ui.c, c, OYEN_TAB_W, clip, ui.now, st.ui.oyen_tab, crate::activities::night(st), look) {
+    if crate::oyen::tab(
+        ui.c,
+        c,
+        OYEN_TAB_W,
+        clip,
+        ui.now,
+        st.ui.oyen_tab,
+        crate::activities::night(st),
+        look,
+    ) {
         ui.request_anim();
     }
 }
@@ -708,7 +854,9 @@ fn draw_tab_label(ui: &mut Ui, p: PageKind, tab: Rect, st: &TextStyle, alpha: f3
     if cut {
         ui.c.clip(Rect::new(lx, tab.y, avail, tab.h));
     }
-    ui.c.with_alpha(alpha, |c| c.text(p.title(), Rect::new(lx, tab.y, lw + 2.0, tab.h), st));
+    ui.c.with_alpha(alpha, |c| {
+        c.text(p.title(), Rect::new(lx, tab.y, lw + 2.0, tab.h), st)
+    });
     if cut {
         ui.c.unclip();
     }
@@ -731,9 +879,21 @@ fn draw_tip(ui: &mut Ui, header: Rect, tip: &Tip) {
 /// Shared helper: a centred, dim placeholder message with an icon.
 pub fn empty_state(ui: &mut Ui, area: Rect, icon: Icon, title: &str, hint: &str) {
     let c = area.center();
-    ui.c.icon(icon, Rect::from_center(Point::new(c.x, c.y - 22.0), 26.0, 26.0), Color::white(0.35));
-    ui.c.text(title, Rect::new(area.x, c.y - 4.0, area.w, 20.0), &TextStyle::headline().center());
-    ui.c.text(hint, Rect::new(area.x, c.y + 16.0, area.w, 18.0), &TextStyle::footnote().color(palette::TEXT_DIM).center());
+    ui.c.icon(
+        icon,
+        Rect::from_center(Point::new(c.x, c.y - 22.0), 26.0, 26.0),
+        Color::white(0.35),
+    );
+    ui.c.text(
+        title,
+        Rect::new(area.x, c.y - 4.0, area.w, 20.0),
+        &TextStyle::headline().center(),
+    );
+    ui.c.text(
+        hint,
+        Rect::new(area.x, c.y + 16.0, area.w, 18.0),
+        &TextStyle::footnote().color(palette::TEXT_DIM).center(),
+    );
 }
 
 #[cfg(test)]
@@ -753,9 +913,17 @@ mod tests {
         // Oyenza last, signed in or not.
         use PageKind::*;
         let mut st = state();
-        assert_eq!(tabs(&st), [Media, Today, Shelf, Tasks, Focus, Ai, Numa, Addons]);
-        st.oyenza.link = OyenzaLink::Connected { account: "a•••@example.com".into() };
-        assert_eq!(tabs(&st), [Media, Today, Shelf, Tasks, Focus, Ai, Numa, Addons]);
+        assert_eq!(
+            tabs(&st),
+            [Media, Today, Shelf, Tasks, Focus, Ai, Numa, Addons]
+        );
+        st.oyenza.link = OyenzaLink::Connected {
+            account: "a•••@example.com".into(),
+        };
+        assert_eq!(
+            tabs(&st),
+            [Media, Today, Shelf, Tasks, Focus, Ai, Numa, Addons]
+        );
         // The add-ons' pages come after Oyenza (Health, Oyenza's steps, first), before the "+".
         for id in ["system", "script", "health"] {
             st.addons.insert(id, poni_core::addons::Status::Ready);
@@ -769,7 +937,12 @@ mod tests {
     fn hidden_tabs_leave_the_row_but_not_while_their_page_is_open() {
         use PageKind::*;
         let mut st = state();
-        st.settings.hidden_tabs = vec!["today".into(), "tasks".into(), "oyenza".into(), "addons".into()];
+        st.settings.hidden_tabs = vec![
+            "today".into(),
+            "tasks".into(),
+            "oyenza".into(),
+            "addons".into(),
+        ];
         st.page = Focus;
         // AI, Oyenza and the "+" can't be hidden.
         assert_eq!(tabs(&st), [Media, Shelf, Focus, Ai, Numa, Addons]);
@@ -782,7 +955,10 @@ mod tests {
         assert_eq!(st.page, Shelf);
         assert!(!tabs(&st).contains(&Today));
         // Every one of them hidden: the island opens on AI.
-        st.settings.hidden_tabs = PageKind::HIDEABLE.iter().map(|p| p.key().to_string()).collect();
+        st.settings.hidden_tabs = PageKind::HIDEABLE
+            .iter()
+            .map(|p| p.key().to_string())
+            .collect();
         st.page = Ai;
         assert_eq!(tabs(&st), [Ai, Numa, Addons]);
         assert_eq!(first_tab(&st), Ai);
@@ -798,10 +974,19 @@ mod tests {
     fn settings_has_the_gear_not_a_tab() {
         let mut st = state();
         assert!(!tabs(&st).contains(&PageKind::Settings));
-        assert!(tabs(&st).contains(&PageKind::Numa), "Numa remains available while signed out");
-        st.oyenza.link = OyenzaLink::Connected { account: "a•••@example.com".into() };
+        assert!(
+            tabs(&st).contains(&PageKind::Numa),
+            "Numa remains available while signed out"
+        );
+        st.oyenza.link = OyenzaLink::Connected {
+            account: "a•••@example.com".into(),
+        };
         let row = tabs(&st);
-        assert!(row.contains(&PageKind::Numa) && !row.contains(&PageKind::Oyenza) && !row.contains(&PageKind::Settings));
+        assert!(
+            row.contains(&PageKind::Numa)
+                && !row.contains(&PageKind::Oyenza)
+                && !row.contains(&PageKind::Settings)
+        );
         // Stepping through the tabs never lands on Settings.
         let mut p = PageKind::Media;
         for _ in 0..2 * PageKind::ALL.len() {
@@ -813,14 +998,18 @@ mod tests {
     #[test]
     fn settings_keeps_its_key_and_slides_in_from_the_right() {
         assert_eq!(PageKind::from_key("settings"), PageKind::Settings);
-        assert!(PageKind::ALL.iter().all(|p| p.tab_index() <= PageKind::Settings.tab_index()));
+        assert!(PageKind::ALL
+            .iter()
+            .all(|p| p.tab_index() <= PageKind::Settings.tab_index()));
     }
 
     #[test]
     fn addons_is_the_last_tab_and_never_makes_the_window_taller() {
         let mut st = state();
         assert_eq!(tabs(&st).last(), Some(&PageKind::Addons));
-        st.oyenza.link = OyenzaLink::Connected { account: "a•••@example.com".into() };
+        st.oyenza.link = OyenzaLink::Connected {
+            account: "a•••@example.com".into(),
+        };
         assert_eq!(tabs(&st).last(), Some(&PageKind::Addons));
         assert_eq!(PageKind::from_key("addons"), PageKind::Addons);
         // The window is as tall as the tallest page (System, laid out for
@@ -829,25 +1018,49 @@ mod tests {
         assert!(content_height(PageKind::Stocks, &st) <= content_height(PageKind::System, &st));
         // Notifications with as many apps as it lists.
         for i in 0..poni_core::notifications::MAX_APPS {
-            st.settings.notifications.remember(&format!("App.{i}"), &format!("App {i}"));
+            st.settings
+                .notifications
+                .remember(&format!("App.{i}"), &format!("App {i}"));
         }
-        assert!(content_height(PageKind::Notifications, &st) <= content_height(PageKind::System, &st));
+        assert!(
+            content_height(PageKind::Notifications, &st) <= content_height(PageKind::System, &st)
+        );
         // Signed out, Oyenza's sign-in is as tall as its code, so starting to
         // sign in doesn't move the island.
         st.oyenza.link = OyenzaLink::Off;
         let signed_out = content_height(PageKind::Oyenza, &st);
-        st.oyenza.link = OyenzaLink::Connecting { code: "ABCD-EFGH".into(), url: String::new(), until: 600.0 };
+        st.oyenza.link = OyenzaLink::Connecting {
+            code: "ABCD-EFGH".into(),
+            url: String::new(),
+            until: 600.0,
+        };
         assert_eq!(signed_out, content_height(PageKind::Oyenza, &st));
     }
 
     #[test]
     fn ai_is_always_a_tab_and_never_makes_the_window_taller() {
         let st = state();
-        assert!(tabs(&st).contains(&PageKind::Ai), "a core tab: no add-on to switch on");
+        assert!(
+            tabs(&st).contains(&PageKind::Ai),
+            "a core tab: no add-on to switch on"
+        );
         assert_eq!(PageKind::from_key("ai"), PageKind::Ai);
         // An island last open on the AI tab opens there again.
-        let store = Store { last_page: "ai".into(), ..Store::default() };
-        assert_eq!(AppState::new(Settings { remember_page: true, ..Settings::default() }, store).page, PageKind::Ai);
+        let store = Store {
+            last_page: "ai".into(),
+            ..Store::default()
+        };
+        assert_eq!(
+            AppState::new(
+                Settings {
+                    remember_page: true,
+                    ..Settings::default()
+                },
+                store
+            )
+            .page,
+            PageKind::Ai
+        );
         assert!(content_height(PageKind::Ai, &st) <= content_height(PageKind::System, &st));
     }
 
@@ -859,14 +1072,27 @@ mod tests {
             (PageKind::Stocks, poni_core::addons::STOCKS),
         ] {
             let mut st = state();
-            assert!(!tabs(&st).contains(&page), "{} is off for everyone until switched on", addon.id);
+            assert!(
+                !tabs(&st).contains(&page),
+                "{} is off for everyone until switched on",
+                addon.id
+            );
             st.settings.set_addon(addon.id, true);
             st.addons.insert(addon.id, poni_core::addons::Status::Ready);
             assert!(tabs(&st).contains(&page));
             // An island last open on its page opens on the first tab while it's off.
-            let store = Store { last_page: page.key().into(), ..Store::default() };
-            let mut settings = Settings { remember_page: true, ..Settings::default() };
-            assert_eq!(AppState::new(settings.clone(), store.clone()).page, PageKind::ALL[0]);
+            let store = Store {
+                last_page: page.key().into(),
+                ..Store::default()
+            };
+            let mut settings = Settings {
+                remember_page: true,
+                ..Settings::default()
+            };
+            assert_eq!(
+                AppState::new(settings.clone(), store.clone()).page,
+                PageKind::ALL[0]
+            );
             settings.set_addon(addon.id, true);
             assert_eq!(AppState::new(settings, store).page, page);
         }
@@ -876,29 +1102,58 @@ mod tests {
     fn downloads_has_a_tab_only_with_studio_pro() {
         // Notifications is free (Luca, 28 Oct): its tab needs no sign-in.
         let mut st = state();
-        st.settings.set_addon(poni_core::addons::NOTIFICATIONS.id, true);
-        st.addons.insert(poni_core::addons::NOTIFICATIONS.id, poni_core::addons::Status::Ready);
-        assert_eq!(tabs(&st).contains(&PageKind::Notifications), cfg!(windows), "signed out, no Pro");
+        st.settings
+            .set_addon(poni_core::addons::NOTIFICATIONS.id, true);
+        st.addons.insert(
+            poni_core::addons::NOTIFICATIONS.id,
+            poni_core::addons::Status::Ready,
+        );
+        assert_eq!(
+            tabs(&st).contains(&PageKind::Notifications),
+            cfg!(windows),
+            "signed out, no Pro"
+        );
         for (page, addon) in [(PageKind::Downloads, poni_core::addons::DOWNLOADER)] {
             let mut st = state();
             st.downloader_offered = true;
             st.settings.set_addon(addon.id, true);
             st.addons.insert(addon.id, poni_core::addons::Status::Ready);
             assert!(!tabs(&st).contains(&page), "{}: signed out", addon.id);
-            st.oyenza.link = OyenzaLink::Connected { account: "a•••@example.com".into() };
-            assert!(!tabs(&st).contains(&page), "{}: before the server's answer", addon.id);
+            st.oyenza.link = OyenzaLink::Connected {
+                account: "a•••@example.com".into(),
+            };
+            assert!(
+                !tabs(&st).contains(&page),
+                "{}: before the server's answer",
+                addon.id
+            );
             st.oyenza.pro = Some(false);
-            assert!(!tabs(&st).contains(&page), "{}: an account without Pro", addon.id);
+            assert!(
+                !tabs(&st).contains(&page),
+                "{}: an account without Pro",
+                addon.id
+            );
             st.oyenza.pro = Some(true);
             assert!(tabs(&st).contains(&page), "{}", addon.id);
             // Signed out again: gone, whatever the server said before.
             st.oyenza.link = OyenzaLink::Off;
             assert!(!tabs(&st).contains(&page), "{}", addon.id);
             // Pro isn't known yet at start: an island last open on its page opens on the first tab.
-            let store = Store { last_page: page.key().into(), ..Store::default() };
-            let mut settings = Settings { remember_page: true, ..Settings::default() };
+            let store = Store {
+                last_page: page.key().into(),
+                ..Store::default()
+            };
+            let mut settings = Settings {
+                remember_page: true,
+                ..Settings::default()
+            };
             settings.set_addon(addon.id, true);
-            assert_eq!(AppState::new(settings, store).page, PageKind::ALL[0], "{}", addon.id);
+            assert_eq!(
+                AppState::new(settings, store).page,
+                PageKind::ALL[0],
+                "{}",
+                addon.id
+            );
         }
     }
 
@@ -908,7 +1163,9 @@ mod tests {
         let mut st = state();
         // Signed out: the sign-in card, so no stats are read for tiles.
         assert!(!today::shows_tiles(&st));
-        st.oyenza.link = OyenzaLink::Connected { account: "a•••@example.com".into() };
+        st.oyenza.link = OyenzaLink::Connected {
+            account: "a•••@example.com".into(),
+        };
         assert!(!today::shows_tiles(&st), "getting the day");
         st.oyenza.agenda_state = AgendaState::Unavailable;
         assert!(today::shows_tiles(&st));
@@ -931,7 +1188,10 @@ mod tests {
         let row = tabs(&st);
         assert_eq!(&row[row.len() - 2..], &[PageKind::Prayer, PageKind::Addons]);
         assert!(content_height(PageKind::Prayer, &st) <= content_height(PageKind::Tasks, &st));
-        st.addons.insert("sholat", poni_core::addons::Status::Downloading { done: 1, total: 2 });
+        st.addons.insert(
+            "sholat",
+            poni_core::addons::Status::Downloading { done: 1, total: 2 },
+        );
         assert!(!tabs(&st).contains(&PageKind::Prayer));
     }
 
@@ -939,24 +1199,45 @@ mod tests {
     fn ielts_has_a_tab_only_while_its_add_on_is_on_after_health() {
         use PageKind::{Addons, Health, Ielts, Numa};
         let mut st = state();
-        assert!(!tabs(&st).contains(&Ielts), "off for everyone until switched on");
+        assert!(
+            !tabs(&st).contains(&Ielts),
+            "off for everyone until switched on"
+        );
         st.addons.insert("ielts", poni_core::addons::Status::Ready);
         st.addons.insert("health", poni_core::addons::Status::Ready);
         assert_eq!(&tabs(&st)[6..], [Numa, Health, Ielts, Addons]);
         // Signed out it shows the sign-in card; signed in, every state is as
         // tall, and never taller than System: the window keeps its size.
         let signed_out = content_height(Ielts, &st);
-        st.oyenza.link = OyenzaLink::Connected { account: "a•••@example.com".into() };
+        st.oyenza.link = OyenzaLink::Connected {
+            account: "a•••@example.com".into(),
+        };
         let h = content_height(Ielts, &st);
-        assert!(signed_out < h && h <= content_height(PageKind::System, &st), "{signed_out} {h}");
-        for s in [poni_core::ielts::Sample::Talking, poni_core::ielts::Sample::Result, poni_core::ielts::Sample::MicDenied] {
+        assert!(
+            signed_out < h && h <= content_height(PageKind::System, &st),
+            "{signed_out} {h}"
+        );
+        for s in [
+            poni_core::ielts::Sample::Talking,
+            poni_core::ielts::Sample::Result,
+            poni_core::ielts::Sample::MicDenied,
+        ] {
             st.ielts = poni_core::ielts::Coach::sample(s, 10.0);
             assert_eq!(content_height(Ielts, &st), h);
         }
         // An island last open on it opens on the first tab once it's off.
-        let store = Store { last_page: "ielts".into(), ..Store::default() };
-        let mut settings = Settings { remember_page: true, ..Settings::default() };
-        assert_eq!(AppState::new(settings.clone(), store.clone()).page, PageKind::Media);
+        let store = Store {
+            last_page: "ielts".into(),
+            ..Store::default()
+        };
+        let mut settings = Settings {
+            remember_page: true,
+            ..Settings::default()
+        };
+        assert_eq!(
+            AppState::new(settings.clone(), store.clone()).page,
+            PageKind::Media
+        );
         settings.set_addon("ielts", true);
         assert_eq!(AppState::new(settings, store).page, Ielts);
     }
@@ -964,7 +1245,10 @@ mod tests {
     #[test]
     fn script_has_a_tab_only_while_its_add_on_is_on() {
         let mut st = state();
-        assert!(!tabs(&st).contains(&PageKind::Script), "off for everyone until switched on");
+        assert!(
+            !tabs(&st).contains(&PageKind::Script),
+            "off for everyone until switched on"
+        );
         st.addons.insert("script", poni_core::addons::Status::Ready);
         assert!(tabs(&st).contains(&PageKind::Script));
         assert_eq!(tabs(&st).last(), Some(&PageKind::Addons));
@@ -973,16 +1257,25 @@ mod tests {
     #[test]
     fn record_has_a_tab_once_the_recorder_is_installed() {
         let mut st = state();
-        assert!(!tabs(&st).contains(&PageKind::Record), "no recorder: no tab");
+        assert!(
+            !tabs(&st).contains(&PageKind::Record),
+            "no recorder: no tab"
+        );
         st.recorder = true;
-        assert!(!tabs(&st).contains(&PageKind::Record), "a recorder that never wrote (1.0.0) can't read Record's links");
+        assert!(
+            !tabs(&st).contains(&PageKind::Record),
+            "a recorder that never wrote (1.0.0) can't read Record's links"
+        );
         st.store.recorder_island = true;
         let row = tabs(&st);
         if cfg!(target_os = "macos") {
             assert!(!row.contains(&PageKind::Record), "Windows only for now");
             return;
         }
-        assert!(row.contains(&PageKind::Record), "installing the recorder is the switch");
+        assert!(
+            row.contains(&PageKind::Record),
+            "installing the recorder is the switch"
+        );
         assert_eq!(row.last(), Some(&PageKind::Addons));
         st.settings.set_addon("recorder", false);
         assert!(!tabs(&st).contains(&PageKind::Record), "switched off: gone");
@@ -990,7 +1283,11 @@ mod tests {
         st.addons.insert("script", poni_core::addons::Status::Ready);
         let row = tabs(&st);
         let at = |p| row.iter().position(|t| *t == p).unwrap();
-        assert_eq!(at(PageKind::Record), at(PageKind::Script) + 1, "beside the Script page");
+        assert_eq!(
+            at(PageKind::Record),
+            at(PageKind::Script) + 1,
+            "beside the Script page"
+        );
     }
 
     #[test]
@@ -1000,14 +1297,27 @@ mod tests {
         st.store.recorder_island = true;
         let tallest = content_height(PageKind::System, &st);
         assert!(content_height(PageKind::Record, &st) <= tallest);
-        assert!(content_height(PageKind::Addons, &st) <= tallest, "{} > {tallest}", content_height(PageKind::Addons, &st));
+        assert!(
+            content_height(PageKind::Addons, &st) <= tallest,
+            "{} > {tallest}",
+            content_height(PageKind::Addons, &st)
+        );
     }
 
     #[test]
     fn an_island_last_on_the_script_page_opens_on_the_first_tab_once_it_is_off() {
-        let store = Store { last_page: "script".into(), ..Store::default() };
-        let mut settings = Settings { remember_page: true, ..Settings::default() };
-        assert_eq!(AppState::new(settings.clone(), store.clone()).page, PageKind::ALL[0]);
+        let store = Store {
+            last_page: "script".into(),
+            ..Store::default()
+        };
+        let mut settings = Settings {
+            remember_page: true,
+            ..Settings::default()
+        };
+        assert_eq!(
+            AppState::new(settings.clone(), store.clone()).page,
+            PageKind::ALL[0]
+        );
         settings.set_addon("script", true);
         assert_eq!(AppState::new(settings, store).page, PageKind::Script);
     }
@@ -1031,6 +1341,9 @@ mod tests {
         let row = content_height(PageKind::Settings, &st);
         st.update.sheet = true;
         let sheet = content_height(PageKind::Settings, &st);
-        assert!(row <= content_height(PageKind::System, &st) && sheet <= row, "{row} {sheet}");
+        assert!(
+            row <= content_height(PageKind::System, &st) && sheet <= row,
+            "{row} {sheet}"
+        );
     }
 }

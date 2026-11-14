@@ -22,14 +22,14 @@ use crate::services::{self, Services};
 use crate::settings_host::{self, SettingsWindow};
 use crate::settings_window::Section;
 use crate::state::{
-    AppState, FpsAccess, HudKind, InlineAction, Locate, LyricsState, LyricsStatus, Notice, NoticeAction, NotifyAccess, OyenzaLink, PairedPhone, PhoneAsk,
-    PhoneDrop, PhoneTransfer, PhoneView, PrayerState,
+    AppState, FpsAccess, HudKind, InlineAction, Locate, LyricsState, LyricsStatus, Notice,
+    NoticeAction, NotifyAccess, OyenzaLink, PairedPhone, PhoneAsk, PhoneDrop, PhoneTransfer,
+    PhoneView, PrayerState,
 };
 use crate::tray::{self, Tray};
 use crate::ui::{wid, CursorKind, Hit, Input, KeyInput, MouseButton, Ui};
 use crate::window::{self, FrameClock, FrameTick, MonitorInfo};
 use crate::{dragdrop, selftest, shell};
-use poni_core::spot;
 use poni_core::addons::Status as AddonStatus;
 use poni_core::frametime::{ambient_divisor, MotionStats};
 use poni_core::geom::{palette, Color, Point, Rect};
@@ -37,8 +37,9 @@ use poni_core::oyenza;
 use poni_core::pairdrop::{MeetEvent, PeerEvent};
 use poni_core::phonedrop::{Event as PhoneEvent, QrMatrix};
 use poni_core::prayer::{Due, PlaceList, Prayer, PrayerMoment};
-use poni_core::settings::{IdleStyle, PrayerSound, Settings, Theme};
 use poni_core::settings::MonitorChoice;
+use poni_core::settings::{IdleStyle, PrayerSound, Settings, Theme};
+use poni_core::spot;
 use poni_core::store::{load_json, parse_json, save_json_atomic, LoadOutcome, Store};
 use std::cell::{Cell, RefCell};
 use std::collections::HashSet;
@@ -49,7 +50,9 @@ use windows::Foundation::Numerics::Matrix3x2;
 use windows::Win32::Foundation::*;
 use windows::Win32::System::Ole::{OleInitialize, OleUninitialize};
 use windows::Win32::System::Threading::CreateMutexW;
-use windows::Win32::UI::HiDpi::{SetProcessDpiAwarenessContext, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2};
+use windows::Win32::UI::HiDpi::{
+    SetProcessDpiAwarenessContext, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2,
+};
 use windows::Win32::UI::Input::KeyboardAndMouse::*;
 use windows::Win32::UI::WindowsAndMessaging::*;
 
@@ -69,13 +72,13 @@ const TIMER_RAISE: usize = 9;
 const TIMER_PEEK: usize = 10;
 /// The next read of the update file (`crate::updates`).
 const TIMER_UPDATE: usize = 11;
-/// Show over games: how long the readout shows over a game, the least time
-/// between two peeks for a frame-rate drop, and Alt+Shift+F's id.
-const PEEK_S: f64 = 5.0;
 /// Polls the global Ctrl+Alt push-to-talk chord. RegisterHotKey cannot report
 /// the release edge, so this lightweight UI-thread poll keeps the recorder
 /// lifetime identical to the physical key hold.
 const TIMER_NUMA: usize = 12;
+/// Show over games: how long the readout shows over a game, the least time
+/// between two peeks for a frame-rate drop, and Alt+Shift+F's id.
+const PEEK_S: f64 = 5.0;
 const DROP_PEEK_EVERY_S: f64 = 30.0;
 const HOTKEY_PEEK: i32 = 1;
 /// Alt+Shift+S pauses and resumes the Script page's reading from any app.
@@ -95,7 +98,8 @@ const WTS_SESSION_LOCK_: usize = 7;
 const WTS_SESSION_UNLOCK_: usize = 8;
 
 /// Steps for copying the Apple Music token (README).
-const APPLE_MUSIC_HELP_URL: &str = "https://github.com/lucacadalora/oyenza-studio#apple-music-lyrics";
+const APPLE_MUSIC_HELP_URL: &str =
+    "https://github.com/lucacadalora/oyenza-studio#apple-music-lyrics";
 /// Phone drop closes itself after this long without a request from a phone.
 const PHONE_IDLE_S: f64 = 600.0;
 
@@ -120,14 +124,22 @@ pub fn main_entry() -> i32 {
     if let Some(i) = args.iter().position(|a| a == services::frames::ALLOW_ARG) {
         return services::frames::allow_main(args.get(i + 1).map_or("", String::as_str));
     }
-    let selftest_dir = args.iter().position(|a| a == "--selftest").map(|i| args.get(i + 1).cloned().unwrap_or_else(|| "selftest-out".into()));
+    let selftest_dir = args.iter().position(|a| a == "--selftest").map(|i| {
+        args.get(i + 1)
+            .cloned()
+            .unwrap_or_else(|| "selftest-out".into())
+    });
     if let Some(dir) = &selftest_dir {
         let home = std::path::Path::new(dir).join("home");
         let _ = std::fs::remove_dir_all(&home);
         std::env::set_var("PONI_HOME", &home);
     }
     crate::plog::init(paths::log_path());
-    pinfo!("Poni {} starting (args: {:?})", env!("CARGO_PKG_VERSION"), &args[1..]);
+    pinfo!(
+        "Poni {} starting (args: {:?})",
+        env!("CARGO_PKG_VERSION"),
+        &args[1..]
+    );
     std::panic::set_hook(Box::new(|info| {
         perror!("panic: {info}");
     }));
@@ -136,7 +148,11 @@ pub fn main_entry() -> i32 {
         let _ = SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
     }
     // Single instance (the self-test may run next to a normal instance).
-    let mutex_name = if selftest_dir.is_some() { w!("Local\\Poni.Island.SelfTest") } else { w!("Local\\Poni.Island") };
+    let mutex_name = if selftest_dir.is_some() {
+        w!("Local\\Poni.Island.SelfTest")
+    } else {
+        w!("Local\\Poni.Island")
+    };
     let _mutex = unsafe { CreateMutexW(None, true, mutex_name) };
     if unsafe { GetLastError() } == ERROR_ALREADY_EXISTS {
         pinfo!("another instance is running; exiting");
@@ -151,7 +167,8 @@ pub fn main_entry() -> i32 {
     }
     // Install on next start: the new version's Setup, downloaded and checked
     // earlier, runs now, before any window, and opens the new version.
-    if selftest_dir.is_none() && !crate::autostart::packaged() && crate::updates::pending_install() {
+    if selftest_dir.is_none() && !crate::autostart::packaged() && crate::updates::pending_install()
+    {
         unsafe { OleUninitialize() };
         return 0;
     }
@@ -187,7 +204,10 @@ fn run(selftest_dir: Option<String>) -> Result<i32> {
         if let Err(e) = save_json_atomic(&paths::settings_path(), &settings) {
             pwarn!("saving settings failed: {e}");
         } else if s_out != LoadOutcome::Missing {
-            pinfo!("settings: wrote back migrated / out-of-range values (v{})", settings.settings_version);
+            pinfo!(
+                "settings: wrote back migrated / out-of-range values (v{})",
+                settings.settings_version
+            );
         }
     }
     let (store, d_out): (Store, _) = load_json(&paths::store_path());
@@ -197,7 +217,17 @@ fn run(selftest_dir: Option<String>) -> Result<i32> {
 
     let (tx, rx) = mpsc::channel();
     let sink = EventSink::new(tx, SendHwnd::new(hwnd));
-    let app = App::new(hwnd, helper, sink, rx, settings, store, selftest_dir, s_out.writable(), d_out.writable())?;
+    let app = App::new(
+        hwnd,
+        helper,
+        sink,
+        rx,
+        settings,
+        store,
+        selftest_dir,
+        s_out.writable(),
+        d_out.writable(),
+    )?;
     APP.with(|c| *c.borrow_mut() = Some(app));
     with_app(|app| app.start());
     pinfo!("started; entering message loop");
@@ -253,13 +283,18 @@ thread_local! {
 /// hidden; false, that it should show them.
 unsafe fn recorder_message(hwnd: HWND, wp: WPARAM, lp: LPARAM) -> bool {
     use poni_core::recorder::{parse_message, COPYDATA_ID, MESSAGE_MAX};
-    let Some(cds) = (lp.0 as *const windows::Win32::System::DataExchange::COPYDATASTRUCT).as_ref() else { return false };
+    let Some(cds) = (lp.0 as *const windows::Win32::System::DataExchange::COPYDATASTRUCT).as_ref()
+    else {
+        return false;
+    };
     let len = cds.cbData as usize;
     if cds.dwData != COPYDATA_ID || cds.lpData.is_null() || len > MESSAGE_MAX {
         return false;
     }
     // The bytes are the sender's only until this returns: read them now.
-    let Some(m) = parse_message(std::slice::from_raw_parts(cds.lpData as *const u8, len)) else { return false };
+    let Some(m) = parse_message(std::slice::from_raw_parts(cds.lpData as *const u8, len)) else {
+        return false;
+    };
     let sender = wp.0 as isize;
     match with_app(|app| app.on_recorder_message(m.clone(), sender)) {
         Some(taken) => taken,
@@ -328,7 +363,12 @@ unsafe extern "system" fn helper_wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: L
 }
 
 /// The Settings window's messages (`settings_window`).
-unsafe extern "system" fn settings_wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
+unsafe extern "system" fn settings_wndproc(
+    hwnd: HWND,
+    msg: u32,
+    wp: WPARAM,
+    lp: LPARAM,
+) -> LRESULT {
     let mut deferred = Vec::new();
     let res = with_app(|app| app.handle_settings_window(hwnd, msg, wp, lp, &mut deferred));
     for d in deferred {
@@ -353,7 +393,16 @@ fn run_deferred(d: Deferred) {
             let Some((helper, items)) = with_app(|app| {
                 // Right-clicked on the open island (the tray's menu leaves it as it is).
                 app.menu_open = app.expanded && app.hovering;
-                (app.helper, tray::menu_items(&app.st.settings, app.st.pinned, &app.st.oyenza.link, crate::services::recorder::installed(), crate::updates::menu_line(&app.st, app.updater.is_some())))
+                (
+                    app.helper,
+                    tray::menu_items(
+                        &app.st.settings,
+                        app.st.pinned,
+                        &app.st.oyenza.link,
+                        crate::services::recorder::installed(),
+                        crate::updates::menu_line(&app.st, app.updater.is_some()),
+                    ),
+                )
             }) else {
                 return;
             };
@@ -406,6 +455,13 @@ pub struct App {
     /// The meeting's audio once stopped, kept until its notes are saved (or
     /// it is thrown away), for Try again.
     notes_take: Option<services::notes::Take>,
+    /// NUMA's microphone while a push-to-talk turn is being recorded.
+    numa_mic: Option<services::mic::Mic>,
+    /// Set once the gateway stream thread has been started (`services::numa_events`).
+    numa_events_started: bool,
+    numa_hotkey: bool,
+    /// Mono time at which a bare "hey numa" stops waiting for its command.
+    numa_listen_until: Option<f64>,
     /// When the meeting being taken down began (local time, for its notes).
     notes_started: poni_core::datetime::LocalDateTime,
     /// The self-test's own notes server and key, in place of api.oyenza.app
@@ -455,13 +511,6 @@ pub struct App {
     fullscreen_on: bool,
     /// Step aside: the app windows at the top edge of the island's monitor
     /// (screen pixels, cut to the band along it), as last reported.
-    /// NUMA's microphone while a push-to-talk turn is being recorded.
-    numa_mic: Option<services::mic::Mic>,
-    /// NUMA's safe takeover status runner (no OS input injection yet).
-    numa_takeover: Option<services::numa_takeover::TakeoverRunner>,
-    numa_hotkey: bool,
-    /// Mono time at which a bare "hey numa" stops waiting for its command.
-    numa_listen_until: Option<f64>,
     top_windows: Vec<[i32; 4]>,
     /// Follow-up raises still due (TIMER_RAISE).
     raises_left: u8,
@@ -636,6 +685,58 @@ fn outgoing_left(age: f64) -> f32 {
     1.0 - t * t * (3.0 - 2.0 * t)
 }
 
+fn numa_history_path() -> std::path::PathBuf {
+    paths::cache_dir().join("numa").join("history.json")
+}
+
+fn load_numa_history() -> Vec<crate::state::NumaTurn> {
+    let Ok(text) = std::fs::read_to_string(numa_history_path()) else {
+        return Vec::new();
+    };
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(&text) else {
+        return Vec::new();
+    };
+    value
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|turn| {
+            Some(crate::state::NumaTurn {
+                user: turn.get("user")?.as_str()?.to_owned(),
+                response: turn
+                    .get("assistant")
+                    .or_else(|| turn.get("response"))?
+                    .as_str()?
+                    .to_owned(),
+                route: turn
+                    .get("route")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("assistant")
+                    .to_owned(),
+            })
+        })
+        .collect()
+}
+
+fn save_numa_history(history: &[crate::state::NumaTurn]) {
+    let path = numa_history_path();
+    let Some(parent) = path.parent() else { return };
+    let _ = std::fs::create_dir_all(parent);
+    let value: Vec<_> = history
+        .iter()
+        .map(|turn| {
+            serde_json::json!({
+                "user": turn.user,
+                "assistant": turn.response,
+                "route": turn.route,
+            })
+        })
+        .collect();
+    if let Ok(text) = serde_json::to_string_pretty(&value) {
+        let _ = std::fs::write(path, text);
+    }
+}
+
 impl App {
     #[allow(clippy::too_many_arguments)]
     fn new(
@@ -656,6 +757,7 @@ impl App {
         st.local = clock::local_now();
         st.unix = clock::unix_now();
         st.accent = theme_accent(st.settings.theme);
+        st.ui.numa.history = load_numa_history();
         let mode = Mode::Idle;
         let mut island = Island::new(activities::geom(&mode, &st));
         island.set_floating(pill::on(st.settings.theme).then_some(pill::TOP_GAP));
@@ -695,6 +797,10 @@ impl App {
             ielts_held: false,
             notes_rec: None,
             notes_take: None,
+            numa_mic: None,
+            numa_events_started: false,
+            numa_hotkey: false,
+            numa_listen_until: None,
             notes_started: Default::default(),
             notes_api: None,
             in_selftest: selftest.is_some(),
@@ -744,10 +850,6 @@ impl App {
             tray: None,
             taskbar_created_msg,
             selftest,
-            numa_mic: None,
-            numa_takeover: None,
-            numa_hotkey: false,
-            numa_listen_until: None,
             exit_code: 0,
             saved_settings,
             settings_writable,
@@ -783,9 +885,19 @@ impl App {
         self.st.power = services::power::query();
         services::power::register(self.helper);
         if !fake {
-            self.services = Some(Services::start(&self.sink, self.hwnd, self.helper, &self.st.settings, self.oyenza_activity()));
+            self.services = Some(Services::start(
+                &self.sink,
+                self.hwnd,
+                self.helper,
+                &self.st.settings,
+                self.oyenza_activity(),
+            ));
             self.sync_top_watch();
-            self.st.paired = self.services.as_ref().map(|s| paired_phones(s.pairs())).unwrap_or_default();
+            self.st.paired = self
+                .services
+                .as_ref()
+                .map(|s| paired_phones(s.pairs()))
+                .unwrap_or_default();
             self.sync_pair_offer();
             if self.st.settings.system_history_on() {
                 self.start_sysmon();
@@ -801,13 +913,23 @@ impl App {
             if self.st.notifications_on() {
                 self.start_notify(false);
             }
+            // The gateway's event stream: one reconnecting thread for the
+            // app's lifetime; the notch's strip mirrors what it reports.
+            if !self.numa_events_started {
+                self.numa_events_started = true;
+                services::numa_events::start(self.sink.clone());
+            }
             if self.st.notes_on() {
                 self.notes_restore();
             }
             self.try_add_tray();
             services::power::register_session(self.helper);
             if !crate::autostart::packaged() {
-                self.updater = Some(crate::updates::Updater::start(paths::data_dir().join("update.json"), &mut self.st, crate::updates::unix_now()));
+                self.updater = Some(crate::updates::Updater::start(
+                    paths::data_dir().join("update.json"),
+                    &mut self.st,
+                    crate::updates::unix_now(),
+                ));
                 self.schedule_update();
                 self.fetch_setup();
             }
@@ -820,6 +942,10 @@ impl App {
             self.st.cmds.push(Command::LoadThumb(p));
         }
         self.schedule_minute_timer();
+        // Ctrl+Alt is intentionally polled rather than registered as a normal
+        // hotkey: RegisterHotKey only delivers a key-down notification and
+        // cannot provide the release edge needed to stop a recording.
+        unsafe { SetTimer(self.hwnd, TIMER_NUMA, 25, None) };
         if let Some(t) = self.selftest.as_mut() {
             t.begin(&mut self.st);
             unsafe { SetTimer(self.hwnd, TIMER_SELFTEST, 50, None) };
@@ -834,6 +960,9 @@ impl App {
         self.frames = None;
         self.set_peek_hotkey(false);
         self.set_script_hotkey(false);
+        unsafe {
+            let _ = KillTimer(self.hwnd, TIMER_NUMA);
+        }
         self.glass.stop(self.hwnd, &mut self.gfx);
         if let Some(p) = self.phone.take() {
             p.stop();
@@ -876,24 +1005,31 @@ impl App {
     /// centre stays put and both edges glide at sub-pixel precision. Call at
     /// start and whenever the scale, the monitor or the expanded width changes.
     fn layout_surface(&mut self) {
-        let tallest = PageKind::ALL.iter().map(|p| pages::content_height(*p, &self.st)).fold(0.0f32, f32::max);
-        self.layout_surface_for(self.st.settings.expanded_width, pages::HEADER_H + tallest + pages::PAD);
+        let tallest = PageKind::ALL
+            .iter()
+            .map(|p| pages::content_height(*p, &self.st))
+            .fold(0.0f32, f32::max);
+        self.layout_surface_for(
+            self.st.settings.expanded_width,
+            pages::HEADER_H + tallest + pages::PAD,
+        );
         // The band Step aside watches follows the monitor and its scale.
         self.sync_top_watch();
     }
 
     /// Step aside on: have the full-screen watcher report the app windows
-        // Ctrl+Alt is intentionally polled rather than registered as a normal
-        // hotkey: RegisterHotKey only delivers a key-down notification and
-        // cannot provide the release edge needed to stop a recording.
-        unsafe { SetTimer(self.hwnd, TIMER_NUMA, 25, None) };
     /// at the top edge of the island's monitor, where the island hangs from
     /// (below a taskbar at the top). Off (always, since 0.2.6; the self-test
     /// still draws it): it looks at nothing, and nothing is under the island.
     fn sync_top_watch(&mut self) {
         let m = &self.monitor;
         let px = (TOP_BAND * self.gfx.scale()).ceil() as i32;
-        let band = self.st.settings.step_aside.then(|| RECT { left: m.rect.left, top: m.top(), right: m.rect.right, bottom: m.top() + px });
+        let band = self.st.settings.step_aside.then(|| RECT {
+            left: m.rect.left,
+            top: m.top(),
+            right: m.rect.right,
+            bottom: m.top() + px,
+        });
         if band.is_none() {
             self.top_windows.clear();
         }
@@ -901,9 +1037,6 @@ impl App {
             s.watch_top(band);
         }
     }
-        unsafe {
-            let _ = KillTimer(self.hwnd, TIMER_NUMA);
-        }
 
     /// Lay the window out for an island body up to `body_w`×`body_h` DIPs.
     fn layout_surface_for(&mut self, body_w: f32, body_h: f32) {
@@ -920,7 +1053,10 @@ impl App {
     /// (`place_island`).
     fn place_surface(&mut self, w: i32, h: i32) {
         let s = self.gfx.scale();
-        let (left, mon_w) = (self.monitor.rect.left, self.monitor.rect.right - self.monitor.rect.left);
+        let (left, mon_w) = (
+            self.monitor.rect.left,
+            self.monitor.rect.right - self.monitor.rect.left,
+        );
         self.laid_spot = self.st.settings.island_x;
         let (x, home) = match self.laid_spot {
             None => (left + (mon_w - w) / 2, w as f32 / 2.0 / s),
@@ -931,7 +1067,12 @@ impl App {
             }
         };
         self.home_cx = home;
-        let surface = Surface { x, y: self.monitor.top(), w, h };
+        let surface = Surface {
+            x,
+            y: self.monitor.top(),
+            w,
+            h,
+        };
         if surface != self.surface {
             self.surface = surface;
             self.prev_canvas_px = None;
@@ -950,7 +1091,12 @@ impl App {
     fn place_island(&mut self) {
         self.cx = match self.laid_spot {
             None => self.home_cx,
-            Some(_) => spot::fit_centre(self.home_cx, self.surface.w as f32 / self.gfx.scale(), self.island.current().w, self.island.side_room()),
+            Some(_) => spot::fit_centre(
+                self.home_cx,
+                self.surface.w as f32 / self.gfx.scale(),
+                self.island.current().w,
+                self.island.side_room(),
+            ),
         };
     }
 
@@ -965,7 +1111,10 @@ impl App {
 
     /// Where a mouse message's point is on the screen, pixels across.
     fn screen_x(&self, lp: LPARAM) -> i32 {
-        let mut pt = POINT { x: (lp.0 & 0xffff) as u16 as i16 as i32, y: ((lp.0 >> 16) & 0xffff) as u16 as i16 as i32 };
+        let mut pt = POINT {
+            x: (lp.0 & 0xffff) as u16 as i16 as i32,
+            y: ((lp.0 >> 16) & 0xffff) as u16 as i16 as i32,
+        };
         unsafe {
             let _ = windows::Win32::Graphics::Gdi::ClientToScreen(self.hwnd, &mut pt);
         }
@@ -994,7 +1143,12 @@ impl App {
         }
         self.grab = Some(Grab { moved: true, ..g });
         let mon_w = (self.monitor.rect.right - self.monitor.rect.left) as f32 / s;
-        let centre = spot::fit_centre(g.centre + dx as f32 / s, mon_w, self.island.current().w, self.island.side_room());
+        let centre = spot::fit_centre(
+            g.centre + dx as f32 / s,
+            mon_w,
+            self.island.current().w,
+            self.island.side_room(),
+        );
         self.st.settings.island_x = spot::remember(centre, mon_w);
         self.sync_spot();
         self.request_frame();
@@ -1023,7 +1177,14 @@ impl App {
         if floats != self.laid_floating {
             self.layout_surface();
             let (w, h) = (self.surface.w, self.surface.h);
-            self.log_queue.push(format!("island {}; window {w}x{h}", if floats { "floats below the top edge" } else { "hangs from the top edge" }));
+            self.log_queue.push(format!(
+                "island {}; window {w}x{h}",
+                if floats {
+                    "floats below the top edge"
+                } else {
+                    "hangs from the top edge"
+                }
+            ));
         }
     }
 
@@ -1037,10 +1198,16 @@ impl App {
         let need_w = ((bw + 2.0 * self.island.side_room()) * s).ceil() as i32;
         let need_h = ((bh + self.island.bottom_room() + self.island.top()) * s).ceil() as i32;
         if need_w > self.surface.w || need_h > self.surface.h {
-            let tallest = PageKind::ALL.iter().map(|p| pages::content_height(*p, &self.st)).fold(0.0f32, f32::max);
+            let tallest = PageKind::ALL
+                .iter()
+                .map(|p| pages::content_height(*p, &self.st))
+                .fold(0.0f32, f32::max);
             let body_h = (pages::HEADER_H + tallest + pages::PAD).max(bh / OVERSHOOT * 1.1);
             pinfo!("island outgrew the window; growing it to fit {bw:.0}x{bh:.0} DIP");
-            self.layout_surface_for(self.st.settings.expanded_width.max(bw / OVERSHOOT * 1.1), body_h);
+            self.layout_surface_for(
+                self.st.settings.expanded_width.max(bw / OVERSHOOT * 1.1),
+                body_h,
+            );
         }
     }
 
@@ -1129,7 +1296,13 @@ impl App {
 
     // ------------------------------------------------------------ messages
 
-    fn handle_island(&mut self, msg: u32, wp: WPARAM, lp: LPARAM, deferred: &mut Vec<Deferred>) -> Option<LRESULT> {
+    fn handle_island(
+        &mut self,
+        msg: u32,
+        wp: WPARAM,
+        lp: LPARAM,
+        deferred: &mut Vec<Deferred>,
+    ) -> Option<LRESULT> {
         match msg {
             WM_APP_FRAME => {
                 // Clear `pending` after the frame so a slow frame can't keep the
@@ -1177,7 +1350,12 @@ impl App {
                     self.hovering = true;
                     self.collapse_due = false;
                     unsafe {
-                        let mut tme = TRACKMOUSEEVENT { cbSize: std::mem::size_of::<TRACKMOUSEEVENT>() as u32, dwFlags: TME_LEAVE, hwndTrack: self.hwnd, dwHoverTime: 0 };
+                        let mut tme = TRACKMOUSEEVENT {
+                            cbSize: std::mem::size_of::<TRACKMOUSEEVENT>() as u32,
+                            dwFlags: TME_LEAVE,
+                            hwndTrack: self.hwnd,
+                            dwHoverTime: 0,
+                        };
                         let _ = TrackMouseEvent(&mut tme);
                         let _ = KillTimer(self.hwnd, TIMER_COLLAPSE);
                     }
@@ -1219,7 +1397,12 @@ impl App {
                 self.input.pressed_id = self.hit_at(p).map(|h| h.id);
                 unsafe { SetCapture(self.hwnd) };
                 if !self.expanded {
-                    let inline = self.st.notice.as_ref().and_then(|n| n.inline).filter(|_| self.input.pressed_id == Some(wid("notice.act")));
+                    let inline = self
+                        .st
+                        .notice
+                        .as_ref()
+                        .and_then(|n| n.inline)
+                        .filter(|_| self.input.pressed_id == Some(wid("notice.act")));
                     if let Some(a) = inline {
                         // The notice's inline pill acts in place without
                         // expanding. The press is consumed here, so the
@@ -1234,8 +1417,14 @@ impl App {
                         // Opens when the button comes up (`open_from_press`),
                         // unless the pointer moves sideways first: then it
                         // drags the island along the top edge (`drag_island`).
-                        let centre = (self.surface.x - self.monitor.rect.left) as f32 / self.gfx.scale() + self.cx;
-                        self.grab = Some(Grab { from_px: self.screen_x(lp), centre, moved: false });
+                        let centre = (self.surface.x - self.monitor.rect.left) as f32
+                            / self.gfx.scale()
+                            + self.cx;
+                        self.grab = Some(Grab {
+                            from_px: self.screen_x(lp),
+                            centre,
+                            moved: false,
+                        });
                         // Held still on it, it doesn't open by itself either.
                         self.cancel_hover();
                     }
@@ -1286,7 +1475,9 @@ impl App {
                 if lp.0 != self.hwnd.0 as isize && self.grab.take().is_some_and(|g| g.moved) {
                     self.dropped_island();
                 }
-                if lp.0 != self.hwnd.0 as isize && (self.input.down || self.input.pressed_id.is_some()) {
+                if lp.0 != self.hwnd.0 as isize
+                    && (self.input.down || self.input.pressed_id.is_some())
+                {
                     self.input.down = false;
                     self.input.pressed_id = None;
                     if !self.hovering {
@@ -1327,7 +1518,12 @@ impl App {
                 Some(LRESULT(0))
             }
             WM_SETCURSOR => {
-                let kind = self.input.mouse.and_then(|p| self.hit_at(p)).map(|h| h.cursor).unwrap_or(CursorKind::Arrow);
+                let kind = self
+                    .input
+                    .mouse
+                    .and_then(|p| self.hit_at(p))
+                    .map(|h| h.cursor)
+                    .unwrap_or(CursorKind::Arrow);
                 unsafe {
                     let id = match kind {
                         CursorKind::Arrow => IDC_ARROW,
@@ -1340,7 +1536,11 @@ impl App {
                 }
                 Some(LRESULT(1))
             }
-            WM_MOUSEACTIVATE => Some(LRESULT(if self.text_focus { MA_ACTIVATE as isize } else { MA_NOACTIVATE as isize })),
+            WM_MOUSEACTIVATE => Some(LRESULT(if self.text_focus {
+                MA_ACTIVATE as isize
+            } else {
+                MA_NOACTIVATE as isize
+            })),
             WM_CHAR => {
                 if self.text_focus {
                     let u = wp.0 as u32;
@@ -1348,7 +1548,11 @@ impl App {
                         self.high_surrogate = Some(u as u16);
                         None
                     } else if (0xDC00..0xE000).contains(&u) {
-                        self.high_surrogate.take().and_then(|h| char::decode_utf16([h, u as u16]).next().and_then(|r| r.ok()))
+                        self.high_surrogate.take().and_then(|h| {
+                            char::decode_utf16([h, u as u16])
+                                .next()
+                                .and_then(|r| r.ok())
+                        })
                     } else {
                         self.high_surrogate = None;
                         char::from_u32(u)
@@ -1423,7 +1627,13 @@ impl App {
         }
     }
 
-    fn handle_helper(&mut self, msg: u32, wp: WPARAM, lp: LPARAM, deferred: &mut Vec<Deferred>) -> Option<LRESULT> {
+    fn handle_helper(
+        &mut self,
+        msg: u32,
+        wp: WPARAM,
+        lp: LPARAM,
+        deferred: &mut Vec<Deferred>,
+    ) -> Option<LRESULT> {
         if msg == self.taskbar_created_msg && msg != 0 {
             if let Some(t) = self.tray.take() {
                 t.remove();
@@ -1506,13 +1716,6 @@ impl App {
                 pages::script::toggle(&mut self.st);
                 self.request_frame();
                 Some(LRESULT(0))
-                if wp.0 as u16 == VK_ESCAPE.0
-                    && matches!(self.st.ui.numa.phase, crate::state::NumaPhase::Takeover)
-                {
-                    self.numa_cmd(crate::commands::NumaCmd::StopTakeover);
-                    self.request_frame();
-                    return Some(LRESULT(0));
-                }
             }
             WM_QUERYENDSESSION => Some(LRESULT(1)),
             WM_ENDSESSION => {
@@ -1552,7 +1755,11 @@ impl App {
                 }
                 w.raise();
             }
-            None => match SettingsWindow::new(self.monitor.work, self.gfx.dpi.round() as u32, section.unwrap_or(Section::General)) {
+            None => match SettingsWindow::new(
+                self.monitor.work,
+                self.gfx.dpi.round() as u32,
+                section.unwrap_or(Section::General),
+            ) {
                 Ok(w) => {
                     pinfo!("settings window: open");
                     self.settings_win = Some(w);
@@ -1565,7 +1772,11 @@ impl App {
                 }
             },
         }
-        if self.settings_win.as_ref().is_some_and(|w| w.view.section == Section::Addons) {
+        if self
+            .settings_win
+            .as_ref()
+            .is_some_and(|w| w.view.section == Section::Addons)
+        {
             self.oyenza(OyenzaCmd::CheckPro);
         }
         self.paint_settings(deferred);
@@ -1584,7 +1795,9 @@ impl App {
         for _ in 0..4 {
             self.st.now = self.st.now.max(clock::mono());
             let now = self.st.now;
-            let Some(w) = self.settings_win.as_mut() else { return };
+            let Some(w) = self.settings_win.as_mut() else {
+                return;
+            };
             let before = w.view.section;
             let out = w.paint(&mut self.st, now, None, false);
             let after = w.view.section;
@@ -1615,7 +1828,9 @@ impl App {
     /// Draw the Settings window on this frame when something in it changed
     /// (all of it), or still glides (only what moves).
     fn paint_settings_if_dirty(&mut self, deferred: &mut Vec<Deferred>) {
-        let Some(w) = self.settings_win.as_ref() else { return };
+        let Some(w) = self.settings_win.as_ref() else {
+            return;
+        };
         if w.view.dirty {
             self.paint_settings(deferred);
         } else if w.view.moving {
@@ -1634,9 +1849,21 @@ impl App {
         self.settings_win.as_ref().is_some_and(|w| w.view.moving)
     }
 
-    fn handle_settings_window(&mut self, hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM, deferred: &mut Vec<Deferred>) -> Option<LRESULT> {
+    fn handle_settings_window(
+        &mut self,
+        hwnd: HWND,
+        msg: u32,
+        wp: WPARAM,
+        lp: LPARAM,
+        deferred: &mut Vec<Deferred>,
+    ) -> Option<LRESULT> {
         let w = self.settings_win.as_mut().filter(|w| w.hwnd == hwnd)?;
-        let xy = |lp: LPARAM| ((lp.0 & 0xffff) as u16 as i16 as i32, ((lp.0 >> 16) & 0xffff) as u16 as i16 as i32);
+        let xy = |lp: LPARAM| {
+            (
+                (lp.0 & 0xffff) as u16 as i16 as i32,
+                ((lp.0 >> 16) & 0xffff) as u16 as i16 as i32,
+            )
+        };
         match msg {
             WM_NCHITTEST => {
                 // Empty parts of the card move the window; the shadow takes nothing.
@@ -1659,7 +1886,12 @@ impl App {
                 if !w.tracking {
                     w.tracking = true;
                     unsafe {
-                        let mut tme = TRACKMOUSEEVENT { cbSize: std::mem::size_of::<TRACKMOUSEEVENT>() as u32, dwFlags: TME_LEAVE, hwndTrack: hwnd, dwHoverTime: 0 };
+                        let mut tme = TRACKMOUSEEVENT {
+                            cbSize: std::mem::size_of::<TRACKMOUSEEVENT>() as u32,
+                            dwFlags: TME_LEAVE,
+                            hwndTrack: hwnd,
+                            dwHoverTime: 0,
+                        };
                         let _ = TrackMouseEvent(&mut tme);
                     }
                 }
@@ -1704,13 +1936,18 @@ impl App {
                 if raw % WHEEL_DELTA as i32 == 0 {
                     w.view.wheel(p, delta);
                 } else {
-                    w.view.scroll_by(p, delta * crate::settings_window::WHEEL_STEP);
+                    w.view
+                        .scroll_by(p, delta * crate::settings_window::WHEEL_STEP);
                 }
                 self.paint_settings(deferred);
                 Some(LRESULT(0))
             }
             WM_SETCURSOR if (lp.0 & 0xffff) as u32 == HTCLIENT => {
-                let kind = w.view.input.mouse.map_or(CursorKind::Arrow, |p| w.view.cursor_at(p));
+                let kind = w
+                    .view
+                    .input
+                    .mouse
+                    .map_or(CursorKind::Arrow, |p| w.view.cursor_at(p));
                 unsafe {
                     let id = match kind {
                         CursorKind::Arrow => IDC_ARROW,
@@ -1765,12 +2002,19 @@ impl App {
                 }
                 if !self.hovering || self.expanded || self.grab.is_some() {
                     self.hover_arm = None;
-                } else if self.mode == Mode::Notice && self.st.notice.as_ref().is_some_and(|n| n.inline.is_some()) {
+                } else if self.mode == Mode::Notice
+                    && self.st.notice.as_ref().is_some_and(|n| n.inline.is_some())
+                {
                     // A notice with an inline pill stays put under a resting
                     // pointer so the pill can be clicked (a click on the rest
                     // of the notice still opens its page). The dwell stays
                     // armed: the next movement restarts it.
-                } else if self.input.mouse.and_then(|p| self.hit_at(p)).is_some_and(|h| h.id == wid(activities::PRAYER_OK_ID)) {
+                } else if self
+                    .input
+                    .mouse
+                    .and_then(|p| self.hit_at(p))
+                    .is_some_and(|h| h.id == wid(activities::PRAYER_OK_ID))
+                {
                     // So does the prayer countdown under a pointer resting on
                     // its OK (resting on the rest of it still opens).
                 } else {
@@ -1842,6 +2086,10 @@ impl App {
                 }
                 self.update_due();
             }
+            TIMER_NUMA => {
+                self.poll_numa_hotkey();
+                self.poll_numa_listen();
+            }
             TIMER_SELFTEST => {
                 if let Some(mut t) = self.selftest.take() {
                     let done = t.step(self);
@@ -1864,12 +2112,26 @@ impl App {
     fn use_apple_music_token(&mut self) {
         let text = services::clipboard::read_text(self.hwnd).unwrap_or_default();
         let Some(token) = poni_core::applemusic::clean_user_token(&text) else {
-            self.st.notify(Icon::Lyrics, palette::ORANGE, "No Apple Music token copied", "Copy media-user-token first", 6.0, None);
+            self.st.notify(
+                Icon::Lyrics,
+                palette::ORANGE,
+                "No Apple Music token copied",
+                "Copy media-user-token first",
+                6.0,
+                None,
+            );
             return;
         };
         if let Err(e) = services::secret::save(&paths::apple_music_token_path(), &token) {
             pwarn!("apple music: cannot save the token ({e})");
-            self.st.notify(Icon::Lyrics, palette::ORANGE, "Couldn't save the token", "Details in poni.log", 5.0, None);
+            self.st.notify(
+                Icon::Lyrics,
+                palette::ORANGE,
+                "Couldn't save the token",
+                "Details in poni.log",
+                5.0,
+                None,
+            );
             return;
         }
         pinfo!("apple music: token saved");
@@ -1878,13 +2140,27 @@ impl App {
             s.apple_music_token_changed();
         }
         self.refetch_lyrics();
-        self.st.notify(Icon::Lyrics, palette::BLUE, "Checking the Apple Music token", "One moment", 4.0, None);
+        self.st.notify(
+            Icon::Lyrics,
+            palette::BLUE,
+            "Checking the Apple Music token",
+            "One moment",
+            4.0,
+            None,
+        );
     }
 
     fn forget_apple_music_token(&mut self) {
         if let Err(e) = services::secret::delete(&paths::apple_music_token_path()) {
             pwarn!("apple music: cannot remove the token ({e})");
-            self.st.notify(Icon::Lyrics, palette::ORANGE, "Couldn't remove the token", "Details in poni.log", 5.0, None);
+            self.st.notify(
+                Icon::Lyrics,
+                palette::ORANGE,
+                "Couldn't remove the token",
+                "Details in poni.log",
+                5.0,
+                None,
+            );
             return;
         }
         pinfo!("apple music: token removed");
@@ -1892,17 +2168,41 @@ impl App {
             s.apple_music_token_changed();
         }
         self.refetch_lyrics();
-        self.st.notify(Icon::Lyrics, palette::BLUE, "Apple Music lyrics off", "Lyrics from LRCLIB only", 4.0, None);
+        self.st.notify(
+            Icon::Lyrics,
+            palette::BLUE,
+            "Apple Music lyrics off",
+            "Lyrics from LRCLIB only",
+            4.0,
+            None,
+        );
     }
 
     fn on_apple_music(&mut self, status: AppleMusicStatus) {
         let (color, title, subtitle) = match status {
-            AppleMusicStatus::Accepted => (palette::GREEN, "Apple Music lyrics on", "LRCLIB fills in the rest"),
-            AppleMusicStatus::Rejected => (palette::ORANGE, "Apple Music token not accepted", "Copy a fresh one from music.apple.com"),
-            AppleMusicStatus::Unreachable => (palette::ORANGE, "Can't reach Apple Music", "Token saved; trying again later"),
-            AppleMusicStatus::NoAccess => (palette::ORANGE, "No lyrics from Apple Music", "They need an Apple Music subscription"),
+            AppleMusicStatus::Accepted => (
+                palette::GREEN,
+                "Apple Music lyrics on",
+                "LRCLIB fills in the rest",
+            ),
+            AppleMusicStatus::Rejected => (
+                palette::ORANGE,
+                "Apple Music token not accepted",
+                "Copy a fresh one from music.apple.com",
+            ),
+            AppleMusicStatus::Unreachable => (
+                palette::ORANGE,
+                "Can't reach Apple Music",
+                "Token saved; trying again later",
+            ),
+            AppleMusicStatus::NoAccess => (
+                palette::ORANGE,
+                "No lyrics from Apple Music",
+                "They need an Apple Music subscription",
+            ),
         };
-        self.st.notify(Icon::Lyrics, color, title, subtitle, 6.0, None);
+        self.st
+            .notify(Icon::Lyrics, color, title, subtitle, 6.0, None);
     }
 
     // ------------------------------------------------------------ AI usage
@@ -1939,7 +2239,11 @@ impl App {
                 let u = &mut self.st.settings.usage;
                 u.hidden.retain(|k| k != id.key());
                 u.added.retain(|k| k != id.key());
-                let list = if matches!(c, UsageCmd::Show(_)) { &mut u.added } else { &mut u.hidden };
+                let list = if matches!(c, UsageCmd::Show(_)) {
+                    &mut u.added
+                } else {
+                    &mut u.hidden
+                };
                 list.push(id.key().into());
                 let before = self.saved_settings.clone();
                 self.settings_changed(&before);
@@ -2000,7 +2304,10 @@ impl App {
     /// starts the first time it opens.
     fn set_stocks_watch(&mut self) {
         // The self-test's scenes show a made-up market: nothing is asked.
-        let open = self.mode == Mode::Expanded(PageKind::Stocks) && !self.locked && !self.display_off && self.selftest.is_none();
+        let open = self.mode == Mode::Expanded(PageKind::Stocks)
+            && !self.locked
+            && !self.display_off
+            && self.selftest.is_none();
         // Closed, and the worker already told so: nothing to do, every frame.
         if !open && !self.stocks_open {
             return;
@@ -2032,13 +2339,16 @@ impl App {
                 self.st.oyenza.link = OyenzaLink::Connected { account };
                 self.ask_pro();
             }
-            OyenzaEvent::Connecting { code, url, expires_in_s } => {
-                self.st.oyenza.link = OyenzaLink::Connecting { code, url, until: now + expires_in_s as f64 };
-            TIMER_NUMA => {
-                self.poll_numa_hotkey();
-                self.poll_numa_safety();
-                self.poll_numa_listen();
-            }
+            OyenzaEvent::Connecting {
+                code,
+                url,
+                expires_in_s,
+            } => {
+                self.st.oyenza.link = OyenzaLink::Connecting {
+                    code,
+                    url,
+                    until: now + expires_in_s as f64,
+                };
                 // Keep the code on screen while the person goes to oyenza.app.
                 if self.st.oyenza.pinned_before.is_none() {
                     self.st.oyenza.pinned_before = Some(self.st.pinned);
@@ -2049,7 +2359,14 @@ impl App {
             }
             OyenzaEvent::Connected { account } => {
                 self.end_sign_in();
-                self.st.notify(Icon::Check, palette::GREEN, "Connected to Oyenza", format!("as {account}"), 6.0, Some(NoticeAction::OpenPage(PageKind::Oyenza)));
+                self.st.notify(
+                    Icon::Check,
+                    palette::GREEN,
+                    "Connected to Oyenza",
+                    format!("as {account}"),
+                    6.0,
+                    Some(NoticeAction::OpenPage(PageKind::Oyenza)),
+                );
                 self.st.oyenza.link = OyenzaLink::Connected { account };
                 self.ask_pro();
                 // Signed in from the Today page: back to it, where the day comes in.
@@ -2063,7 +2380,8 @@ impl App {
                 self.end_sign_in();
                 self.st.oyenza.link = OyenzaLink::Off;
                 let (title, subtitle) = oyenza::connect_failure_text(&code);
-                self.st.notify(Icon::Unlink, palette::ORANGE, title, subtitle, 6.0, None);
+                self.st
+                    .notify(Icon::Unlink, palette::ORANGE, title, subtitle, 6.0, None);
             }
             OyenzaEvent::ConnectCancelled => {
                 self.st.oyenza.from_today = false;
@@ -2091,7 +2409,11 @@ impl App {
             }
             OyenzaEvent::ActivityChecked => self.st.oyenza.updated_unix = Some(self.st.unix),
             OyenzaEvent::Bills { today, bills } => {
-                let day = if today.is_empty() { self.st.day_key() } else { today };
+                let day = if today.is_empty() {
+                    self.st.day_key()
+                } else {
+                    today
+                };
                 self.st.oyenza.bills = bills;
                 self.st.oyenza.bills_today = day.clone();
                 self.st.oyenza.updated_unix = Some(self.st.unix);
@@ -2107,7 +2429,9 @@ impl App {
                 self.st.oyenza.agenda = None;
                 self.st.oyenza.agenda_state = crate::state::AgendaState::Unavailable;
             }
-            OyenzaEvent::DayFailed => self.st.oyenza.agenda_state = crate::state::AgendaState::Failed,
+            OyenzaEvent::DayFailed => {
+                self.st.oyenza.agenda_state = crate::state::AgendaState::Failed
+            }
             OyenzaEvent::Pro(pro) => self.st.oyenza.pro = Some(pro),
             // Steps asked for before Health was switched off stay out.
             OyenzaEvent::Health(next) if self.st.health_on() => {
@@ -2133,7 +2457,11 @@ impl App {
             }
             OyenzaEvent::Undone => self.st.oyenza.flash = Some(("Taken back".into(), now + 3.0)),
             OyenzaEvent::UndoFailed(code) => {
-                let line = if code == "too_late" { "Too late to undo here. Change it in oyenza.app" } else { "Couldn't undo. Change it in oyenza.app" };
+                let line = if code == "too_late" {
+                    "Too late to undo here. Change it in oyenza.app"
+                } else {
+                    "Couldn't undo. Change it in oyenza.app"
+                };
                 self.st.oyenza.flash = Some((line.into(), now + 5.0));
             }
             OyenzaEvent::Disconnected { by_server } => {
@@ -2142,9 +2470,16 @@ impl App {
                 self.st.health = None;
                 // Signed out: an IELTS session ends, and the ladder was the account's.
                 self.ielts_off();
-                let (title, subtitle) =
-                    if by_server { ("Oyenza disconnected", "Sign in again in Settings") } else { ("Disconnected from Oyenza", "Sign in again any time in Settings") };
-                self.st.notify(Icon::Unlink, palette::TEXT_DIM, title, subtitle, 6.0, None);
+                let (title, subtitle) = if by_server {
+                    ("Oyenza disconnected", "Sign in again in Settings")
+                } else {
+                    (
+                        "Disconnected from Oyenza",
+                        "Sign in again any time in Settings",
+                    )
+                };
+                self.st
+                    .notify(Icon::Unlink, palette::TEXT_DIM, title, subtitle, 6.0, None);
             }
         }
         // Signed in or out, the Oyenza page's height changes: the window fits the tallest page again.
@@ -2194,7 +2529,14 @@ impl App {
     /// amounts on the island" is on (`hidden` None: nothing to hide). While a
     /// full-screen app hides the island it waits, and shows when the island
     /// is back if it isn't old by then.
-    fn oyenza_notice(&mut self, icon: Icon, color: Color, title: String, shown: String, hidden: Option<String>) {
+    fn oyenza_notice(
+        &mut self,
+        icon: Icon,
+        color: Color,
+        title: String,
+        shown: String,
+        hidden: Option<String>,
+    ) {
         let now = self.st.now;
         let hide = hidden.is_some() && !self.st.settings.oyenza_show_amounts;
         let notice = Notice {
@@ -2202,7 +2544,11 @@ impl App {
             color,
             title,
             title_dim: String::new(),
-            subtitle: if hide { hidden.unwrap_or_default() } else { shown.clone() },
+            subtitle: if hide {
+                hidden.unwrap_or_default()
+            } else {
+                shown.clone()
+            },
             until: now + oyenza::NOTICE_S,
             action: Some(NoticeAction::OpenPage(PageKind::Oyenza)),
             inline: hide.then_some(InlineAction::ShowAmount),
@@ -2240,12 +2586,27 @@ impl App {
         if st.local.hour < oyenza::BILL_HOUR {
             return;
         }
-        let Some(b) = oyenza::bills_to_remind(&st.oyenza.bills, today, &st.store.oyenza_noticed).first().map(|b| (*b).clone()) else { return };
+        let Some(b) = oyenza::bills_to_remind(&st.oyenza.bills, today, &st.store.oyenza_noticed)
+            .first()
+            .map(|b| (*b).clone())
+        else {
+            return;
+        };
         st.store.oyenza_noticed.push(oyenza::notice_key(&b));
         st.save();
         let (shown, hidden) = oyenza::bill_subtitles(&b);
-        let icon = if b.is_card() { Icon::Card } else { Icon::Calendar };
-        self.oyenza_notice(icon, palette::ORANGE, oyenza::bill_title(&b, today), shown, hidden);
+        let icon = if b.is_card() {
+            Icon::Card
+        } else {
+            Icon::Calendar
+        };
+        self.oyenza_notice(
+            icon,
+            palette::ORANGE,
+            oyenza::bill_title(&b, today),
+            shown,
+            hidden,
+        );
     }
 
     /// Look up the current track's lyrics again (the sources changed).
@@ -2253,9 +2614,15 @@ impl App {
         if !self.st.settings.lyrics {
             return;
         }
-        let Some(m) = self.st.media.clone().filter(|m| !m.title.is_empty()) else { return };
+        let Some(m) = self.st.media.clone().filter(|m| !m.title.is_empty()) else {
+            return;
+        };
         if let Some(svc) = self.services.as_ref() {
-            self.st.lyrics = LyricsState { track_key: m.track_key.clone(), status: LyricsStatus::Loading, ..Default::default() };
+            self.st.lyrics = LyricsState {
+                track_key: m.track_key.clone(),
+                status: LyricsStatus::Loading,
+                ..Default::default()
+            };
             svc.request_lyrics(&m);
         }
     }
@@ -2279,10 +2646,15 @@ impl App {
         let now = &self.st.settings;
         if !before.lyrics && now.lyrics {
             if let Some(m) = self.st.media.clone() {
-                let stale = self.st.lyrics.track_key != m.track_key || self.st.lyrics.status == LyricsStatus::Idle;
+                let stale = self.st.lyrics.track_key != m.track_key
+                    || self.st.lyrics.status == LyricsStatus::Idle;
                 if stale && !m.title.is_empty() {
                     if let Some(svc) = self.services.as_ref() {
-                        self.st.lyrics = LyricsState { track_key: m.track_key.clone(), status: LyricsStatus::Loading, ..Default::default() };
+                        self.st.lyrics = LyricsState {
+                            track_key: m.track_key.clone(),
+                            status: LyricsStatus::Loading,
+                            ..Default::default()
+                        };
                         svc.request_lyrics(&m);
                     }
                 }
@@ -2297,7 +2669,10 @@ impl App {
         if before.prayer.place != self.st.settings.prayer.place {
             self.resolve_prayer_place();
         }
-        if !before.prayer.follow_location && self.st.settings.prayer.follow_location && self.st.prayer_on() {
+        if !before.prayer.follow_location
+            && self.st.settings.prayer.follow_location
+            && self.st.prayer_on()
+        {
             self.locate();
         }
         // The Downloader: off stops its downloads before its tools are deleted.
@@ -2309,8 +2684,21 @@ impl App {
         for a in poni_core::addons::ALL {
             let on = self.st.settings.addon_on(a.id);
             if before.addon_on(a.id) != on {
-                pinfo!("add-ons: {} switched {}", a.id, if on { "on" } else { "off" });
-                self.st.addons.insert(a.id, if !on { AddonStatus::Off } else if a.downloads() { AddonStatus::Checking } else { AddonStatus::Ready });
+                pinfo!(
+                    "add-ons: {} switched {}",
+                    a.id,
+                    if on { "on" } else { "off" }
+                );
+                self.st.addons.insert(
+                    a.id,
+                    if !on {
+                        AddonStatus::Off
+                    } else if a.downloads() {
+                        AddonStatus::Checking
+                    } else {
+                        AddonStatus::Ready
+                    },
+                );
                 if let Some(s) = self.services.as_ref() {
                     s.set_addon(a.id, on);
                 }
@@ -2318,7 +2706,9 @@ impl App {
         }
         // Notifications on: listen, Windows' question first; off: stop.
         let notify_id = poni_core::addons::NOTIFICATIONS.id;
-        if before.addon_on(notify_id) != self.st.settings.addon_on(notify_id) && self.selftest.is_none() {
+        if before.addon_on(notify_id) != self.st.settings.addon_on(notify_id)
+            && self.selftest.is_none()
+        {
             if self.st.settings.addon_on(notify_id) {
                 self.start_notify(true);
             } else {
@@ -2357,7 +2747,11 @@ impl App {
             unsafe {
                 let _ = KillTimer(self.hwnd, TIMER_PEEK);
             }
-            self.peek_game(if self.st.settings.game_peek { "peeks picked" } else { "picked to stay" });
+            self.peek_game(if self.st.settings.game_peek {
+                "peeks picked"
+            } else {
+                "picked to stay"
+            });
         }
         // The AI tab's heads-up notices: its worker reads every few minutes only while they're on.
         if before.usage.notices != self.st.settings.usage.notices {
@@ -2426,7 +2820,10 @@ impl App {
                 // Never move the user's file aside or reset on a typo: keep the
                 // current settings and say what's wrong.
                 let path = paths::settings_path();
-                match std::fs::read_to_string(&path).map_err(|e| e.to_string()).and_then(|t| parse_json::<Settings>(&t)) {
+                match std::fs::read_to_string(&path)
+                    .map_err(|e| e.to_string())
+                    .and_then(|t| parse_json::<Settings>(&t))
+                {
                     Ok(s2) => {
                         let s2 = s2.sanitized();
                         let monitor_changed = s2.monitor != self.st.settings.monitor;
@@ -2444,7 +2841,14 @@ impl App {
                     }
                     Err(e) => {
                         pwarn!("settings.json not reloaded: {e}");
-                        self.st.notify(crate::icons::Icon::Sliders, palette::ORANGE, "Settings not reloaded", "settings.json has an error; see poni.log", 5.0, None);
+                        self.st.notify(
+                            crate::icons::Icon::Sliders,
+                            palette::ORANGE,
+                            "Settings not reloaded",
+                            "settings.json has an error; see poni.log",
+                            5.0,
+                            None,
+                        );
                     }
                 }
             }
@@ -2480,11 +2884,18 @@ impl App {
     pub fn on_event(&mut self, ev: AppEvent) {
         let now = clock::mono();
         self.st.now = now;
-        let media_before = matches!(ev, AppEvent::Media(_) | AppEvent::MediaTimeline { .. }).then(|| self.media_snapshot());
+        let media_before = matches!(ev, AppEvent::Media(_) | AppEvent::MediaTimeline { .. })
+            .then(|| self.media_snapshot());
         // What the Settings window shows that a service reports.
         let shown = matches!(
             ev,
-            AppEvent::Autostart(_) | AppEvent::Update(_) | AppEvent::Oyenza(_) | AppEvent::Addon { .. } | AppEvent::Usage(_) | AppEvent::Located(_) | AppEvent::Notify(_)
+            AppEvent::Autostart(_)
+                | AppEvent::Update(_)
+                | AppEvent::Oyenza(_)
+                | AppEvent::Addon { .. }
+                | AppEvent::Usage(_)
+                | AppEvent::Located(_)
+                | AppEvent::Notify(_)
         );
         if let Some(w) = self.settings_win.as_mut().filter(|_| shown) {
             w.view.dirty = true;
@@ -2492,7 +2903,13 @@ impl App {
         // A download's bytes coming in while nobody can see the island (locked,
         // display off) wait for the next frame something else asks for: the
         // pill catches up then, as nothing else of it moves on its own.
-        let unseen = matches!(ev, AppEvent::Download { line: poni_core::ytdlp::Line::Progress { .. }, .. }) && (self.locked || self.display_off);
+        let unseen = matches!(
+            ev,
+            AppEvent::Download {
+                line: poni_core::ytdlp::Line::Progress { .. },
+                ..
+            }
+        ) && (self.locked || self.display_off);
         match ev {
             AppEvent::Backdrop => {
                 if self.glass.on_backdrop(self.hwnd, &mut self.gfx) {
@@ -2514,7 +2931,11 @@ impl App {
                         }
                         let changed = prev_key.as_deref() != Some(s.track_key.as_str());
                         if changed {
-                            self.st.lyrics = LyricsState { track_key: s.track_key.clone(), status: LyricsStatus::Idle, ..Default::default() };
+                            self.st.lyrics = LyricsState {
+                                track_key: s.track_key.clone(),
+                                status: LyricsStatus::Idle,
+                                ..Default::default()
+                            };
                             if self.st.settings.lyrics && !s.title.is_empty() {
                                 if let Some(svc) = self.services.as_ref() {
                                     self.st.lyrics.status = LyricsStatus::Loading;
@@ -2530,7 +2951,10 @@ impl App {
                     }
                 }
             }
-            AppEvent::MediaTimeline { track_key, timeline } => {
+            AppEvent::MediaTimeline {
+                track_key,
+                timeline,
+            } => {
                 if let Some(m) = self.st.media.as_mut() {
                     if m.track_key == track_key {
                         m.timeline = timeline;
@@ -2548,7 +2972,12 @@ impl App {
             AppEvent::Lyrics { track_key, result } => {
                 if self.st.lyrics.track_key == track_key {
                     match result {
-                        crate::events::LyricsResult::Found { lyrics, source, ruby, wants_ja_readings } => {
+                        crate::events::LyricsResult::Found {
+                            lyrics,
+                            source,
+                            ruby,
+                            wants_ja_readings,
+                        } => {
                             self.st.lyrics.status = LyricsStatus::Found;
                             self.st.lyrics.lyrics = Some(lyrics);
                             self.st.lyrics.source = source;
@@ -2560,21 +2989,36 @@ impl App {
                             // the song is read again with romaji. Only people
                             // who play Japanese songs get it; switched off by
                             // hand, it stays off (the Music page still offers it).
-                            if poni_core::addons::ja_switches_on(&self.st.settings, wants_ja_readings) {
+                            if poni_core::addons::ja_switches_on(
+                                &self.st.settings,
+                                wants_ja_readings,
+                            ) {
                                 pinfo!("lyrics: a Japanese song's kanji went unread; switching Japanese readings on");
-                                self.st.settings.set_addon(poni_core::addons::JAPANESE_READINGS.id, true);
+                                self.st
+                                    .settings
+                                    .set_addon(poni_core::addons::JAPANESE_READINGS.id, true);
                                 self.st.cmd(Command::SaveSettings);
                             }
                         }
-                        crate::events::LyricsResult::Instrumental => self.st.lyrics.status = LyricsStatus::Instrumental,
-                        crate::events::LyricsResult::NotFound => self.st.lyrics.status = LyricsStatus::NotFound,
-                        crate::events::LyricsResult::Error(e) => self.st.lyrics.status = LyricsStatus::Error(e),
+                        crate::events::LyricsResult::Instrumental => {
+                            self.st.lyrics.status = LyricsStatus::Instrumental
+                        }
+                        crate::events::LyricsResult::NotFound => {
+                            self.st.lyrics.status = LyricsStatus::NotFound
+                        }
+                        crate::events::LyricsResult::Error(e) => {
+                            self.st.lyrics.status = LyricsStatus::Error(e)
+                        }
                     }
                 }
             }
             AppEvent::Volume { level, muted } => {
                 let first = !self.st.volume.known;
-                self.st.volume = crate::state::VolumeState { level, muted, known: true };
+                self.st.volume = crate::state::VolumeState {
+                    level,
+                    muted,
+                    known: true,
+                };
                 if !first && self.st.settings.hud_volume {
                     self.st.show_hud(HudKind::Volume { level, muted }, 1.6);
                 }
@@ -2584,15 +3028,38 @@ impl App {
                 self.st.power = p;
                 if self.st.settings.hud_power && p.has_battery {
                     if p.on_ac != old.on_ac {
-                        self.st.show_hud(HudKind::Charging { percent: p.percent, plugged: p.on_ac }, 2.2);
-                    } else if !p.on_ac && ((old.percent > 20 && p.percent <= 20) || (old.percent > 10 && p.percent <= 10)) {
-                        self.st.show_hud(HudKind::LowBattery { percent: p.percent }, 4.0);
+                        self.st.show_hud(
+                            HudKind::Charging {
+                                percent: p.percent,
+                                plugged: p.on_ac,
+                            },
+                            2.2,
+                        );
+                    } else if !p.on_ac
+                        && ((old.percent > 20 && p.percent <= 20)
+                            || (old.percent > 10 && p.percent <= 10))
+                    {
+                        self.st
+                            .show_hud(HudKind::LowBattery { percent: p.percent }, 4.0);
                     }
                 }
             }
-            AppEvent::Bluetooth { name, connected, battery, audio } => {
+            AppEvent::Bluetooth {
+                name,
+                connected,
+                battery,
+                audio,
+            } => {
                 if self.st.settings.hud_bluetooth {
-                    self.st.show_hud(HudKind::Bluetooth { name, connected, battery, audio }, 2.6);
+                    self.st.show_hud(
+                        HudKind::Bluetooth {
+                            name,
+                            connected,
+                            battery,
+                            audio,
+                        },
+                        2.6,
+                    );
                 }
             }
             AppEvent::Fullscreen(on) => {
@@ -2608,7 +3075,11 @@ impl App {
                     self.request_frame();
                 }
             }
-            AppEvent::ShelfAdd(paths) if self.expanded && self.st.page == PageKind::Script && pages::script::take_drop(&mut self.st, &paths) => {
+            AppEvent::ShelfAdd(paths)
+                if self.expanded
+                    && self.st.page == PageKind::Script
+                    && pages::script::take_drop(&mut self.st, &paths) =>
+            {
                 // A text file dropped on the Script page becomes the script.
                 self.drag_hover = false;
                 self.st.drag_hover = false;
@@ -2646,7 +3117,10 @@ impl App {
                 let for_shelf = !ours || self.st.shelf_thumbs.contains_key(&path);
                 if ours {
                     let px = pages::system::icon_px(self.gfx.scale());
-                    self.st.app_icons.insert(path.clone(), image.as_ref().map(|i| pages::system::shrink_icon(i, px)));
+                    self.st.app_icons.insert(
+                        path.clone(),
+                        image.as_ref().map(|i| pages::system::shrink_icon(i, px)),
+                    );
                 }
                 if for_shelf {
                     self.st.shelf_thumbs.insert(path, image);
@@ -2667,7 +3141,10 @@ impl App {
                     // Peeks only: a sharp drop shows the readout (at most every half minute).
                     let now = clock::mono();
                     if let Some(fps) = fps.filter(|_| self.st.settings.game_peek) {
-                        if now >= self.game_peek_until && now - self.game_drop_at >= DROP_PEEK_EVERY_S && poni_core::frames::sharp_drop(&before, fps) {
+                        if now >= self.game_peek_until
+                            && now - self.game_drop_at >= DROP_PEEK_EVERY_S
+                            && poni_core::frames::sharp_drop(&before, fps)
+                        {
                             self.game_drop_at = now;
                             self.peek_game("the frame rate dropped");
                         }
@@ -2695,7 +3172,10 @@ impl App {
                     self.st.addons.insert(id, status);
                 }
                 if id == poni_core::addons::PRAYER_TIMES.id {
-                    if status == AddonStatus::Ready && self.st.settings.addon_on(id) && self.st.prayer.places.is_none() {
+                    if status == AddonStatus::Ready
+                        && self.st.settings.addon_on(id)
+                        && self.st.prayer.places.is_none()
+                    {
                         self.prayer_ready();
                     } else if status == AddonStatus::Off {
                         self.prayer_off();
@@ -2703,17 +3183,25 @@ impl App {
                 }
                 // Japanese readings arrived for the song that asked for them:
                 // read it again (its lyrics come from the cache).
-                if id == poni_core::addons::JAPANESE_READINGS.id && status == AddonStatus::Ready && self.st.lyrics.wants_ja_readings {
+                if id == poni_core::addons::JAPANESE_READINGS.id
+                    && status == AddonStatus::Ready
+                    && self.st.lyrics.wants_ja_readings
+                {
                     if let (Some(svc), Some(m)) = (self.services.as_ref(), self.st.media.as_ref()) {
                         if m.track_key == self.st.lyrics.track_key {
-                            pinfo!("lyrics: Japanese readings are on this PC; reading the song again");
+                            pinfo!(
+                                "lyrics: Japanese readings are on this PC; reading the song again"
+                            );
                             svc.request_lyrics(m);
                         }
                     }
                 }
             }
             AppEvent::Update(services::update::UpdateEvent::Checked(r)) => {
-                let open = self.updater.as_mut().is_some_and(|u| u.checked(&mut self.st, r, crate::updates::unix_now()));
+                let open = self
+                    .updater
+                    .as_mut()
+                    .is_some_and(|u| u.checked(&mut self.st, r, crate::updates::unix_now()));
                 self.schedule_update();
                 self.fetch_setup();
                 // Check for updates… found one to install: the Update sheet.
@@ -2724,7 +3212,11 @@ impl App {
                 self.request_frame();
             }
             AppEvent::Update(services::update::UpdateEvent::Downloaded(r)) => {
-                if self.updater.as_mut().is_some_and(|u| u.fetched(&mut self.st, r)) {
+                if self
+                    .updater
+                    .as_mut()
+                    .is_some_and(|u| u.fetched(&mut self.st, r))
+                {
                     self.expand();
                 }
                 self.request_frame();
@@ -2746,7 +3238,11 @@ impl App {
                 let failed = self.ielts.voice.failed();
                 self.ielts.voice.stop();
                 // A clip that couldn't play shows its words for their reading time.
-                let fx = if failed { self.st.ielts.voice_failed(now) } else { self.st.ielts.voice_ended(now) };
+                let fx = if failed {
+                    self.st.ielts.voice_failed(now)
+                } else {
+                    self.st.ielts.voice_ended(now)
+                };
                 self.ielts_do(fx);
             }
             AppEvent::VoiceEnded => {}
@@ -2761,6 +3257,66 @@ impl App {
                 let fx = self.st.ielts.mic_failed(issue);
                 self.ielts_do(fx);
             }
+            AppEvent::NumaTranscript(text) => {
+                pinfo!("numa transcript received: {text}");
+                self.numa_listen_until = None;
+                let text = text.trim().to_owned();
+                if text.is_empty() {
+                    // The mic caught a breath, not words. Answer locally: an
+                    // empty question must never reach the coding lane.
+                    self.st.ui.numa.phase = crate::state::NumaPhase::Idle;
+                    self.st.ui.numa.transcript = None;
+                    services::numa::speak("Didn't catch that.".into());
+                } else {
+                    self.st.ui.numa.phase = crate::state::NumaPhase::Thinking;
+                    self.st.ui.numa.transcript = Some(text.clone());
+                    services::numa::ask(text, self.sink.clone());
+                }
+            }
+            AppEvent::NumaWake => {
+                pinfo!("numa: wake word detected; opening notch");
+                self.st.page = PageKind::Numa;
+                self.expand();
+                self.start_raises();
+                // SAPI only detects the wake phrase. Deepgram transcribes the
+                // follow-up command recorded by Poni.
+                self.numa_cmd(NumaCmd::Start);
+                self.numa_listen_until = Some(now + services::wake::FOLLOW_UP_SECS);
+            }
+            AppEvent::NumaResponse(text) => {
+                self.st.ui.numa.phase = crate::state::NumaPhase::Idle;
+                if let Some(user) = self.st.ui.numa.transcript.take() {
+                    self.st.ui.numa.history.push(crate::state::NumaTurn {
+                        user,
+                        response: text.clone(),
+                        route: "assistant".into(),
+                    });
+                    self.st.ui.numa.history = self
+                        .st
+                        .ui
+                        .numa
+                        .history
+                        .iter()
+                        .rev()
+                        .take(12)
+                        .cloned()
+                        .collect::<Vec<_>>()
+                        .into_iter()
+                        .rev()
+                        .collect();
+                    save_numa_history(&self.st.ui.numa.history);
+                }
+                self.st.ui.numa.response = Some(text);
+                if let Some(response) = self.st.ui.numa.response.clone() {
+                    services::numa::speak(response);
+                }
+            }
+            AppEvent::NumaFailed(error) => {
+                pwarn!("numa request failed: {error}");
+                self.numa_listen_until = None;
+                self.st.ui.numa.phase = crate::state::NumaPhase::Error(error);
+            }
+            AppEvent::NumaGateway(event) => self.on_numa_gateway(event),
             AppEvent::Log(s) => pinfo!("{s}"),
         }
         if let Some(before) = media_before {
@@ -2771,9 +3327,41 @@ impl App {
         }
     }
 
+    /// Fold one gateway stream event into the notch's strip state.
+    fn on_numa_gateway(&mut self, event: services::numa_events::GatewayEvent) {
+        match event {
+            services::numa_events::GatewayEvent::Connected => {
+                if !self.st.ui.numa.gateway.connected {
+                    pinfo!("numa gateway: stream connected");
+                }
+                self.st.ui.numa.gateway.connected = true;
+            }
+            services::numa_events::GatewayEvent::Disconnected => {
+                if self.st.ui.numa.gateway.connected {
+                    pinfo!("numa gateway: stream dropped");
+                }
+                self.st.ui.numa.gateway.connected = false;
+            }
+            services::numa_events::GatewayEvent::Execution { kind, id, data } => {
+                // One line per transition keeps the log a truthful mirror of
+                // what the strip shows, without flooding it.
+                let tool = data
+                    .get("toolId")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or_default();
+                pinfo!("numa gateway: {kind} {id} {tool}");
+                self.st.ui.numa.gateway.apply(&kind, &id, &data);
+            }
+        }
+        self.request_frame();
+    }
+
     /// (player, track, playing) of the current media session.
     fn media_snapshot(&self) -> Option<(String, String, bool)> {
-        self.st.media.as_ref().map(|m| (m.app_id.clone(), m.track_key.clone(), m.is_playing()))
+        self.st
+            .media
+            .as_ref()
+            .map(|m| (m.app_id.clone(), m.track_key.clone(), m.is_playing()))
     }
 
     /// Track the pause grace period and the title peek after a media update.
@@ -2823,7 +3411,10 @@ impl App {
                 self.oyenza(OyenzaCmd::RefreshHealth);
             } else if self.st.page == PageKind::Notifications {
                 self.notify_cmd(NotifyCmd::Check);
-            } else if matches!(self.st.page, PageKind::Notes | PageKind::Ielts | PageKind::Addons) {
+            } else if matches!(
+                self.st.page,
+                PageKind::Notes | PageKind::Ielts | PageKind::Addons
+            ) {
                 self.oyenza(OyenzaCmd::CheckPro);
             }
         }
@@ -2834,7 +3425,12 @@ impl App {
     fn arm_hover(&mut self, p: Point) {
         self.hover_arm = Some(p);
         unsafe {
-            SetTimer(self.hwnd, TIMER_HOVER, self.st.settings.hover_delay_ms.max(1), None);
+            SetTimer(
+                self.hwnd,
+                TIMER_HOVER,
+                self.st.settings.hover_delay_ms.max(1),
+                None,
+            );
         }
     }
 
@@ -2861,7 +3457,13 @@ impl App {
             self.st.oyenza.scroll = 0.0;
             // Settings closes with the island: it opens again on the page it was opened from.
             if self.st.page == PageKind::Settings {
-                self.st.page = self.st.ui.before_settings.take().filter(|p| pages::tabs(&self.st).contains(p)).unwrap_or_else(|| pages::first_tab(&self.st));
+                self.st.page = self
+                    .st
+                    .ui
+                    .before_settings
+                    .take()
+                    .filter(|p| pages::tabs(&self.st).contains(p))
+                    .unwrap_or_else(|| pages::first_tab(&self.st));
             }
             self.st.update.sheet = false;
             self.st.update.said = None;
@@ -2877,7 +3479,13 @@ impl App {
     /// Nothing holds the open island: no pointer on it, no pin, typing,
     /// file drag, press or Phone drop.
     fn free_to_collapse(&self) -> bool {
-        !self.hovering && !self.st.pinned && !self.text_focus && !self.drag_hover && !self.menu_open && self.input.pressed_id.is_none() && !self.phone_holds()
+        !self.hovering
+            && !self.st.pinned
+            && !self.text_focus
+            && !self.drag_hover
+            && !self.menu_open
+            && self.input.pressed_id.is_none()
+            && !self.phone_holds()
     }
 
     /// The right-click menu closed: the island stays open with the pointer
@@ -2887,7 +3495,10 @@ impl App {
             return;
         }
         let mut pt = POINT::default();
-        let on_island = unsafe { GetCursorPos(&mut pt).is_ok() && windows::Win32::Graphics::Gdi::ScreenToClient(self.hwnd, &mut pt).as_bool() } && {
+        let on_island = unsafe {
+            GetCursorPos(&mut pt).is_ok()
+                && windows::Win32::Graphics::Gdi::ScreenToClient(self.hwnd, &mut pt).as_bool()
+        } && {
             let s = self.gfx.scale();
             self.hovering_inside(Point::new(pt.x as f32 / s, pt.y as f32 / s))
         };
@@ -2895,7 +3506,12 @@ impl App {
             // As a move onto it would: watch for the pointer leaving again.
             self.hovering = true;
             unsafe {
-                let mut tme = TRACKMOUSEEVENT { cbSize: std::mem::size_of::<TRACKMOUSEEVENT>() as u32, dwFlags: TME_LEAVE, hwndTrack: self.hwnd, dwHoverTime: 0 };
+                let mut tme = TRACKMOUSEEVENT {
+                    cbSize: std::mem::size_of::<TRACKMOUSEEVENT>() as u32,
+                    dwFlags: TME_LEAVE,
+                    hwndTrack: self.hwnd,
+                    dwHoverTime: 0,
+                };
                 let _ = TrackMouseEvent(&mut tme);
             }
         } else {
@@ -2922,9 +3538,21 @@ impl App {
 
     /// A hold ended (see [`HOLD_GRACE_MS`]): close soon unless the pointer is on the island.
     fn maybe_schedule_collapse(&mut self) {
-        if self.expanded && !self.hovering && !self.st.pinned && !self.text_focus && !self.drag_hover && !self.menu_open && !self.phone_holds() {
+        if self.expanded
+            && !self.hovering
+            && !self.st.pinned
+            && !self.text_focus
+            && !self.drag_hover
+            && !self.menu_open
+            && !self.phone_holds()
+        {
             unsafe {
-                SetTimer(self.hwnd, TIMER_COLLAPSE, HOLD_GRACE_MS.max(self.st.settings.collapse_delay_ms), None);
+                SetTimer(
+                    self.hwnd,
+                    TIMER_COLLAPSE,
+                    HOLD_GRACE_MS.max(self.st.settings.collapse_delay_ms),
+                    None,
+                );
             }
         }
     }
@@ -2970,7 +3598,11 @@ impl App {
 
     fn start_sysmon(&mut self) {
         self.sysmon_rest = self.rest_now();
-        match services::sysmon::SysMon::start(self.sink.clone(), self.st.settings.system_history_on(), self.sysmon_rest) {
+        match services::sysmon::SysMon::start(
+            self.sink.clone(),
+            self.st.settings.system_history_on(),
+            self.sysmon_rest,
+        ) {
             Ok(s) => self.sysmon = Some(s),
             Err(e) => pwarn!("sysmon: couldn't start ({e})"),
         }
@@ -2978,7 +3610,10 @@ impl App {
 
     /// Nobody at the PC (locked, or the display off) and battery saver.
     fn rest_now(&self) -> poni_core::sysmon::Rest {
-        poni_core::sysmon::Rest { away: self.locked || self.display_off, saver: self.st.power.saver }
+        poni_core::sysmon::Rest {
+            away: self.locked || self.display_off,
+            saver: self.st.power.saver,
+        }
     }
 
     /// The System reader rests while nobody is at the PC, and its kept minute
@@ -2993,7 +3628,12 @@ impl App {
         if let Some(s) = &self.sysmon {
             s.rest(rest);
         }
-        if !poni_core::sysmon::reads(self.sysmon_on, self.st.game.active, self.st.settings.system_history_on(), rest) {
+        if !poni_core::sysmon::reads(
+            self.sysmon_on,
+            self.st.game.active,
+            self.st.settings.system_history_on(),
+            rest,
+        ) {
             self.st.system.clear();
         }
     }
@@ -3003,7 +3643,9 @@ impl App {
     /// (peeks only), or once Alt+Shift+F hid it. Then nothing covers the game,
     /// and Windows sends its frames straight to the screen.
     fn fullscreen_hides(&self, now: f64) -> bool {
-        self.fullscreen_on && (self.st.settings.hide_in_fullscreen || (self.st.game.active && self.readout_away(now)))
+        self.fullscreen_on
+            && (self.st.settings.hide_in_fullscreen
+                || (self.st.game.active && self.readout_away(now)))
     }
 
     /// Show over games: the readout is off the screen. It stays unless the
@@ -3034,8 +3676,23 @@ impl App {
                 self.hovering = false;
                 self.input.mouse = None;
             }
-            let why = if self.fullscreen_on && !self.st.settings.hide_in_fullscreen && self.st.game.active { " (show over games)" } else { "" };
-            pinfo!("fullscreen app {}: island {}{why}", if self.fullscreen_on { "in front" } else { "gone" }, if hide { "hidden" } else { "shown" });
+            let why = if self.fullscreen_on
+                && !self.st.settings.hide_in_fullscreen
+                && self.st.game.active
+            {
+                " (show over games)"
+            } else {
+                ""
+            };
+            pinfo!(
+                "fullscreen app {}: island {}{why}",
+                if self.fullscreen_on {
+                    "in front"
+                } else {
+                    "gone"
+                },
+                if hide { "hidden" } else { "shown" }
+            );
             // Notices held back wait for the game to leave, not for a peek.
             if !hide && !self.fullscreen_on {
                 self.show_held_notice(now);
@@ -3076,7 +3733,14 @@ impl App {
         let now = clock::mono();
         if !self.st.settings.game_peek {
             self.game_hidden = !self.game_hidden;
-            pinfo!("show over games: readout {} (Alt+Shift+F)", if self.game_hidden { "hidden until the next game" } else { "shows again" });
+            pinfo!(
+                "show over games: readout {} (Alt+Shift+F)",
+                if self.game_hidden {
+                    "hidden until the next game"
+                } else {
+                    "shows again"
+                }
+            );
             self.apply_fullscreen(now);
             return;
         }
@@ -3098,7 +3762,12 @@ impl App {
         }
         unsafe {
             if on {
-                match RegisterHotKey(self.helper, HOTKEY_PEEK, MOD_ALT | MOD_SHIFT | MOD_NOREPEAT, u32::from(b'F')) {
+                match RegisterHotKey(
+                    self.helper,
+                    HOTKEY_PEEK,
+                    MOD_ALT | MOD_SHIFT | MOD_NOREPEAT,
+                    u32::from(b'F'),
+                ) {
                     Ok(()) => self.peek_hotkey = true,
                     Err(e) => pwarn!("show over games: Alt+Shift+F is taken ({e})"),
                 }
@@ -3116,7 +3785,12 @@ impl App {
         }
         unsafe {
             if on {
-                match RegisterHotKey(self.helper, HOTKEY_SCRIPT, MOD_ALT | MOD_SHIFT | MOD_NOREPEAT, u32::from(b'S')) {
+                match RegisterHotKey(
+                    self.helper,
+                    HOTKEY_SCRIPT,
+                    MOD_ALT | MOD_SHIFT | MOD_NOREPEAT,
+                    u32::from(b'S'),
+                ) {
                     Ok(()) => self.script_hotkey = true,
                     Err(e) => pwarn!("script: Alt+Shift+S is taken ({e})"),
                 }
@@ -3132,7 +3806,11 @@ impl App {
     /// only while there's a script to read on the page. Whether Record shows
     /// is asked as the page comes on screen.
     fn script_tick(&mut self) {
-        let shown = self.expanded && self.st.page == PageKind::Script && !self.locked && !self.display_off && !self.fullscreen_hidden;
+        let shown = self.expanded
+            && self.st.page == PageKind::Script
+            && !self.locked
+            && !self.display_off
+            && !self.fullscreen_hidden;
         if shown && !self.script_shown && self.selftest.is_none() {
             self.st.recorder = services::recorder::installed();
         }
@@ -3145,7 +3823,9 @@ impl App {
             self.maybe_schedule_collapse();
         }
         self.script_held = held;
-        let can_read = self.st.page == PageKind::Script && !self.st.store.script.is_empty() && (self.expanded || self.st.script.active);
+        let can_read = self.st.page == PageKind::Script
+            && !self.st.store.script.is_empty()
+            && (self.expanded || self.st.script.active);
         self.set_script_hotkey(can_read && self.selftest.is_none());
     }
 
@@ -3175,7 +3855,11 @@ impl App {
                 self.expand();
                 true
             }
-            Message::State { phase, elapsed_ms, error } => {
+            Message::State {
+                phase,
+                elapsed_ms,
+                error,
+            } => {
                 let now = clock::mono();
                 let rec = &mut self.st.rec;
                 rec.opening_until = 0.0;
@@ -3201,49 +3885,14 @@ impl App {
     /// behind on the island. A window check, only while one is under way.
     fn check_recorder_alive(&mut self) {
         let sender = self.st.rec.sender;
-        if self.st.rec_live() && sender != 0 && !unsafe { IsWindow(HWND(sender as *mut core::ffi::c_void)) }.as_bool() {
+        if self.st.rec_live()
+            && sender != 0
+            && !unsafe { IsWindow(HWND(sender as *mut core::ffi::c_void)) }.as_bool()
+        {
             pinfo!("recorder: its window went away mid-recording");
             self.st.rec = crate::state::RecView::default();
             self.request_frame();
         }
-            AppEvent::NumaTranscript(text) => {
-                self.numa_listen_until = None;
-                self.st.ui.numa.phase = crate::state::NumaPhase::Thinking;
-                self.st.ui.numa.transcript = Some(text);
-                if let Some(text) = self.st.ui.numa.transcript.clone() {
-                    services::numa::ask(text, self.sink.clone());
-                }
-            }
-            AppEvent::NumaWake => {
-                self.st.page = PageKind::Numa;
-                self.expand();
-                self.st.ui.numa.phase = crate::state::NumaPhase::Listening;
-                self.st.ui.numa.transcript = None;
-                self.st.ui.numa.response = Some("Listeningâ€¦".into());
-                // The recognizer reports one phrase per pause, so the wake
-                // word is usually its own line and the command is the next
-                // one. Hold the window open so it isn't dropped.
-                self.numa_listen_until = Some(now + services::wake::FOLLOW_UP_SECS);
-            }
-            AppEvent::NumaResponse(text) => {
-                self.st.ui.numa.phase = crate::state::NumaPhase::Idle;
-                self.st.ui.numa.response = Some(text);
-                if let Some(response) = self.st.ui.numa.response.clone() {
-                    services::numa::speak(response);
-                }
-            }
-            AppEvent::NumaFailed(error) => {
-                self.numa_listen_until = None;
-                self.st.ui.numa.phase = crate::state::NumaPhase::Error(error);
-            }
-            AppEvent::NumaMediaKey(action) => {
-                services::numa::send_media_key(&action);
-            }
-            AppEvent::NumaTakeoverState(action) => {
-                if matches!(self.st.ui.numa.phase, crate::state::NumaPhase::Takeover) {
-                    self.st.ui.numa.takeover_action = Some(action);
-                }
-            }
     }
 
     /// Out of the recorder's video (and every other capture) while a recording
@@ -3253,7 +3902,10 @@ impl App {
             return;
         }
         self.rec_excluded = on;
-        if !on || window::windows_build().is_some_and(|b| b >= crate::glass::EXCLUDE_FROM_CAPTURE_BUILD) {
+        if !on
+            || window::windows_build()
+                .is_some_and(|b| b >= crate::glass::EXCLUDE_FROM_CAPTURE_BUILD)
+        {
             window::exclude_from_capture(self.hwnd, window::CaptureOwner::Recording, on);
         }
     }
@@ -3269,10 +3921,18 @@ impl App {
             window::exclude_from_capture(self.hwnd, window::CaptureOwner::Script, false);
             return;
         }
-        let ok = window::windows_build().is_some_and(|b| b >= crate::glass::EXCLUDE_FROM_CAPTURE_BUILD)
+        let ok = window::windows_build()
+            .is_some_and(|b| b >= crate::glass::EXCLUDE_FROM_CAPTURE_BUILD)
             && window::exclude_from_capture(self.hwnd, window::CaptureOwner::Script, true);
         if self.st.script_hidden != Some(ok) {
-            pinfo!("script: {}", if ok { "left out of screen capture" } else { "Windows can't leave the island out of screen capture" });
+            pinfo!(
+                "script: {}",
+                if ok {
+                    "left out of screen capture"
+                } else {
+                    "Windows can't leave the island out of screen capture"
+                }
+            );
         }
         self.st.script_hidden = Some(ok);
     }
@@ -3282,7 +3942,10 @@ impl App {
     /// It follows the full-screen app; the readings and the frame count run
     /// only meanwhile.
     fn sync_game(&mut self) {
-        let want = self.st.settings.game_stats && self.fullscreen_on && !self.st.settings.hide_in_fullscreen && self.selftest.is_none();
+        let want = self.st.settings.game_stats
+            && self.fullscreen_on
+            && !self.st.settings.hide_in_fullscreen
+            && self.selftest.is_none();
         if want != self.st.game.active {
             self.st.game.active = want;
             self.set_peek_hotkey(want);
@@ -3312,7 +3975,10 @@ impl App {
                     self.st.system.clear();
                 }
             }
-            pinfo!("show over games: readout {}", if want { "on" } else { "off" });
+            pinfo!(
+                "show over games: readout {}",
+                if want { "on" } else { "off" }
+            );
         }
         if !want {
             self.apply_fullscreen(clock::mono());
@@ -3327,14 +3993,19 @@ impl App {
             if let (Some(f), Some(p)) = (&self.frames, pid) {
                 f.set_target(p);
             }
-            pinfo!("show over games: {} in front", self.st.game.app.as_deref().unwrap_or("an app"));
+            pinfo!(
+                "show over games: {} in front",
+                self.st.game.app.as_deref().unwrap_or("an app")
+            );
             // A game came to the front: the readout shows for a moment.
             self.peek_game("a game came to the front");
         } else {
             self.apply_fullscreen(clock::mono());
         }
         let Some(pid) = pid else { return };
-        if self.frames.is_none() && matches!(self.st.game.access, FpsAccess::Unknown | FpsAccess::Ready) {
+        if self.frames.is_none()
+            && matches!(self.st.game.access, FpsAccess::Unknown | FpsAccess::Ready)
+        {
             match services::frames::Frames::start(pid) {
                 Ok(f) => {
                     self.frames = Some(f);
@@ -3342,7 +4013,9 @@ impl App {
                 }
                 // Tells the one-time OK apart from a sign-out still to come
                 // (once: a check that said yes isn't asked again).
-                Err(services::frames::StartError::NoAccess) if self.st.game.access == FpsAccess::Ready => {
+                Err(services::frames::StartError::NoAccess)
+                    if self.st.game.access == FpsAccess::Ready =>
+                {
                     self.st.game.access = FpsAccess::NeedsOk;
                 }
                 Err(services::frames::StartError::NoAccess) => self.check_fps(),
@@ -3356,7 +4029,9 @@ impl App {
 
     /// Asks (off the UI thread) whether Windows lets Poni read frames.
     fn check_fps(&mut self) {
-        if self.selftest.is_some() || matches!(self.st.game.access, FpsAccess::Checking | FpsAccess::Asking) {
+        if self.selftest.is_some()
+            || matches!(self.st.game.access, FpsAccess::Checking | FpsAccess::Asking)
+        {
             return;
         }
         self.st.game.access = FpsAccess::Checking;
@@ -3381,12 +4056,17 @@ impl App {
     /// Raises the island when a window sits above it or it lost its topmost
     /// style, and logs each culprit once.
     fn raise_if_covered(&mut self) {
-        let topmost = unsafe { GetWindowLongPtrW(self.hwnd, GWL_EXSTYLE) } & WS_EX_TOPMOST.0 as isize != 0;
+        let topmost =
+            unsafe { GetWindowLongPtrW(self.hwnd, GWL_EXSTYLE) } & WS_EX_TOPMOST.0 as isize != 0;
         let above = services::fullscreen::window_above(self.hwnd);
         if topmost && above.is_none() {
             return;
         }
-        let key = if topmost { above.clone().unwrap_or_default() } else { String::new() };
+        let key = if topmost {
+            above.clone().unwrap_or_default()
+        } else {
+            String::new()
+        };
         if self.covered_by.insert(key) {
             match (&above, topmost) {
                 (_, false) => pinfo!("island lost its topmost style; raised again"),
@@ -3400,7 +4080,15 @@ impl App {
     /// Top of the topmost band, without taking the focus.
     fn raise_topmost(&self) {
         unsafe {
-            let _ = SetWindowPos(self.hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+            let _ = SetWindowPos(
+                self.hwnd,
+                HWND_TOPMOST,
+                0,
+                0,
+                0,
+                0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+            );
         }
     }
 
@@ -3436,7 +4124,10 @@ impl App {
         self.text_focus = false;
         self.set_noactivate(true);
         unsafe {
-            if !self.prev_foreground.is_invalid() && IsWindow(self.prev_foreground).as_bool() && GetForegroundWindow() == self.hwnd {
+            if !self.prev_foreground.is_invalid()
+                && IsWindow(self.prev_foreground).as_bool()
+                && GetForegroundWindow() == self.hwnd
+            {
                 let _ = SetForegroundWindow(self.prev_foreground);
             }
         }
@@ -3445,10 +4136,10 @@ impl App {
 
     fn refresh_monitor(&mut self) {
         let m = match self.st.settings.monitor {
-            MonitorChoice::Cursor => {
-                window::monitor_info(windows::Win32::Graphics::Gdi::HMONITOR(self.monitor.handle as *mut core::ffi::c_void))
-                    .unwrap_or_else(|| window::pick_monitor(MonitorChoice::Primary))
-            }
+            MonitorChoice::Cursor => window::monitor_info(windows::Win32::Graphics::Gdi::HMONITOR(
+                self.monitor.handle as *mut core::ffi::c_void,
+            ))
+            .unwrap_or_else(|| window::pick_monitor(MonitorChoice::Primary)),
             c => window::pick_monitor(c),
         };
         if m != self.monitor {
@@ -3494,7 +4185,8 @@ impl App {
     /// The closed island rests invisible, a strip at the top edge that only
     /// catches the pointer: the Hidden idle look, or stepped aside.
     fn rests_hidden(&self) -> bool {
-        self.mode == Mode::Aside || (self.mode == Mode::Idle && self.st.settings.idle_style == IdleStyle::Hidden)
+        self.mode == Mode::Aside
+            || (self.mode == Mode::Idle && self.st.settings.idle_style == IdleStyle::Hidden)
     }
 
     /// Step aside: where the island rests (what it shows at rest, the clock
@@ -3510,7 +4202,12 @@ impl App {
         let cx = self.surface.x as f32 + self.cx * s;
         let left = (cx - w * s / 2.0).floor() as i32;
         let right = (cx + w * s / 2.0).ceil() as i32;
-        RECT { left, top: self.surface.y, right, bottom: self.surface.y + (h * s).ceil() as i32 }
+        RECT {
+            left,
+            top: self.surface.y,
+            right,
+            bottom: self.surface.y + (h * s).ceil() as i32,
+        }
     }
 
     /// Step aside (off since 0.2.6, see `Settings::step_aside`) while an app window
@@ -3520,11 +4217,18 @@ impl App {
     /// compares a few rects.
     fn sync_aside(&mut self) {
         let r = self.rest_rect();
-        let under = self.top_windows.iter().any(|t| t[0] < r.right && t[2] > r.left && t[1] < r.bottom && t[3] > r.top);
+        let under = self
+            .top_windows
+            .iter()
+            .any(|t| t[0] < r.right && t[2] > r.left && t[1] < r.bottom && t[3] > r.top);
         let aside = self.st.settings.step_aside && !self.fullscreen_on && under;
         if aside != self.st.aside {
             self.st.aside = aside;
-            let why = if aside { "a window is under the island; it rests out of the way" } else { "nothing under the island; it rests as before" };
+            let why = if aside {
+                "a window is under the island; it rests out of the way"
+            } else {
+                "nothing under the island; it rests as before"
+            };
             self.log_queue.push(format!("step aside: {why}"));
         }
     }
@@ -3544,7 +4248,13 @@ impl App {
         if self.island.settled() {
             return false;
         }
-        let r = if self.expanded { self.island.canvas_rect_at(self.cx) } else { self.island.hover_rect_at(self.cx).inset(-SHOULDER - 2.0, 0.0) };
+        let r = if self.expanded {
+            self.island.canvas_rect_at(self.cx)
+        } else {
+            self.island
+                .hover_rect_at(self.cx)
+                .inset(-SHOULDER - 2.0, 0.0)
+        };
         !Rect::new(r.x, r.y, r.w, r.h + 2.0).contains(p)
     }
 
@@ -3615,15 +4325,26 @@ impl App {
         }
         // A new version's notice (or "Updated to") waits for the island to be
         // free. The first frame counts (the window shows at its end).
-        let free = !self.fullscreen_hidden && !self.locked && !self.display_off && !self.expanded && self.st.notice.is_none();
-        if self.updater.as_mut().is_some_and(|u| u.announce(&mut self.st, free)) {
+        let free = !self.fullscreen_hidden
+            && !self.locked
+            && !self.display_off
+            && !self.expanded
+            && self.st.notice.is_none();
+        if self
+            .updater
+            .as_mut()
+            .is_some_and(|u| u.announce(&mut self.st, free))
+        {
             self.request_frame();
         }
         // The AI tab's heads-up notices wait the same way, one at a time.
         // Over a game whose readout only peeks they wait for the game to
         // leave, as held money notices do, not for a peek.
         let peeks = self.st.game.active && self.st.settings.game_peek;
-        if self.st.show_usage_notice(free && !peeks, self.expanded && self.st.page == PageKind::Ai) {
+        if self.st.show_usage_notice(
+            free && !peeks,
+            self.expanded && self.st.page == PageKind::Ai,
+        ) {
             self.request_frame();
         }
         if let Some(ended) = self.st.pomodoro.tick(now) {
@@ -3657,7 +4378,14 @@ impl App {
             // Nothing is drawn, but timers, chimes and commands keep working.
             // Glass stops copying the screen: nobody sees the island.
             let off = RECT::default();
-            self.glass.sync(false, self.hwnd, &self.sink, self.monitor.handle, off, &mut self.gfx);
+            self.glass.sync(
+                false,
+                self.hwnd,
+                &self.sink,
+                self.monitor.handle,
+                off,
+                &mut self.gfx,
+            );
             self.refresh_time();
             self.tick();
             self.run_commands(deferred);
@@ -3673,11 +4401,17 @@ impl App {
         // animation step is a whole number of refresh periods: even motion at
         // 60, 144 or 240 Hz, whatever the thread's wake-up jitter.
         let period = tick.map_or_else(|| self.clock.period(), |t| t.period);
-        let anim_t = tick.map_or(rendered_at, |t| t.vblank + t.period).max(self.last_frame_t);
+        let anim_t = tick
+            .map_or(rendered_at, |t| t.vblank + t.period)
+            .max(self.last_frame_t);
         let resumed = tick.is_some_and(|t| t.resumed) || self.last_frame_t == 0.0;
         // Coming out of rest, a motion advances one refresh, not the whole
         // time the clock was parked.
-        let mut dt = if resumed { period } else { anim_t - self.last_frame_t };
+        let mut dt = if resumed {
+            period
+        } else {
+            anim_t - self.last_frame_t
+        };
         self.last_frame_t = anim_t;
         self.st.now = self.st.now.max(anim_t);
         self.tick();
@@ -3695,26 +4429,39 @@ impl App {
         let target = self.target_mode();
         let mut retarget = false;
         if target != self.mode {
-            let new_content = activities::content_key(&target) != activities::content_key(&self.mode);
+            let new_content =
+                activities::content_key(&target) != activities::content_key(&self.mode);
             // A morph turned around mid-fade (the pointer came back while the
             // island closed): the content coming back is the one still fading
             // out, and it fades back in from where it is, not from nothing.
             let back = self
                 .outgoing
-                .filter(|o| new_content && activities::content_key(&o.0) == activities::content_key(&target))
+                .filter(|o| {
+                    new_content && activities::content_key(&o.0) == activities::content_key(&target)
+                })
                 .map(|(_, t0, _, from)| from * outgoing_left(now - t0));
             if new_content {
                 // The leaving content fades from how visible it is now.
-                self.outgoing = Some((self.mode, now, self.island.target(), self.island.content_alpha()));
+                self.outgoing = Some((
+                    self.mode,
+                    now,
+                    self.island.target(),
+                    self.island.content_alpha(),
+                ));
             }
             if let (Mode::Expanded(a), Mode::Expanded(b)) = (self.mode, target) {
                 if a != b {
-                    let dir = if b.tab_index() > a.tab_index() { 1.0 } else { -1.0 };
+                    let dir = if b.tab_index() > a.tab_index() {
+                        1.0
+                    } else {
+                        -1.0
+                    };
                     self.page_anim = Some((a, now, dir));
                 }
             }
             self.motion_name = motion_name(&self.mode, &target);
-            self.island.set_target(self.geom_for(&target), now, new_content);
+            self.island
+                .set_target(self.geom_for(&target), now, new_content);
             if let Some(a) = back {
                 self.island.resume_content(a);
             }
@@ -3741,14 +4488,17 @@ impl App {
         }
         let dt = dt.clamp(0.0, 0.05) as f32;
         // Today's tiles need the readings only while they show (signed out it has the sign-in card, signed in the day).
-        self.set_stats(self.mode == Mode::Expanded(PageKind::Today) && pages::today::shows_tiles(&self.st));
+        self.set_stats(
+            self.mode == Mode::Expanded(PageKind::Today) && pages::today::shows_tiles(&self.st),
+        );
         self.set_sysmon(self.mode == Mode::Expanded(PageKind::System));
         self.set_oyenza_watch(self.mode == Mode::Expanded(PageKind::Oyenza));
         self.set_today_watch(self.mode == Mode::Expanded(PageKind::Today));
         self.set_stocks_watch();
         self.set_usage_watch();
         // The Pill theme floats the island below the top edge.
-        self.island.set_floating(pill::on(self.st.settings.theme).then_some(pill::TOP_GAP));
+        self.island
+            .set_floating(pill::on(self.st.settings.theme).then_some(pill::TOP_GAP));
         self.island.step(dt, now);
         self.sync_room();
         self.ensure_room();
@@ -3764,7 +4514,12 @@ impl App {
         let content_alpha = self.island.content_alpha();
         // Clear what the island covered last frame as well as this one.
         let canvas_px = px_rect(canvas_r, scale, 1, sw, sh);
-        let full = RECT { left: 0, top: 0, right: sw, bottom: sh };
+        let full = RECT {
+            left: 0,
+            top: 0,
+            right: sw,
+            bottom: sh,
+        };
         let dirty = px_union(self.prev_canvas_px.unwrap_or(full), canvas_px);
         self.prev_canvas_px = Some(canvas_px);
         if std::mem::take(&mut self.capture_next) {
@@ -3776,11 +4531,16 @@ impl App {
 
         // Stepping aside, the island flattens into the top edge and goes
         // invisible once there; coming back, it drops from the edge.
-        let hidden_idle = self.rests_hidden() && (self.mode != Mode::Aside || self.island.settled());
+        let hidden_idle =
+            self.rests_hidden() && (self.mode != Mode::Aside || self.island.settled());
         let floating = self.island.floating();
         // Software renderer: what of the floating island's hit area isn't
         // drawn (the gap above it) is painted at 1/255 (see hit_mask_for).
-        let float_hit = if floating && !self.expanded { self.hit_mask().rect } else { None };
+        let float_hit = if floating && !self.expanded {
+            self.hit_mask().rect
+        } else {
+            None
+        };
         // Content is masked to the island silhouette only while the outline
         // or the content moves. At rest every layout fits inside the body,
         // and skipping the mask layer keeps ambient frames cheap.
@@ -3810,7 +4570,12 @@ impl App {
         // self-test brings its own backdrop), then draw this frame's glass
         // before the frame starts. The look follows the glass, light or dark.
         let glass_theme = self.st.settings.theme == Theme::Glass;
-        let window_px = RECT { left: self.surface.x, top: self.surface.y, right: self.surface.x + sw, bottom: self.surface.y + sh };
+        let window_px = RECT {
+            left: self.surface.x,
+            top: self.surface.y,
+            right: self.surface.x + sw,
+            bottom: self.surface.y + sh,
+        };
         // Only while someone can see it: not while hidden, locked or the display
         // is off. Not over a full-screen app either: copying a game's screen
         // every frame costs the game (Glass draws smoked glass there).
@@ -3821,19 +4586,31 @@ impl App {
             && !self.display_off
             && !self.fullscreen_on
             && matches!(self.gfx.renderer(), crate::gfx::Renderer::Gpu { .. });
-        self.glass.sync(copy_on, self.hwnd, &self.sink, self.monitor.handle, window_px, &mut self.gfx);
-        self.sync_script_capture(self.st.page == PageKind::Script && (self.expanded || !self.island.settled()));
+        self.glass.sync(
+            copy_on,
+            self.hwnd,
+            &self.sink,
+            self.monitor.handle,
+            window_px,
+            &mut self.gfx,
+        );
+        self.sync_script_capture(
+            self.st.page == PageKind::Script && (self.expanded || !self.island.settled()),
+        );
         self.sync_recording_capture(self.st.rec_live() && self.st.record_on());
         let mut glass_moving = false;
         let glass = if glass_theme && !hidden_idle {
             let small = !matches!(mode, Mode::Expanded(_));
-            let (light, p, moving) = self.glass.frame(body, geom.r, SHOULDER, small, now, dt, scale, &mut self.gfx);
+            let (light, p, moving) =
+                self.glass
+                    .frame(body, geom.r, SHOULDER, small, now, dt, scale, &mut self.gfx);
             glass_moving = moving;
             self.gfx.set_look(poni_core::look::glass(light));
             self.gfx.prepare_glass(&p, canvas_px);
             Some(p)
         } else {
-            self.gfx.set_look(poni_core::look::of(self.st.settings.theme));
+            self.gfx
+                .set_look(poni_core::look::of(self.st.settings.theme));
             None
         };
         let (repaint, anim, focus, ui_live) = match self.gfx.begin(dirty) {
@@ -3851,8 +4628,16 @@ impl App {
                 if let Some(p) = glass.as_ref() {
                     canvas.glass(p, canvas_r);
                 } else {
-                    let island_color = if hidden_idle { Color::black(1.0 / 255.0) } else { palette::ISLAND };
-                    let border = if hidden_idle { None } else { Some(canvas.look().border) };
+                    let island_color = if hidden_idle {
+                        Color::black(1.0 / 255.0)
+                    } else {
+                        palette::ISLAND
+                    };
+                    let border = if hidden_idle {
+                        None
+                    } else {
+                        Some(canvas.look().border)
+                    };
                     if floating {
                         // Hidden floats nothing: its band takes the mouse.
                         if !hidden_idle {
@@ -3865,7 +4650,11 @@ impl App {
 
                 // Content scales about the top centre, where the island hangs
                 // (floating, about the middle of the pill end of the morph).
-                let pivot = if floating { pill::motion::pivot(body, self.island.target()) } else { Point::new(body.center().x, body.y) };
+                let pivot = if floating {
+                    pill::motion::pivot(body, self.island.target())
+                } else {
+                    Point::new(body.center().x, body.y)
+                };
                 if morphing {
                     canvas.clip(body);
                     if floating {
@@ -3885,7 +4674,11 @@ impl App {
                     } else {
                         let old_body = Rect::new(body.center().x - g.w / 2.0, body.y, g.w, g.h);
                         let alpha = from * outgoing_left(now - t0);
-                        let shrink = if floating { pill::motion::ghost_scale(geom, g, GHOST_MIN_SCALE) } else { (geom.w / g.w.max(1.0)).clamp(GHOST_MIN_SCALE, 1.0) };
+                        let shrink = if floating {
+                            pill::motion::ghost_scale(geom, g, GHOST_MIN_SCALE)
+                        } else {
+                            (geom.w / g.w.max(1.0)).clamp(GHOST_MIN_SCALE, 1.0)
+                        };
                         let xf = scale_about(pivot, shrink);
                         let st = &mut self.st;
                         canvas.layered(old_body, alpha, xf, |c| {
@@ -3893,7 +4686,9 @@ impl App {
                             let mut ghost_hits = Vec::new();
                             let mut ghost = Ui::new(c, &mut ghost_input, &mut ghost_hits, now);
                             match m {
-                                Mode::Expanded(page) => pages::draw_expanded(&mut ghost, st, old_body, page, None),
+                                Mode::Expanded(page) => {
+                                    pages::draw_expanded(&mut ghost, st, old_body, page, None)
+                                }
                                 _ => activities::draw(&mut ghost, st, &m, old_body),
                             }
                         });
@@ -3903,13 +4698,32 @@ impl App {
                 // Incoming content settles down from the bezel as it fades in,
                 // as one layer, so its text doesn't re-hint every frame.
                 let out = if content_alpha < 1.0 {
-                    let grow = scale_about(pivot, CONTENT_SCALE_FROM + (1.0 - CONTENT_SCALE_FROM) * content_alpha);
-                    let drop_by = if floating { pill::motion::CONTENT_DROP } else { CONTENT_DROP };
+                    let grow = scale_about(
+                        pivot,
+                        CONTENT_SCALE_FROM + (1.0 - CONTENT_SCALE_FROM) * content_alpha,
+                    );
+                    let drop_by = if floating {
+                        pill::motion::CONTENT_DROP
+                    } else {
+                        CONTENT_DROP
+                    };
                     let xf = grow * Matrix3x2::translation(0.0, -drop_by * (1.0 - content_alpha));
                     let (input, st) = (&mut self.input, &mut self.st);
-                    canvas.layered(union_rect(lay, body), content_alpha, xf, |c| draw_content(c, input, &mut hits, st, mode, lay, body, transition, now))
+                    canvas.layered(union_rect(lay, body), content_alpha, xf, |c| {
+                        draw_content(c, input, &mut hits, st, mode, lay, body, transition, now)
+                    })
                 } else {
-                    draw_content(&mut canvas, &mut self.input, &mut hits, &mut self.st, mode, lay, body, transition, now)
+                    draw_content(
+                        &mut canvas,
+                        &mut self.input,
+                        &mut hits,
+                        &mut self.st,
+                        mode,
+                        lay,
+                        body,
+                        transition,
+                        now,
+                    )
                 };
                 wheel_left = self.input.wheel;
                 if morphing {
@@ -3935,7 +4749,10 @@ impl App {
         // page content a wheel the page didn't use does nothing (a short list
         // must not jump pages where a long one would scroll).
         if let Mode::Expanded(p) = self.mode {
-            let over_header = self.input.mouse.is_some_and(|m| m.y < body.y + pages::HEADER_H);
+            let over_header = self
+                .input
+                .mouse
+                .is_some_and(|m| m.y < body.y + pages::HEADER_H);
             if wheel_left != 0.0 && over_header {
                 if now - self.wheel_t > 0.25 || wheel_left.signum() != self.wheel_acc.signum() {
                     self.wheel_acc = 0.0;
@@ -3969,15 +4786,34 @@ impl App {
         if self.gfx.needs_hit_mask() {
             self.update_hit_mask(now);
         }
-        if let (Some(t), true) = (tick, self.motion.is_some() && self.motions_logged < 6 && self.trace.len() < 200) {
+        if let (Some(t), true) = (
+            tick,
+            self.motion.is_some() && self.motions_logged < 6 && self.trace.len() < 200,
+        ) {
             let ms = |a: f64, b: f64| ((b - a) * 1000.0) as f32;
-            self.trace.push((t.periods, [ms(t.vblank, draw_from), ms(draw_from, drawn_at), ms(drawn_at, presented_at), ms(presented_at, clock::mono())]));
+            self.trace.push((
+                t.periods,
+                [
+                    ms(t.vblank, draw_from),
+                    ms(draw_from, drawn_at),
+                    ms(drawn_at, presented_at),
+                    ms(presented_at, clock::mono()),
+                ],
+            ));
         }
         if !self.shown {
             self.shown = true;
             unsafe {
                 let _ = ShowWindow(self.hwnd, SW_SHOWNOACTIVATE);
-                let _ = SetWindowPos(self.hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+                let _ = SetWindowPos(
+                    self.hwnd,
+                    HWND_TOPMOST,
+                    0,
+                    0,
+                    0,
+                    0,
+                    SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+                );
             }
             self.gfx.set_shown(true);
         }
@@ -4038,7 +4874,10 @@ impl App {
             return;
         }
         let prev = self.mask.map(|(m, _)| m);
-        match self.gfx.push_hit_mask(self.surface.x, self.surface.y, &mask, prev.as_ref()) {
+        match self
+            .gfx
+            .push_hit_mask(self.surface.x, self.surface.y, &mask, prev.as_ref())
+        {
             Ok(()) => self.mask = Some((mask, now)),
             Err(e) => {
                 pwarn!("hit mask update failed: {e}");
@@ -4060,14 +4899,34 @@ impl App {
                 let early = self.motions_logged < 20;
                 if m.frames >= 4 && (early || (m.hitches > 0 && t - self.hitch_logged_at > 60.0)) {
                     let dwm = match (self.dwm_at_start, dwm_counters()) {
-                        (Some(a), Some(b)) => format!(", dwm {} refreshes / {} composed / {} missed", b.0.wrapping_sub(a.0), b.1.wrapping_sub(a.1), b.2.wrapping_sub(a.2)),
+                        (Some(a), Some(b)) => format!(
+                            ", dwm {} refreshes / {} composed / {} missed",
+                            b.0.wrapping_sub(a.0),
+                            b.1.wrapping_sub(a.1),
+                            b.2.wrapping_sub(a.2)
+                        ),
                         _ => String::new(),
                     };
-                    self.log_queue.push(format!("{} ({}{dwm})", m.summary(), self.renderer_name()));
+                    self.log_queue
+                        .push(format!("{} ({}{dwm})", m.summary(), self.renderer_name()));
                     if self.motions_logged < 6 && !self.trace.is_empty() {
-                        let col = |i: usize| self.trace.iter().map(|f| format!("{:.1}", f.1[i])).collect::<Vec<_>>().join(" ");
-                        let periods: Vec<String> = self.trace.iter().map(|f| f.0.to_string()).collect();
-                        self.log_queue.push(format!("  vblanks {}; late ms {}; draw ms {}; present ms {}; mask ms {}", periods.join(" "), col(0), col(1), col(2), col(3)));
+                        let col = |i: usize| {
+                            self.trace
+                                .iter()
+                                .map(|f| format!("{:.1}", f.1[i]))
+                                .collect::<Vec<_>>()
+                                .join(" ")
+                        };
+                        let periods: Vec<String> =
+                            self.trace.iter().map(|f| f.0.to_string()).collect();
+                        self.log_queue.push(format!(
+                            "  vblanks {}; late ms {}; draw ms {}; present ms {}; mask ms {}",
+                            periods.join(" "),
+                            col(0),
+                            col(1),
+                            col(2),
+                            col(3)
+                        ));
                     }
                     self.motions_logged += 1;
                     if !early {
@@ -4113,7 +4972,12 @@ impl App {
         }
         // While hidden for a full-screen app only the phase end matters.
         let visible = !self.fullscreen_hidden;
-        if let Some(b) = self.st.pomodoro.next_second_boundary(now).filter(|_| visible) {
+        if let Some(b) = self
+            .st
+            .pomodoro
+            .next_second_boundary(now)
+            .filter(|_| visible)
+        {
             consider(now + b + 0.005);
         }
         if let poni_core::pomodoro::RunState::Running { ends_at } = self.st.pomodoro.run {
@@ -4131,7 +4995,9 @@ impl App {
         // locked or the display is off, so they rest then (the lock and
         // display events ask for a frame, which picks them up again).
         let singing = self.mode == Mode::Activity(activities::Activity::Media);
-        let watched = visible && !((pill::on(self.st.settings.theme) || singing) && (self.locked || self.display_off));
+        let watched = visible
+            && !((pill::on(self.st.settings.theme) || singing)
+                && (self.locked || self.display_off));
         if let Some(t) = activities::next_wake(&self.mode, &self.st).filter(|_| watched) {
             consider(t);
         }
@@ -4165,12 +5031,20 @@ impl App {
     /// Arm the update file's timer for the next read, or stop it while a
     /// read runs.
     fn schedule_update(&mut self) {
-        let secs = self.updater.as_ref().and_then(|u| u.due_in(crate::updates::unix_now()));
+        let secs = self
+            .updater
+            .as_ref()
+            .and_then(|u| u.due_in(crate::updates::unix_now()));
         unsafe {
             match secs {
                 // SetTimer waits at most about 24 days; reads are an hour apart.
                 Some(s) => {
-                    SetTimer(self.hwnd, TIMER_UPDATE, s.saturating_mul(1000).clamp(1000, 0x7FFF_FFFF) as u32, None);
+                    SetTimer(
+                        self.hwnd,
+                        TIMER_UPDATE,
+                        s.saturating_mul(1000).clamp(1000, 0x7FFF_FFFF) as u32,
+                        None,
+                    );
                 }
                 None => {
                     let _ = KillTimer(self.hwnd, TIMER_UPDATE);
@@ -4210,7 +5084,11 @@ impl App {
         if let Some(u) = self.updater.as_mut() {
             u.begin();
             if !started {
-                u.checked(&mut self.st, Err("the add-on thread isn't running".into()), now);
+                u.checked(
+                    &mut self.st,
+                    Err("the add-on thread isn't running".into()),
+                    now,
+                );
                 self.schedule_update();
             }
         }
@@ -4219,9 +5097,19 @@ impl App {
     /// The offered version's Setup, once per release, on the add-on thread
     /// (after a look at the file, and at start for one already offered).
     fn fetch_setup(&mut self) {
-        let Some((d, path)) = self.updater.as_mut().and_then(|u| u.want_setup(&mut self.st)) else { return };
+        let Some((d, path)) = self
+            .updater
+            .as_mut()
+            .and_then(|u| u.want_setup(&mut self.st))
+        else {
+            return;
+        };
         let job = services::update::download_job(self.sink.clone(), d, path);
-        if !self.services.as_ref().is_some_and(|s| s.run_job(job)) && self.updater.as_mut().is_some_and(|u| u.fetched(&mut self.st, Err("the add-on thread isn't running".into()))) {
+        if !self.services.as_ref().is_some_and(|s| s.run_job(job))
+            && self.updater.as_mut().is_some_and(|u| {
+                u.fetched(&mut self.st, Err("the add-on thread isn't running".into()))
+            })
+        {
             self.expand();
         }
     }
@@ -4240,7 +5128,11 @@ impl App {
                 Err(e) => pwarn!("updates: couldn't run the Setup ({e}); opening the release page"),
             }
         }
-        if let Some(url) = self.updater.as_ref().and_then(|u| u.download_page(&self.st)) {
+        if let Some(url) = self
+            .updater
+            .as_ref()
+            .and_then(|u| u.download_page(&self.st))
+        {
             pinfo!("updates: opening {url}");
             shell::open(&url);
         }
@@ -4252,7 +5144,11 @@ impl App {
         self.refresh_time();
         if a == InlineAction::Open {
             // Another app's notification: that app opens and the notice goes.
-            if let Some(Notice { action: Some(NoticeAction::OpenApp(id)), .. }) = self.st.notice.take() {
+            if let Some(Notice {
+                action: Some(NoticeAction::OpenApp(id)),
+                ..
+            }) = self.st.notice.take()
+            {
                 shell::open_app(&id);
             }
             return;
@@ -4272,7 +5168,13 @@ impl App {
             }
             return;
         }
-        if a == InlineAction::WhatsNew && self.st.notice.as_ref().is_some_and(|n| n.icon != Icon::Check) {
+        if a == InlineAction::WhatsNew
+            && self
+                .st
+                .notice
+                .as_ref()
+                .is_some_and(|n| n.icon != Icon::Check)
+        {
             shell::open(&crate::version::notes_url());
         }
         let st = &mut self.st;
@@ -4294,7 +5196,11 @@ impl App {
         }
         match a {
             InlineAction::StartFocus => st.pomodoro.start(st.now),
-            InlineAction::ShowAmount | InlineAction::StopAdzan | InlineAction::Hide | InlineAction::WhatsNew | InlineAction::Open => {}
+            InlineAction::ShowAmount
+            | InlineAction::StopAdzan
+            | InlineAction::Hide
+            | InlineAction::WhatsNew
+            | InlineAction::Open => {}
         }
         let until = st.now + INLINE_DONE_S;
         if let Some(n) = st.notice.as_mut() {
@@ -4310,8 +5216,14 @@ impl App {
     /// and ask where the PC is when following the location.
     fn prayer_ready(&mut self) {
         let a = &poni_core::addons::PRAYER_TIMES;
-        let path = paths::addons_dir().join(a.id).join(a.tag).join("places.json");
-        match std::fs::read_to_string(&path).map_err(|e| e.to_string()).and_then(|t| PlaceList::parse(&t)) {
+        let path = paths::addons_dir()
+            .join(a.id)
+            .join(a.tag)
+            .join("places.json");
+        match std::fs::read_to_string(&path)
+            .map_err(|e| e.to_string())
+            .and_then(|t| PlaceList::parse(&t))
+        {
             Ok(list) => {
                 pinfo!("prayer: {} places", list.places.len());
                 self.st.prayer.places = Some(std::sync::Arc::new(list));
@@ -4338,19 +5250,36 @@ impl App {
     /// kept as it is once settled; at start it comes from the lines settings
     /// keep of it (nothing online).
     fn resolve_prayer_place(&mut self) {
-        let Some(list) = self.st.prayer.places.clone() else { return };
+        let Some(list) = self.st.prayer.places.clone() else {
+            return;
+        };
         let chosen = match self.st.settings.prayer.place.as_deref() {
-            Some(id) if self.st.prayer.place.as_ref().is_some_and(|p| p.id == id) => self.st.prayer.place.clone(),
-            Some(id) => poni_core::prayer::find(&list, self.st.settings.prayer.world_place.as_deref(), id),
+            Some(id) if self.st.prayer.place.as_ref().is_some_and(|p| p.id == id) => {
+                self.st.prayer.place.clone()
+            }
+            Some(id) => {
+                poni_core::prayer::find(&list, self.st.settings.prayer.world_place.as_deref(), id)
+            }
             None => None,
         };
         let suggested = chosen.is_none();
-        let place = chosen.or_else(|| poni_core::prayer::suggested_place_id(self.utc_offset_min()).and_then(|id| list.find(id)).cloned());
+        let place = chosen.or_else(|| {
+            poni_core::prayer::suggested_place_id(self.utc_offset_min())
+                .and_then(|id| list.find(id))
+                .cloned()
+        });
         let changed = place.as_ref().map(|p| &p.id) != self.st.prayer.place.as_ref().map(|p| &p.id);
         self.st.prayer.place = place;
         self.st.prayer.suggested = suggested;
         if changed {
-            pinfo!("prayer: times for {}", self.st.prayer.place.as_ref().map_or("no place", |p| p.id.as_str()));
+            pinfo!(
+                "prayer: times for {}",
+                self.st
+                    .prayer
+                    .place
+                    .as_ref()
+                    .map_or("no place", |p| p.id.as_str())
+            );
             // A new place: prayer times that passed there don't ring now.
             self.st.prayer.handled_until = Some(self.st.prayer_now());
         }
@@ -4359,7 +5288,10 @@ impl App {
     /// The PC's UTC offset in minutes, from its clock.
     fn utc_offset_min(&self) -> i32 {
         let l = &self.st.local;
-        let local = poni_core::datetime::days_from_civil(l.year, l.month, l.day) * 86_400 + l.hour as i64 * 3600 + l.minute as i64 * 60 + l.second as i64;
+        let local = poni_core::datetime::days_from_civil(l.year, l.month, l.day) * 86_400
+            + l.hour as i64 * 3600
+            + l.minute as i64 * 60
+            + l.second as i64;
         (((local - self.st.unix) as f64 / 900.0).round() * 15.0) as i32
     }
 
@@ -4391,10 +5323,18 @@ impl App {
         if !self.st.prayer_on() {
             return;
         }
-        if self.st.settings.prayer.follow_location && self.st.prayer.located_at.is_none_or(|t| self.st.unix - t >= 3 * 3600) {
+        if self.st.settings.prayer.follow_location
+            && self
+                .st
+                .prayer
+                .located_at
+                .is_none_or(|t| self.st.unix - t >= 3 * 3600)
+        {
             self.locate();
         }
-        let Some(site) = self.st.prayer.site() else { return };
+        let Some(site) = self.st.prayer.site() else {
+            return;
+        };
         let now = self.st.prayer_now();
         let Some(from) = self.st.prayer.handled_until else {
             self.st.prayer.handled_until = Some(now);
@@ -4416,10 +5356,21 @@ impl App {
     /// A prayer's time came: the island says so and plays the chosen sound.
     /// Quiet when it's late (after a sleep) or a full-screen app hides the island.
     fn prayer_moment(&mut self, m: PrayerMoment, ring: bool) {
-        let Some(site) = self.st.prayer.site() else { return };
-        let place = self.st.prayer.place.as_ref().map_or(String::new(), |p| p.label.clone());
+        let Some(site) = self.st.prayer.site() else {
+            return;
+        };
+        let place = self
+            .st
+            .prayer
+            .place
+            .as_ref()
+            .map_or(String::new(), |p| p.label.clone());
         let quiet = !ring || self.fullscreen_hidden;
-        let sound = if quiet { PrayerSound::Silent } else { self.st.settings.prayer.sound };
+        let sound = if quiet {
+            PrayerSound::Silent
+        } else {
+            self.st.settings.prayer.sound
+        };
         let mut adzan = false;
         match sound {
             // The recording isn't Subuh's adzan (no "ash-shalatu khairum minan naum"): Subuh gets the tone.
@@ -4429,17 +5380,31 @@ impl App {
                     self.st.cmd(Command::Play(crate::commands::Sound::Chime));
                 }
             }
-            PrayerSound::Adzan | PrayerSound::Tone => self.st.cmd(Command::Play(crate::commands::Sound::Chime)),
+            PrayerSound::Adzan | PrayerSound::Tone => {
+                self.st.cmd(Command::Play(crate::commands::Sound::Chime))
+            }
             PrayerSound::Silent => {}
         }
         let title = pages::prayer::moment_title(m.prayer);
         let subtitle = format!("{} \u{b7} {place}", site.hhmm(m.at));
         let secs = if adzan { 200.0 } else { 60.0 };
-        self.st.notify(Icon::Moon, self.st.accent, title, subtitle, secs, Some(NoticeAction::OpenPage(PageKind::Prayer)));
+        self.st.notify(
+            Icon::Moon,
+            self.st.accent,
+            title,
+            subtitle,
+            secs,
+            Some(NoticeAction::OpenPage(PageKind::Prayer)),
+        );
         if adzan {
             self.st.set_notice_inline(InlineAction::StopAdzan);
         }
-        pinfo!("prayer: {} at {}{}", m.prayer.name(), site.hhmm(m.at), if quiet { ", quietly" } else { "" });
+        pinfo!(
+            "prayer: {} at {}{}",
+            m.prayer.name(),
+            site.hhmm(m.at),
+            if quiet { ", quietly" } else { "" }
+        );
     }
 
     /// Start the adzan; music that plays pauses (and stays paused).
@@ -4449,7 +5414,9 @@ impl App {
         match self.adzan.play(&path, &self.sink) {
             Ok(()) => {
                 self.st.prayer.adzan = true;
-                if self.st.settings.prayer.pause_music && self.st.media.as_ref().is_some_and(|m| m.is_playing()) {
+                if self.st.settings.prayer.pause_music
+                    && self.st.media.as_ref().is_some_and(|m| m.is_playing())
+                {
                     self.st.media_cmd(MediaCmd::PlayPause);
                 }
                 true
@@ -4468,7 +5435,11 @@ impl App {
     fn prayer_countdown_ok(&mut self) {
         self.refresh_time();
         if let (Some(m), Some(site)) = (self.st.prayer_countdown_ok(), self.st.prayer.site()) {
-            pinfo!("prayer: countdown put away until {} at {}", m.prayer.name(), site.hhmm(m.at));
+            pinfo!(
+                "prayer: countdown put away until {} at {}",
+                m.prayer.name(),
+                site.hhmm(m.at)
+            );
         }
     }
 
@@ -4484,7 +5455,13 @@ impl App {
         }
         let now = self.st.now;
         let signed_in = matches!(self.st.oyenza.link, OyenzaLink::Connected { .. });
-        let shown = self.expanded && self.st.page == PageKind::Ielts && self.st.ielts_on() && signed_in && !self.locked && !self.display_off && !self.fullscreen_hidden;
+        let shown = self.expanded
+            && self.st.page == PageKind::Ielts
+            && self.st.ielts_on()
+            && signed_in
+            && !self.locked
+            && !self.display_off
+            && !self.fullscreen_hidden;
         if shown != self.ielts_shown {
             self.ielts_shown = shown;
             let fx = self.st.ielts.show(shown, now);
@@ -4586,7 +5563,9 @@ impl App {
                     Vec::new()
                 }
                 Effect::ResumeMusic => {
-                    if std::mem::take(&mut self.ielts_music) && self.st.media.as_ref().is_some_and(|m| !m.is_playing()) {
+                    if std::mem::take(&mut self.ielts_music)
+                        && self.st.media.as_ref().is_some_and(|m| !m.is_playing())
+                    {
                         self.st.media_cmd(MediaCmd::PlayPause);
                     }
                     Vec::new()
@@ -4604,11 +5583,133 @@ impl App {
         use poni_core::ielts::{Call, Effect};
         let now = self.st.now;
         // Everything Udahan does but read the ladder again.
-        let fx = self.st.ielts.quit(now).into_iter().filter(|e| *e != Effect::Call(Call::Me)).collect();
+        let fx = self
+            .st
+            .ielts
+            .quit(now)
+            .into_iter()
+            .filter(|e| *e != Effect::Call(Call::Me))
+            .collect();
         self.ielts_do(fx);
         self.ielts.close();
         self.st.ielts = Default::default();
         self.ielts_shown = false;
+    }
+
+    // ------------------------------------------------------------ NUMA
+
+    fn poll_numa_hotkey(&mut self) {
+        let ctrl = unsafe { GetAsyncKeyState(VK_CONTROL.0 as i32) < 0 };
+        let alt = unsafe { GetAsyncKeyState(VK_MENU.0 as i32) < 0 };
+        let held = ctrl && alt;
+        if held && !self.numa_hotkey {
+            self.numa_hotkey = true;
+            pinfo!("numa: Ctrl+Alt detected; opening notch and recording");
+            self.numa_cmd(NumaCmd::Start);
+        } else if !held && self.numa_hotkey {
+            self.numa_hotkey = false;
+            pinfo!("numa: Ctrl+Alt released; transcribing recording");
+            self.numa_cmd(NumaCmd::Stop);
+        }
+    }
+
+    /// A bare "hey numa" only has a few seconds to be followed by a command.
+    /// Without this the page would sit on "Listening…" for ever, reading as if
+    /// NUMA were still capturing when nothing is open.
+    fn poll_numa_listen(&mut self) {
+        let Some(until) = self.numa_listen_until else {
+            return;
+        };
+        if self.numa_mic.is_some() && self.st.now < until {
+            return;
+        }
+        if self.st.now < until {
+            return;
+        }
+        self.numa_listen_until = None;
+        if self.numa_mic.is_some() {
+            self.numa_cmd(NumaCmd::Stop);
+        } else if matches!(self.st.ui.numa.phase, crate::state::NumaPhase::Listening) {
+            self.st.ui.numa.phase = crate::state::NumaPhase::Idle;
+            self.st.ui.numa.response = Some("Didn't catch that.".into());
+        }
+    }
+
+    fn numa_cmd(&mut self, c: NumaCmd) {
+        match c {
+            NumaCmd::Start => {
+                if self.st.ui.numa.mic_muted {
+                    self.st.ui.numa.response = Some("Microphone is muted.".into());
+                    return;
+                }
+                if self.numa_mic.is_some() {
+                    return;
+                }
+                // Push-to-talk supersedes a wake word that is still waiting
+                // for its command.
+                self.numa_listen_until = None;
+                // Push-to-talk is a global entry point: bring the Numa surface
+                // forward even when the island is currently on another page
+                // or collapsed into the notch.
+                self.st.page = PageKind::Numa;
+                self.expand();
+                self.start_raises();
+                if let Some(services) = &self.services {
+                    services.set_numa_muted(true);
+                }
+                let dir = paths::cache_dir().join("numa");
+                let _ = std::fs::create_dir_all(&dir);
+                let path = dir.join("turn.wav");
+                match services::mic::Mic::start(&path, &self.sink) {
+                    Ok(mic) => {
+                        self.numa_mic = Some(mic);
+                        self.st.ui.numa.phase = crate::state::NumaPhase::Listening;
+                        self.st.ui.numa.transcript = None;
+                        self.st.ui.numa.response = None;
+                    }
+                    Err(error) => {
+                        if let Some(services) = &self.services {
+                            services.set_numa_muted(false);
+                        }
+                        self.st.ui.numa.phase = crate::state::NumaPhase::Error(error.to_string())
+                    }
+                }
+            }
+            NumaCmd::Stop => {
+                let Some(mic) = self.numa_mic.take() else {
+                    return;
+                };
+                match mic.stop() {
+                    Ok((path, _secs)) => {
+                        if let Some(services) = &self.services {
+                            services.set_numa_muted(false);
+                        }
+                        self.st.ui.numa.phase = crate::state::NumaPhase::Thinking;
+                        services::numa::transcribe(path, self.sink.clone());
+                    }
+                    Err(error) => {
+                        self.st.ui.numa.phase = crate::state::NumaPhase::Error(error.to_string())
+                    }
+                }
+            }
+            NumaCmd::Mute => {
+                if let Some(services) = &self.services {
+                    services.set_numa_muted(true);
+                }
+                self.st.ui.numa.mic_muted = true;
+                self.st.ui.numa.phase = crate::state::NumaPhase::Idle;
+            }
+            NumaCmd::Unmute => {
+                if let Some(services) = &self.services {
+                    services.set_numa_muted(false);
+                }
+                self.st.ui.numa.mic_muted = false;
+            }
+            // A run that asked for permission: fire-and-forget — the event
+            // stream reports the new state, the UI never waits on the POST.
+            NumaCmd::Approve(id) => services::numa::decide(id, true),
+            NumaCmd::Cancel(id) => services::numa::decide(id, false),
+        }
     }
 
     // ------------------------------------------------------------ Meeting notes
@@ -4660,16 +5761,28 @@ impl App {
     /// Take notes: the microphone and the PC's sound start recording.
     fn notes_start(&mut self) {
         // Studio Pro only: the page shows its Pro card instead of the button.
-        if self.notes_rec.is_some() || self.st.notes.live() || self.notes_take.is_some() || self.st.studio_pro() == Some(false) {
+        if self.notes_rec.is_some()
+            || self.st.notes.live()
+            || self.notes_take.is_some()
+            || self.st.studio_pro() == Some(false)
+        {
             return;
         }
         // Whatever an earlier meeting left (the app closed on it) goes first.
         services::notes::clear_audio(None);
         let now = self.st.now;
         let started = self.st.local;
-        match services::notes::Recording::start(&crate::paths::notes_audio_dir(), &started, &self.sink) {
+        match services::notes::Recording::start(
+            &crate::paths::notes_audio_dir(),
+            &started,
+            &self.sink,
+        ) {
             Ok((rec, mic, pc)) => {
-                pinfo!("notes: listening (microphone {}, the PC's sound {})", if mic { "on" } else { "off" }, if pc { "on" } else { "off" });
+                pinfo!(
+                    "notes: listening (microphone {}, the PC's sound {})",
+                    if mic { "on" } else { "off" },
+                    if pc { "on" } else { "off" }
+                );
                 self.notes_started = started;
                 self.st.notes.started(now, mic, pc);
                 self.notes_rec = Some(rec);
@@ -4677,7 +5790,9 @@ impl App {
             Err(issue) => {
                 pwarn!("notes: no recording ({issue:?})");
                 self.st.ui.notes_kept = false;
-                self.st.notes.failed(poni_core::notes::Problem::Capture(issue));
+                self.st
+                    .notes
+                    .failed(poni_core::notes::Problem::Capture(issue));
             }
         }
     }
@@ -4685,7 +5800,9 @@ impl App {
     /// Stop: the meeting is over, its notes get written.
     fn notes_stop(&mut self) {
         use poni_core::notes::{CaptureIssue, Problem};
-        let Some(rec) = self.notes_rec.take() else { return };
+        let Some(rec) = self.notes_rec.take() else {
+            return;
+        };
         match rec.stop() {
             Ok(take) if take.secs >= 1.0 && !take.parts.is_empty() => {
                 self.notes_take = Some(take);
@@ -4699,16 +5816,30 @@ impl App {
             }
             Err(issue) => {
                 self.st.ui.notes_kept = false;
-                self.st.notes.failed(Problem::Capture(if issue == CaptureIssue::MicDenied { issue } else { CaptureIssue::Failed }));
+                self.st
+                    .notes
+                    .failed(Problem::Capture(if issue == CaptureIssue::MicDenied {
+                        issue
+                    } else {
+                        CaptureIssue::Failed
+                    }));
             }
         }
     }
 
     /// Hand the kept meeting over (again, for Try again).
     fn notes_send(&mut self) {
-        let Some(take) = self.notes_take.clone() else { return };
+        let Some(take) = self.notes_take.clone() else {
+            return;
+        };
         self.st.notes.stopped(take.parts.len() as u32, take.secs);
-        let job = services::notes::Job { take, started: self.notes_started, lang: poni_core::notes::Lang::Auto, api: self.notes_api.clone(), out: crate::paths::notes_dir() };
+        let job = services::notes::Job {
+            take,
+            started: self.notes_started,
+            lang: poni_core::notes::Lang::Auto,
+            api: self.notes_api.clone(),
+            out: crate::paths::notes_dir(),
+        };
         services::notes::send(job, &self.sink);
     }
 
@@ -4721,8 +5852,16 @@ impl App {
         }
         let now = self.st.now;
         let end = match &r {
-            Reply::Saved(s) => Some(("Your notes are ready".to_string(), s.notes.title.clone(), true)),
-            Reply::Failed(p) => Some((p.title().to_string(), "Open Notes to try again".to_string(), false)),
+            Reply::Saved(s) => Some((
+                "Your notes are ready".to_string(),
+                s.notes.title.clone(),
+                true,
+            )),
+            Reply::Failed(p) => Some((
+                p.title().to_string(),
+                "Open Notes to try again".to_string(),
+                false,
+            )),
             _ => None,
         };
         let saved = matches!(r, Reply::Saved(_));
@@ -4734,8 +5873,19 @@ impl App {
         }
         if let Some((title, subtitle, good)) = end {
             if !(self.expanded && self.st.page == PageKind::Notes) {
-                let color = if good { crate::oyen::ORANGE } else { palette::TEXT_DIM };
-                self.st.notify(Icon::Notes, color, title, subtitle, 8.0, Some(crate::state::NoticeAction::OpenPage(PageKind::Notes)));
+                let color = if good {
+                    crate::oyen::ORANGE
+                } else {
+                    palette::TEXT_DIM
+                };
+                self.st.notify(
+                    Icon::Notes,
+                    color,
+                    title,
+                    subtitle,
+                    8.0,
+                    Some(crate::state::NoticeAction::OpenPage(PageKind::Notes)),
+                );
             }
         }
     }
@@ -4744,7 +5894,10 @@ impl App {
     /// recording waits on the page for Write it up or Throw away.
     fn notes_restore(&mut self) {
         if let Some((take, started)) = services::notes::kept() {
-            pinfo!("notes: a meeting of {:.0} s from before wasn't written up; it's kept", take.secs);
+            pinfo!(
+                "notes: a meeting of {:.0} s from before wasn't written up; it's kept",
+                take.secs
+            );
             self.notes_started = started;
             self.st.notes.secs = take.secs;
             self.notes_take = Some(take);
@@ -4768,7 +5921,12 @@ impl App {
         self.st.prayer.adzan = false;
         // The notice leaves soon after the adzan.
         let soon = self.st.now + 4.0;
-        if let Some(n) = self.st.notice.as_mut().filter(|n| n.inline == Some(InlineAction::StopAdzan)) {
+        if let Some(n) = self
+            .st
+            .notice
+            .as_mut()
+            .filter(|n| n.inline == Some(InlineAction::StopAdzan))
+        {
             n.until = n.until.min(soon);
         }
     }
@@ -4854,7 +6012,9 @@ impl App {
                 Command::RecordStop => services::recorder::stop(),
                 Command::ScriptPaste => {
                     // Read here, not through the text field path: that one drops line breaks.
-                    let text = services::clipboard::read_text(self.hwnd).map(|t| poni_core::script::clean(&t)).filter(|t| !t.is_empty());
+                    let text = services::clipboard::read_text(self.hwnd)
+                        .map(|t| poni_core::script::clean(&t))
+                        .filter(|t| !t.is_empty());
                     match text {
                         Some(text) => pages::script::set_text(&mut self.st, text),
                         None => pages::script::note(&mut self.st, "Copy your script first"),
@@ -4916,6 +6076,7 @@ impl App {
                 Command::Usage(c) => self.usage_cmd(c),
                 Command::Ielts(c) => self.ielts_cmd(c),
                 Command::Notes(c) => self.notes_cmd(c),
+                Command::Numa(c) => self.numa_cmd(c),
                 // The self-test's pictures use the files it seeds (none from the website).
                 Command::GetCities(file) => {
                     if self.selftest.is_none() {
@@ -4984,7 +6145,11 @@ impl App {
                 }
             }
             NotifyEvent::Seen(seen) => {
-                let (shows, changed) = self.st.settings.notifications.remember(&seen.app_id, &seen.app);
+                let (shows, changed) = self
+                    .st
+                    .settings
+                    .notifications
+                    .remember(&seen.app_id, &seen.app);
                 if changed {
                     self.st.cmd(Command::SaveSettings);
                 }
@@ -4992,7 +6157,12 @@ impl App {
                 if !shows || self.locked || self.display_off {
                     return;
                 }
-                if let Some(n) = pages::notifications::message_notice(&seen, &self.st.settings.notifications, self.st.accent, self.st.now) {
+                if let Some(n) = pages::notifications::message_notice(
+                    &seen,
+                    &self.st.settings.notifications,
+                    self.st.accent,
+                    self.st.now,
+                ) {
                     self.st.show_or_hold(n, self.fullscreen_hidden);
                 }
             }
@@ -5019,9 +6189,20 @@ impl App {
                 if let Some(pd) = self.st.phone.as_mut() {
                     if let Some(a) = pd.ask.take_if(|a| a.id == id) {
                         if accept {
-                            pd.transfer = Some(PhoneTransfer { id, from: a.from, file: 0, files: a.files.len(), done: 0, total: a.total });
+                            pd.transfer = Some(PhoneTransfer {
+                                id,
+                                from: a.from,
+                                file: 0,
+                                files: a.files.len(),
+                                done: 0,
+                                total: a.total,
+                            });
                         } else {
-                            pd.outcome = Some((format!("Declined {} from {}", files_label(a.files.len()), a.from), false, until));
+                            pd.outcome = Some((
+                                format!("Declined {} from {}", files_label(a.files.len()), a.from),
+                                false,
+                                until,
+                            ));
                         }
                     }
                 }
@@ -5039,7 +6220,10 @@ impl App {
             pd.error = Some("Phone drop is off in the self-test.".into());
         } else {
             let offer = self.st.store.shelf.paths();
-            match services::phonedrop::PhoneDrop::start(self.sink.clone(), offer.iter().map(PathBuf::from).collect()) {
+            match services::phonedrop::PhoneDrop::start(
+                self.sink.clone(),
+                offer.iter().map(PathBuf::from).collect(),
+            ) {
                 Ok((svc, url)) => {
                     pd.qr = QrMatrix::encode(&url);
                     pd.url = url;
@@ -5061,7 +6245,10 @@ impl App {
         if let Some(svc) = self.phone.take() {
             svc.stop();
         }
-        if matches!(self.st.phone.as_ref().map(|p| &p.view), Some(PhoneView::Pairing { .. })) {
+        if matches!(
+            self.st.phone.as_ref().map(|p| &p.view),
+            Some(PhoneView::Pairing { .. })
+        ) {
             if let Some(s) = &self.services {
                 s.pair_cancel();
             }
@@ -5074,10 +6261,20 @@ impl App {
 
     /// Minute tick: nobody has used the link for a while, so close it.
     fn close_idle_phone(&mut self) {
-        let idle = self.phone.as_ref().is_some_and(|svc| !svc.busy() && svc.idle_secs() >= PHONE_IDLE_S);
-        let quiet = self.st.phone.as_ref().is_some_and(|p| p.ask.is_none() && p.transfer.is_none());
+        let idle = self
+            .phone
+            .as_ref()
+            .is_some_and(|svc| !svc.busy() && svc.idle_secs() >= PHONE_IDLE_S);
+        let quiet = self
+            .st
+            .phone
+            .as_ref()
+            .is_some_and(|p| p.ask.is_none() && p.transfer.is_none());
         if idle && quiet {
-            pinfo!("phone drop: closed after {:.0} minutes without a phone", PHONE_IDLE_S / 60.0);
+            pinfo!(
+                "phone drop: closed after {:.0} minutes without a phone",
+                PHONE_IDLE_S / 60.0
+            );
             self.close_phone();
         }
     }
@@ -5095,7 +6292,9 @@ impl App {
     fn on_phone(&mut self, e: PhoneEvent) {
         let now = self.st.now;
         let until = now + pages::shelf::PHONE_OUTCOME_S;
-        let Some(pd) = self.st.phone.as_mut() else { return };
+        let Some(pd) = self.st.phone.as_mut() else {
+            return;
+        };
         match e {
             PhoneEvent::Visit { from } => {
                 pd.visitor = Some(from);
@@ -5104,9 +6303,19 @@ impl App {
             PhoneEvent::Ask(a) => {
                 pd.outcome = None;
                 pd.visitor.get_or_insert_with(|| a.from.clone());
-                let files: Vec<(String, u64)> = a.files.iter().map(|f| (f.name.clone(), f.size)).collect();
-                pinfo!("phone drop: {} asks to send {}", a.from, files_label(files.len()));
-                pd.ask = Some(PhoneAsk { id: a.id, from: a.from.clone(), total: a.total(), files });
+                let files: Vec<(String, u64)> =
+                    a.files.iter().map(|f| (f.name.clone(), f.size)).collect();
+                pinfo!(
+                    "phone drop: {} asks to send {}",
+                    a.from,
+                    files_label(files.len())
+                );
+                pd.ask = Some(PhoneAsk {
+                    id: a.id,
+                    from: a.from.clone(),
+                    total: a.total(),
+                    files,
+                });
                 self.st.page = PageKind::Shelf;
                 self.expand();
                 self.st.chime();
@@ -5117,7 +6326,13 @@ impl App {
                 }
                 self.maybe_schedule_collapse();
             }
-            PhoneEvent::Progress { id, file, files, done, total } => match pd.transfer.as_mut() {
+            PhoneEvent::Progress {
+                id,
+                file,
+                files,
+                done,
+                total,
+            } => match pd.transfer.as_mut() {
                 Some(t) if t.id == id => {
                     t.file = file;
                     t.files = files;
@@ -5126,15 +6341,29 @@ impl App {
                 }
                 _ => {
                     let from = pd.visitor.clone().unwrap_or_else(|| "Phone".into());
-                    pd.transfer = Some(PhoneTransfer { id, from, file, files, done, total });
+                    pd.transfer = Some(PhoneTransfer {
+                        id,
+                        from,
+                        file,
+                        files,
+                        done,
+                        total,
+                    });
                 }
             },
             PhoneEvent::Received { from, paths, .. } => {
                 pd.transfer = None;
                 let n = paths.len();
-                let title = format!("{} from {from} {} on the Shelf", files_label(n), if n == 1 { "is" } else { "are" });
+                let title = format!(
+                    "{} from {from} {} on the Shelf",
+                    files_label(n),
+                    if n == 1 { "is" } else { "are" }
+                );
                 pd.outcome = Some((title.clone(), true, until));
-                let added: Vec<String> = paths.iter().map(|p| p.to_string_lossy().into_owned()).collect();
+                let added: Vec<String> = paths
+                    .iter()
+                    .map(|p| p.to_string_lossy().into_owned())
+                    .collect();
                 self.st.store.shelf.add_paths(&added, self.st.unix);
                 for p in added {
                     self.st.cmds.push(Command::LoadThumb(p));
@@ -5142,12 +6371,24 @@ impl App {
                 self.st.save();
                 pinfo!("phone drop: {} from {from}", files_label(n));
                 if !self.expanded {
-                    self.st.notify(Icon::Phone, palette::GREEN, title, "Open the Shelf to see them", 6.0, Some(NoticeAction::OpenPage(PageKind::Shelf)));
+                    self.st.notify(
+                        Icon::Phone,
+                        palette::GREEN,
+                        title,
+                        "Open the Shelf to see them",
+                        6.0,
+                        Some(NoticeAction::OpenPage(PageKind::Shelf)),
+                    );
                 }
                 self.st.chime();
                 self.maybe_schedule_collapse();
             }
-            PhoneEvent::Failed { from, reason, detail, .. } => {
+            PhoneEvent::Failed {
+                from,
+                reason,
+                detail,
+                ..
+            } => {
                 pd.transfer = None;
                 pd.outcome = Some((format!("Nothing kept from {from}. {reason}."), false, until));
                 pwarn!("phone drop: transfer from {from} failed: {reason} {detail}");
@@ -5166,12 +6407,18 @@ impl App {
                     Some(s) => s.pair_begin(),
                     None => Err("Pairing is off in the self-test.".into()),
                 };
-                let Some(pd) = self.st.phone.as_mut() else { return };
+                let Some(pd) = self.st.phone.as_mut() else {
+                    return;
+                };
                 pd.outcome = None;
                 match r {
                     Ok(url) => {
                         pinfo!("pair drop: showing a pairing code");
-                        pd.view = PhoneView::Pairing { qr: QrMatrix::encode(&url), url, until: now + poni_core::pairdrop::meet::PAIRING_FOR.as_secs_f64() };
+                        pd.view = PhoneView::Pairing {
+                            qr: QrMatrix::encode(&url),
+                            url,
+                            until: now + poni_core::pairdrop::meet::PAIRING_FOR.as_secs_f64(),
+                        };
                     }
                     Err(e) => {
                         pwarn!("pair drop: {e}");
@@ -5180,7 +6427,10 @@ impl App {
                 }
             }
             PairCmd::Back => {
-                if matches!(self.st.phone.as_ref().map(|p| &p.view), Some(PhoneView::Pairing { .. })) {
+                if matches!(
+                    self.st.phone.as_ref().map(|p| &p.view),
+                    Some(PhoneView::Pairing { .. })
+                ) {
                     if let Some(s) = &self.services {
                         s.pair_cancel();
                     }
@@ -5190,7 +6440,10 @@ impl App {
                 }
             }
             PairCmd::List => {
-                if matches!(self.st.phone.as_ref().map(|p| &p.view), Some(PhoneView::Pairing { .. })) {
+                if matches!(
+                    self.st.phone.as_ref().map(|p| &p.view),
+                    Some(PhoneView::Pairing { .. })
+                ) {
                     if let Some(s) = &self.services {
                         s.pair_cancel();
                     }
@@ -5207,7 +6460,11 @@ impl App {
                     let p = self.st.paired.remove(i);
                     pinfo!("pair drop: removed a paired phone");
                     if let Some(pd) = self.st.phone.as_mut() {
-                        pd.outcome = Some((format!("{} can't send to this PC any more", p.name), false, now + pages::shelf::PHONE_OUTCOME_S));
+                        pd.outcome = Some((
+                            format!("{} can't send to this PC any more", p.name),
+                            false,
+                            now + pages::shelf::PHONE_OUTCOME_S,
+                        ));
                         pd.outcome_line = Some("Pair it again any time from Pair a phone.".into());
                     }
                 }
@@ -5233,7 +6490,14 @@ impl App {
             MeetEvent::Pairs(list) => self.st.paired = paired_phones(list),
             MeetEvent::Server { reachable } => {
                 if self.st.pair_server.is_some() || !reachable {
-                    pinfo!("pair drop: meeting server {}", if reachable { "reachable again" } else { "unreachable" });
+                    pinfo!(
+                        "pair drop: meeting server {}",
+                        if reachable {
+                            "reachable again"
+                        } else {
+                            "unreachable"
+                        }
+                    );
                 }
                 self.st.pair_server = Some(reachable);
             }
@@ -5242,11 +6506,20 @@ impl App {
                 if let Some(pd) = self.st.phone.as_mut() {
                     pd.view = PhoneView::Lan;
                     pd.outcome = Some((format!("{name} is paired"), true, until));
-                    pd.outcome_line = Some("It can now send from any network, even with this panel closed.".into());
+                    pd.outcome_line = Some(
+                        "It can now send from any network, even with this panel closed.".into(),
+                    );
                 }
                 if !self.hovering {
                     // The island closes now that nothing waits: say it on the pill.
-                    self.st.notify(Icon::Phone, palette::GREEN, format!("{name} is paired"), "It can send from any network now", 6.0, Some(NoticeAction::OpenPage(PageKind::Shelf)));
+                    self.st.notify(
+                        Icon::Phone,
+                        palette::GREEN,
+                        format!("{name} is paired"),
+                        "It can send from any network now",
+                        6.0,
+                        Some(NoticeAction::OpenPage(PageKind::Shelf)),
+                    );
                 }
                 self.st.chime();
                 self.maybe_schedule_collapse();
@@ -5255,14 +6528,28 @@ impl App {
                 PeerEvent::Hello { .. } => pinfo!("pair drop: a paired phone connected"),
                 PeerEvent::Progress { files, done: 0, .. } => {
                     if !self.expanded {
-                        self.st.notify(Icon::Phone, palette::GREEN, format!("{phone} is sending {}", files_label(files)), "They go straight onto the Shelf", 4.0, None);
+                        self.st.notify(
+                            Icon::Phone,
+                            palette::GREEN,
+                            format!("{phone} is sending {}", files_label(files)),
+                            "They go straight onto the Shelf",
+                            4.0,
+                            None,
+                        );
                     }
                 }
                 PeerEvent::Progress { .. } => {}
                 PeerEvent::Received { paths } => {
                     let n = paths.len();
-                    let title = format!("{} from {phone} {} on the Shelf", files_label(n), if n == 1 { "is" } else { "are" });
-                    let added: Vec<String> = paths.iter().map(|p| p.to_string_lossy().into_owned()).collect();
+                    let title = format!(
+                        "{} from {phone} {} on the Shelf",
+                        files_label(n),
+                        if n == 1 { "is" } else { "are" }
+                    );
+                    let added: Vec<String> = paths
+                        .iter()
+                        .map(|p| p.to_string_lossy().into_owned())
+                        .collect();
                     self.st.store.shelf.add_paths(&added, self.st.unix);
                     for p in added {
                         self.st.cmds.push(Command::LoadThumb(p));
@@ -5274,7 +6561,14 @@ impl App {
                         pd.outcome_line = None;
                     }
                     if !self.expanded {
-                        self.st.notify(Icon::Phone, palette::GREEN, title, "Open the Shelf to see them", 6.0, Some(NoticeAction::OpenPage(PageKind::Shelf)));
+                        self.st.notify(
+                            Icon::Phone,
+                            palette::GREEN,
+                            title,
+                            "Open the Shelf to see them",
+                            6.0,
+                            Some(NoticeAction::OpenPage(PageKind::Shelf)),
+                        );
                     }
                     self.st.chime();
                     self.maybe_schedule_collapse();
@@ -5282,9 +6576,20 @@ impl App {
                 PeerEvent::Failed { reason, detail } => {
                     pwarn!("pair drop: a send from a paired phone failed: {reason} {detail}");
                     if !self.expanded {
-                        self.st.notify(Icon::Phone, palette::TEXT, format!("Nothing kept from {phone}"), format!("{reason}."), 6.0, None);
+                        self.st.notify(
+                            Icon::Phone,
+                            palette::TEXT,
+                            format!("Nothing kept from {phone}"),
+                            format!("{reason}."),
+                            6.0,
+                            None,
+                        );
                     } else if let Some(pd) = self.st.phone.as_mut() {
-                        pd.outcome = Some((format!("Nothing kept from {phone}. {reason}."), false, until));
+                        pd.outcome = Some((
+                            format!("Nothing kept from {phone}. {reason}."),
+                            false,
+                            until,
+                        ));
                         pd.outcome_line = None;
                     }
                 }
@@ -5332,7 +6637,11 @@ impl App {
     pub fn selftest_window_under(&mut self, under: bool) {
         let m = &self.monitor;
         let px = (TOP_BAND * self.gfx.scale()).ceil() as i32;
-        self.top_windows = if under { vec![[m.rect.left, m.top(), m.rect.right, m.top() + px]] } else { Vec::new() };
+        self.top_windows = if under {
+            vec![[m.rect.left, m.top(), m.rect.right, m.top() + px]]
+        } else {
+            Vec::new()
+        };
     }
 
     /// Self-test: what the closed island shows now, and whether it stepped aside.
@@ -5363,9 +6672,15 @@ impl App {
         self.ielts.stand_in = Some(stand_in);
         self.st.ielts = Default::default();
         self.st.oyenza = Default::default();
-        self.st.oyenza.link = OyenzaLink::Connected { account: "s\u{2022}\u{2022}\u{2022}@example.com".into() };
-        self.st.settings.set_addon(poni_core::addons::IELTS.id, true);
-        self.st.addons.insert(poni_core::addons::IELTS.id, AddonStatus::Ready);
+        self.st.oyenza.link = OyenzaLink::Connected {
+            account: "s\u{2022}\u{2022}\u{2022}@example.com".into(),
+        };
+        self.st
+            .settings
+            .set_addon(poni_core::addons::IELTS.id, true);
+        self.st
+            .addons
+            .insert(poni_core::addons::IELTS.id, AddonStatus::Ready);
         self.st.notice = None;
         self.st.hud = None;
         self.st.page = PageKind::Ielts;
@@ -5384,7 +6699,9 @@ impl App {
     /// every clip and answer was used and deleted).
     pub fn selftest_ielts_files(&mut self) -> usize {
         self.ielts.retry_deletes();
-        std::fs::read_dir(paths::ielts_dir()).map(|d| d.count()).unwrap_or(0)
+        std::fs::read_dir(paths::ielts_dir())
+            .map(|d| d.count())
+            .unwrap_or(0)
     }
 
     /// Self-test, the IELTS turn is over: nothing of it stays.
@@ -5392,10 +6709,21 @@ impl App {
     /// the run's own server with its own key.
     pub fn selftest_notes_begin(&mut self, base: String, key: String, take: services::notes::Take) {
         self.notes_api = Some((base, key));
-        self.st.settings.set_addon(poni_core::addons::MEETING_NOTES.id, true);
-        self.st.addons.insert(poni_core::addons::MEETING_NOTES.id, AddonStatus::Ready);
+        self.st
+            .settings
+            .set_addon(poni_core::addons::MEETING_NOTES.id, true);
+        self.st
+            .addons
+            .insert(poni_core::addons::MEETING_NOTES.id, AddonStatus::Ready);
         self.st.notes = Default::default();
-        self.notes_started = poni_core::datetime::LocalDateTime { year: 2026, month: 10, day: 29, hour: 14, minute: 5, second: 0 };
+        self.notes_started = poni_core::datetime::LocalDateTime {
+            year: 2026,
+            month: 10,
+            day: 29,
+            hour: 14,
+            minute: 5,
+            second: 0,
+        };
         self.notes_take = Some(take);
         self.st.ui.notes_kept = true;
         self.notes_send();
@@ -5404,16 +6732,24 @@ impl App {
     pub fn selftest_notes_end(&mut self) {
         self.notes_off();
         self.notes_api = None;
-        self.st.settings.set_addon(poni_core::addons::MEETING_NOTES.id, false);
-        self.st.addons.insert(poni_core::addons::MEETING_NOTES.id, AddonStatus::Off);
+        self.st
+            .settings
+            .set_addon(poni_core::addons::MEETING_NOTES.id, false);
+        self.st
+            .addons
+            .insert(poni_core::addons::MEETING_NOTES.id, AddonStatus::Off);
     }
 
     pub fn selftest_ielts_end(&mut self) {
         self.ielts_off();
         self.ielts_turn = false;
         self.ielts = Default::default();
-        self.st.settings.set_addon(poni_core::addons::IELTS.id, false);
-        self.st.addons.insert(poni_core::addons::IELTS.id, AddonStatus::Off);
+        self.st
+            .settings
+            .set_addon(poni_core::addons::IELTS.id, false);
+        self.st
+            .addons
+            .insert(poni_core::addons::IELTS.id, AddonStatus::Off);
         self.st.oyenza = Default::default();
         self.st.page = PageKind::ALL[0];
     }
@@ -5433,7 +6769,9 @@ impl App {
         }
         self.st.now = self.st.now.max(clock::mono());
         let now = self.st.now;
-        let Some(w) = self.settings_win.as_mut() else { return (0, 0, Vec::new()) };
+        let Some(w) = self.settings_win.as_mut() else {
+            return (0, 0, Vec::new());
+        };
         w.view.show_section(section);
         w.view.input.mouse = None;
         w.set_light(light);
@@ -5453,7 +6791,9 @@ impl App {
         for _ in 0..n {
             self.st.now = self.st.now.max(clock::mono());
             let now = self.st.now;
-            let Some(w) = self.settings_win.as_mut() else { break };
+            let Some(w) = self.settings_win.as_mut() else {
+                break;
+            };
             let t = std::time::Instant::now();
             let _ = w.paint(&mut self.st, now, only, false);
             out.push(t.elapsed().as_secs_f64() * 1000.0);
@@ -5465,13 +6805,26 @@ impl App {
     /// Film the Settings window as a person uses it (`settings_host::film`)
     /// on this monitor, at `hz`. Its clicks change a setting: it goes back
     /// as it was, unsaved, afterwards.
-    pub fn selftest_settings_film(&mut self, hz: f64, on_frame: impl FnMut(usize, i32, i32, &[u8], Option<RECT>)) -> Option<settings_host::Film> {
+    pub fn selftest_settings_film(
+        &mut self,
+        hz: f64,
+        on_frame: impl FnMut(usize, i32, i32, &[u8], Option<RECT>),
+    ) -> Option<settings_host::Film> {
         let (before, queued) = (self.st.settings.clone(), self.st.cmds.len());
-        let film = settings_host::film(&mut self.st, self.monitor.work, self.gfx.dpi.round() as u32, hz, on_frame);
+        let film = settings_host::film(
+            &mut self.st,
+            self.monitor.work,
+            self.gfx.dpi.round() as u32,
+            hz,
+            on_frame,
+        );
         self.st.settings = before;
         self.st.cmds.truncate(queued);
         self.st.now = clock::mono();
-        film.inspect_err(|e| pwarn!("selftest: the Settings window's film couldn't open its windows ({e})")).ok()
+        film.inspect_err(|e| {
+            pwarn!("selftest: the Settings window's film couldn't open its windows ({e})")
+        })
+        .ok()
     }
 
     /// The scale the Settings window draws at.
@@ -5481,11 +6834,18 @@ impl App {
 
     /// Where its card is in its window (DIPs).
     pub fn selftest_settings_card(&self) -> Rect {
-        self.settings_win.as_ref().map_or(settings_host::card_rect(crate::settings_window::CARD_H), |w| w.card())
+        self.settings_win.as_ref().map_or(
+            settings_host::card_rect(crate::settings_window::CARD_H),
+            |w| w.card(),
+        )
     }
 
     pub fn selftest_settled(&self) -> bool {
-        self.island.settled() && self.target_mode() == self.mode && self.page_anim.is_none() && self.outgoing.is_none() && !self.glass_moving
+        self.island.settled()
+            && self.target_mode() == self.mode
+            && self.page_anim.is_none()
+            && self.outgoing.is_none()
+            && !self.glass_moving
     }
 
     /// Self-test, Glass theme: `px` (BGRA, the window's size) is what's under
@@ -5494,137 +6854,6 @@ impl App {
         self.glass.app_light = app_light;
         self.glass.inject(px, w, h, &mut self.gfx);
     }
-    // ------------------------------------------------------------ NUMA
-
-    fn poll_numa_hotkey(&mut self) {
-        let ctrl = unsafe {
-            GetAsyncKeyState(VK_LCONTROL.0 as i32) < 0 || GetAsyncKeyState(VK_RCONTROL.0 as i32) < 0
-        };
-        let alt = unsafe {
-            GetAsyncKeyState(VK_LMENU.0 as i32) < 0 || GetAsyncKeyState(VK_RMENU.0 as i32) < 0
-        };
-        let held = ctrl && alt;
-        if held && !self.numa_hotkey {
-            self.numa_hotkey = true;
-            self.numa_cmd(NumaCmd::Start);
-        } else if !held && self.numa_hotkey {
-            self.numa_hotkey = false;
-            self.numa_cmd(NumaCmd::Stop);
-        }
-    }
-
-    /// Escape is polled as well as handled by the island window. Takeover is
-    /// deliberately cancellable even when the island is not focused.
-    fn poll_numa_safety(&mut self) {
-        let escape = unsafe { GetAsyncKeyState(VK_ESCAPE.0 as i32) < 0 };
-        if escape && matches!(self.st.ui.numa.phase, crate::state::NumaPhase::Takeover) {
-            self.numa_cmd(NumaCmd::StopTakeover);
-        }
-    }
-
-    /// A bare "hey numa" only has a few seconds to be followed by a command.
-    /// Without this the page would sit on "Listeningâ€¦" for ever, reading as if
-    /// NUMA were still capturing when nothing is open.
-    fn poll_numa_listen(&mut self) {
-        let Some(until) = self.numa_listen_until else {
-            return;
-        };
-        if self.numa_mic.is_some() {
-            // Push-to-talk owns the phase from here.
-            self.numa_listen_until = None;
-            return;
-        }
-        if self.st.now < until {
-            return;
-        }
-        self.numa_listen_until = None;
-        if matches!(self.st.ui.numa.phase, crate::state::NumaPhase::Listening) {
-            self.st.ui.numa.phase = crate::state::NumaPhase::Idle;
-            self.st.ui.numa.response = Some("Didn't catch that.".into());
-        }
-    }
-
-    fn numa_cmd(&mut self, c: NumaCmd) {
-        match c {
-            NumaCmd::Start => {
-                if self.st.ui.numa.mic_muted {
-                    self.st.ui.numa.response = Some("Microphone is muted.".into());
-                    return;
-                }
-                if self.numa_mic.is_some() {
-                    return;
-                }
-                // Push-to-talk supersedes a wake word that is still waiting
-                // for its command.
-                self.numa_listen_until = None;
-                // Push-to-talk is a global entry point: bring the Numa surface
-                // forward even when the island is currently on another page
-                // or collapsed into the notch.
-                self.st.page = PageKind::Numa;
-                self.expand();
-                let dir = paths::cache_dir().join("numa");
-                let _ = std::fs::create_dir_all(&dir);
-                let path = dir.join("turn.wav");
-                match services::mic::Mic::start(&path, &self.sink) {
-                    Ok(mic) => {
-                        self.numa_mic = Some(mic);
-                        self.st.ui.numa.phase = crate::state::NumaPhase::Listening;
-                        self.st.ui.numa.transcript = None;
-                        self.st.ui.numa.response = None;
-                    }
-                    Err(error) => {
-                        self.st.ui.numa.phase = crate::state::NumaPhase::Error(error.to_string())
-                    }
-                }
-            }
-            NumaCmd::Stop => {
-                let Some(mic) = self.numa_mic.take() else {
-                    return;
-                };
-                match mic.stop() {
-                    Ok((path, _secs)) => {
-                        self.st.ui.numa.phase = crate::state::NumaPhase::Thinking;
-                        services::numa::transcribe(path, self.sink.clone());
-                    }
-                    Err(error) => {
-                        self.st.ui.numa.phase = crate::state::NumaPhase::Error(error.to_string())
-                    }
-                }
-            }
-            NumaCmd::Mute => {
-                if let Some(services) = &self.services {
-                    services.set_numa_muted(true);
-                }
-                self.st.ui.numa.mic_muted = true;
-                self.st.ui.numa.phase = crate::state::NumaPhase::Idle;
-            }
-            NumaCmd::Unmute => {
-                if let Some(services) = &self.services {
-                    services.set_numa_muted(false);
-                }
-                self.st.ui.numa.mic_muted = false;
-            }
-            NumaCmd::Takeover => {
-                // Safe vertical slice: enter takeover stub boundary. No arbitrary
-                // mouse/keyboard execution; `services::numa_takeover` only emits
-                // events and updates `st.ui.numa.takeover_action`.
-                self.st.page = PageKind::Numa;
-                self.expand();
-                self.st.ui.numa.phase = crate::state::NumaPhase::Takeover;
-                self.st.ui.numa.takeover_action = Some("Entering computer-control mode.".into());
-                self.numa_takeover = Some(services::numa_takeover::TakeoverRunner::start(
-                    self.sink.clone(),
-                ));
-            }
-            NumaCmd::StopTakeover => {
-                // Esc / Stop safety path: exit takeover, drop to idle.
-                self.numa_takeover = None;
-                self.st.ui.numa.phase = crate::state::NumaPhase::Idle;
-                self.st.ui.numa.takeover_action = None;
-            }
-        }
-    }
-
 
     /// Self-test: a new scene starts (the glass takes its side at once).
     pub fn selftest_glass_reseed(&mut self) {
@@ -5640,7 +6869,11 @@ impl App {
     /// Self-test: the last frame's glass came from the shader, the backdrop
     /// is on the GPU, and the look content was painted in.
     pub fn selftest_glass_state(&self) -> (bool, bool, &'static poni_core::look::Look) {
-        (self.gfx.glass_drew(), self.gfx.glass_has_copy(), self.gfx.look())
+        (
+            self.gfx.glass_drew(),
+            self.gfx.glass_has_copy(),
+            self.gfx.look(),
+        )
     }
 
     /// Self-test: the captured rectangle (surface pixels).
@@ -5661,12 +6894,22 @@ impl App {
         self.capture_next = true;
         self.frame(&mut d, None);
         let r = self.capture_rect;
-        (r.right - r.left, r.bottom - r.top, self.gfx.take_capture(), (self.surface.x + r.left, self.surface.y + r.top))
+        (
+            r.right - r.left,
+            r.bottom - r.top,
+            self.gfx.take_capture(),
+            (self.surface.x + r.left, self.surface.y + r.top),
+        )
     }
 
     /// The window's screen rectangle as laid out (left, top, width, height).
     pub fn selftest_surface(&self) -> (i32, i32, i32, i32) {
-        (self.surface.x, self.surface.y, self.surface.w, self.surface.h)
+        (
+            self.surface.x,
+            self.surface.y,
+            self.surface.w,
+            self.surface.h,
+        )
     }
 
     pub fn renderer(&self) -> &'static str {
@@ -5680,7 +6923,10 @@ impl App {
 
     /// The middle of a widget drawn in the last frame, found by its id.
     pub fn selftest_hit_center(&self, id: crate::ui::WidgetId) -> Option<Point> {
-        self.hits.iter().find(|h| h.id == id).map(|h| h.rect.center())
+        self.hits
+            .iter()
+            .find(|h| h.id == id)
+            .map(|h| h.rect.center())
     }
 
     pub fn selftest_click(&mut self, p: Point) {
@@ -5695,7 +6941,10 @@ impl App {
     /// click). Returns whether the island opened.
     pub fn selftest_press(&mut self, p: Point) -> bool {
         let s = self.gfx.scale();
-        let (x, y) = ((p.x * s).round() as i32 & 0xffff, (p.y * s).round() as i32 & 0xffff);
+        let (x, y) = (
+            (p.x * s).round() as i32 & 0xffff,
+            (p.y * s).round() as i32 & 0xffff,
+        );
         let lp = LPARAM(((y << 16) | x) as isize);
         // Nothing a left press defers (the right button's menu is what does).
         let mut deferred = Vec::new();
@@ -5709,7 +6958,12 @@ impl App {
     /// whether the island opened.
     pub fn selftest_drag(&mut self, p: Point, dx: f32) -> bool {
         let s = self.gfx.scale();
-        let lp = |p: Point| LPARAM(((((p.y * s).round() as i32 & 0xffff) << 16) | ((p.x * s).round() as i32 & 0xffff)) as isize);
+        let lp = |p: Point| {
+            LPARAM(
+                ((((p.y * s).round() as i32 & 0xffff) << 16) | ((p.x * s).round() as i32 & 0xffff))
+                    as isize,
+            )
+        };
         let to = Point::new(p.x + dx, p.y);
         let mut deferred = Vec::new();
         self.handle_island(WM_LBUTTONDOWN, WPARAM(0), lp(p), &mut deferred);
@@ -5742,7 +6996,9 @@ impl App {
     pub fn island_body_in_capture(&self) -> Rect {
         let s = self.gfx.scale();
         let r = self.capture_rect;
-        self.island.body_rect_at(self.cx).offset(-(r.left as f32) / s, -(r.top as f32) / s)
+        self.island
+            .body_rect_at(self.cx)
+            .offset(-(r.left as f32) / s, -(r.top as f32) / s)
     }
 
     pub fn scale(&self) -> f32 {
@@ -5784,13 +7040,21 @@ fn draw_content(
         Mode::Expanded(page) => pages::draw_expanded(&mut ui, st, lay, page, transition),
         _ => activities::draw(&mut ui, st, &mode, body),
     }
-    (ui.repaint_requested(), ui.anim_requested(), ui.focus_request(), ui.live_requested())
+    (
+        ui.repaint_requested(),
+        ui.anim_requested(),
+        ui.focus_request(),
+        ui.live_requested(),
+    )
 }
 
 /// DWM's (refreshes, frames composed, frames missed) counters, if available.
 fn dwm_counters() -> Option<(u64, u64, u64)> {
     use windows::Win32::Graphics::Dwm::{DwmGetCompositionTimingInfo, DWM_TIMING_INFO};
-    let mut info = DWM_TIMING_INFO { cbSize: std::mem::size_of::<DWM_TIMING_INFO>() as u32, ..Default::default() };
+    let mut info = DWM_TIMING_INFO {
+        cbSize: std::mem::size_of::<DWM_TIMING_INFO>() as u32,
+        ..Default::default()
+    };
     unsafe { DwmGetCompositionTimingInfo(HWND::default(), &mut info) }.ok()?;
     Some((info.cRefresh, info.cFrame, info.cFramesMissed))
 }
@@ -5808,7 +7072,11 @@ fn surface_size(island: &Island, body_w: f32, body_h: f32, scale: f32, mon_w: i3
     }
     // The gap the island rests at, not where an outline sliding into or out
     // of it is now: the window never resizes during that motion.
-    let top = if island.floating() { pill::TOP_GAP } else { 0.0 };
+    let top = if island.floating() {
+        pill::TOP_GAP
+    } else {
+        0.0
+    };
     let h = ((body_h * OVERSHOOT + island.bottom_room() + top) * scale).ceil() as i32;
     (w, h)
 }
@@ -5825,17 +7093,38 @@ fn surface_size(island: &Island, body_w: f32, body_h: f32, scale: f32, mon_w: i3
 /// software renderer paints it at alpha 1/255 under the island.
 fn hit_mask_for(island: &Island, cx: f32, expanded: bool, hidden: bool) -> HitMask {
     if expanded {
-        return HitMask { rect: Some(island.canvas_rect_at(cx)), notch: None, pill: None };
+        return HitMask {
+            rect: Some(island.canvas_rect_at(cx)),
+            notch: None,
+            pill: None,
+        };
     }
     let body = island.body_rect_at(cx);
     if !island.floating() {
-        return HitMask { rect: None, notch: Some((body, island.current().r, SHOULDER)), pill: None };
+        return HitMask {
+            rect: None,
+            notch: Some((body, island.current().r, SHOULDER)),
+            pill: None,
+        };
     }
     if hidden {
-        return HitMask { rect: Some(Rect::new(body.x, 0.0, body.w, body.h)), notch: None, pill: None };
+        return HitMask {
+            rect: Some(Rect::new(body.x, 0.0, body.w, body.h)),
+            notch: None,
+            pill: None,
+        };
     }
     let gap = island.hover_rect_at(cx);
-    HitMask { rect: Some(Rect::new(gap.x, gap.y, gap.w, body.y + body.h / 2.0 - gap.y)), notch: None, pill: Some((body, island.current().r)) }
+    HitMask {
+        rect: Some(Rect::new(
+            gap.x,
+            gap.y,
+            gap.w,
+            body.y + body.h / 2.0 - gap.y,
+        )),
+        notch: None,
+        pill: Some((body, island.current().r)),
+    }
 }
 
 /// Name of a morph for the motion log.
@@ -5851,7 +7140,14 @@ fn motion_name(from: &Mode, to: &Mode) -> &'static str {
 /// "1 file", "3 files".
 /// The panel's list: most recently used first.
 fn paired_phones(pairs: Vec<poni_core::pairdrop::Pair>) -> Vec<PairedPhone> {
-    let mut v: Vec<PairedPhone> = pairs.into_iter().map(|p| PairedPhone { room: p.room(), name: p.name, seen: p.seen.max(p.added) }).collect();
+    let mut v: Vec<PairedPhone> = pairs
+        .into_iter()
+        .map(|p| PairedPhone {
+            room: p.room(),
+            name: p.name,
+            seen: p.seen.max(p.added),
+        })
+        .collect();
     v.sort_by_key(|a| std::cmp::Reverse(a.seen));
     v
 }
@@ -5895,29 +7191,71 @@ mod tests {
         assert_eq!(body, Rect::new(CX - 42.0, 0.0, 84.0, 30.0));
         assert_eq!(i.hover_rect_at(CX), body, "Classic hovers on its body");
         let side = SHOULDER + HIT_MARGIN;
-        assert_eq!(i.canvas_rect_at(CX), Rect::new(CX - 42.0 - side, 0.0, 84.0 + 2.0 * side, 30.0 + HIT_MARGIN));
-        assert_eq!((i.top(), i.side_room(), i.bottom_room()), (0.0, side, HIT_MARGIN));
+        assert_eq!(
+            i.canvas_rect_at(CX),
+            Rect::new(CX - 42.0 - side, 0.0, 84.0 + 2.0 * side, 30.0 + HIT_MARGIN)
+        );
+        assert_eq!(
+            (i.top(), i.side_room(), i.bottom_room()),
+            (0.0, side, HIT_MARGIN)
+        );
     }
 
     #[test]
     fn pill_floats_below_the_edge() {
         let i = island(Geom::new(152.0, 32.0, 16.0), true);
         let (gap, side, below) = (pill::TOP_GAP, i.side_room(), i.bottom_room());
-        assert!(i.floating() && i.top() == gap && side > 0.0 && below > 0.0, "room for the gap and the shadow");
+        assert!(
+            i.floating() && i.top() == gap && side > 0.0 && below > 0.0,
+            "room for the gap and the shadow"
+        );
         let body = i.body_rect_at(CX);
         assert_eq!(body, Rect::new(CX - 76.0, gap, 152.0, 32.0));
-        assert_eq!(i.hover_rect_at(CX), Rect::new(CX - 76.0, 0.0, 152.0, gap + 32.0), "the gap above it and the body");
-        assert_eq!(i.canvas_rect_at(CX), Rect::new(CX - 76.0 - side, 0.0, 152.0 + 2.0 * side, gap + 32.0 + below));
+        assert_eq!(
+            i.hover_rect_at(CX),
+            Rect::new(CX - 76.0, 0.0, 152.0, gap + 32.0),
+            "the gap above it and the body"
+        );
+        assert_eq!(
+            i.canvas_rect_at(CX),
+            Rect::new(
+                CX - 76.0 - side,
+                0.0,
+                152.0 + 2.0 * side,
+                gap + 32.0 + below
+            )
+        );
     }
 
     #[test]
     fn classic_masks_are_unchanged() {
         let i = island(Geom::new(84.0, 30.0, 14.0), false);
         let body = i.body_rect_at(CX);
-        assert_eq!(hit_mask_for(&i, CX, false, false), HitMask { rect: None, notch: Some((body, 14.0, SHOULDER)), pill: None });
+        assert_eq!(
+            hit_mask_for(&i, CX, false, false),
+            HitMask {
+                rect: None,
+                notch: Some((body, 14.0, SHOULDER)),
+                pill: None
+            }
+        );
         // Hidden is Classic's own strip there, with its shoulders.
-        assert_eq!(hit_mask_for(&i, CX, false, true), HitMask { rect: None, notch: Some((body, 14.0, SHOULDER)), pill: None });
-        assert_eq!(hit_mask_for(&i, CX, true, false), HitMask { rect: Some(i.canvas_rect_at(CX)), notch: None, pill: None });
+        assert_eq!(
+            hit_mask_for(&i, CX, false, true),
+            HitMask {
+                rect: None,
+                notch: Some((body, 14.0, SHOULDER)),
+                pill: None
+            }
+        );
+        assert_eq!(
+            hit_mask_for(&i, CX, true, false),
+            HitMask {
+                rect: Some(i.canvas_rect_at(CX)),
+                notch: None,
+                pill: None
+            }
+        );
     }
 
     #[test]
@@ -5929,18 +7267,36 @@ mod tests {
         // A pointer thrown at the top edge: anywhere above the pill.
         for x in [body.x + 0.1, CX, body.right() - 0.1] {
             assert!(m.contains(pt(x, 0.0)), "top edge at x {x}");
-            assert!(m.contains(pt(x, pill::TOP_GAP - 0.1)), "just above the pill at x {x}");
+            assert!(
+                m.contains(pt(x, pill::TOP_GAP - 0.1)),
+                "just above the pill at x {x}"
+            );
         }
-        assert!(m.contains(pt(body.x + 0.5, body.y + 0.5)), "the top corners: the gap reaches the pill's middle");
-        assert!(m.contains(pt(CX, body.bottom() - 0.5)), "the pill's bottom edge");
+        assert!(
+            m.contains(pt(body.x + 0.5, body.y + 0.5)),
+            "the top corners: the gap reaches the pill's middle"
+        );
+        assert!(
+            m.contains(pt(CX, body.bottom() - 0.5)),
+            "the pill's bottom edge"
+        );
         // Beside it at the top edge, beside and below it (its shadow): through.
         assert!(!m.contains(pt(body.x - 0.5, 0.0)) && !m.contains(pt(body.right() + 0.5, 0.0)));
         for d in [0.5, 3.0, 8.0] {
-            assert!(!m.contains(pt(body.x - d, body.center().y)), "beside, {d} out");
-            assert!(!m.contains(pt(body.right() + d, body.center().y)), "beside, {d} out");
+            assert!(
+                !m.contains(pt(body.x - d, body.center().y)),
+                "beside, {d} out"
+            );
+            assert!(
+                !m.contains(pt(body.right() + d, body.center().y)),
+                "beside, {d} out"
+            );
             assert!(!m.contains(pt(CX, body.bottom() + d)), "below, {d} down");
         }
-        assert!(!m.contains(pt(body.x + 1.0, body.bottom() - 1.0)), "the round bottom corners");
+        assert!(
+            !m.contains(pt(body.x + 1.0, body.bottom() - 1.0)),
+            "the round bottom corners"
+        );
     }
 
     #[test]
@@ -5948,12 +7304,28 @@ mod tests {
         let i = island(Geom::new(620.0, 216.0, 40.0), true);
         let canvas = i.canvas_rect_at(CX);
         let m = hit_mask_for(&i, CX, true, false);
-        assert_eq!(m, HitMask { rect: Some(canvas), notch: None, pill: None });
+        assert_eq!(
+            m,
+            HitMask {
+                rect: Some(canvas),
+                notch: None,
+                pill: None
+            }
+        );
         let body = i.body_rect_at(CX);
         assert!(m.contains(pt(CX, 0.0)), "the gap above the card");
-        assert!(m.contains(pt(body.x - i.side_room() + 0.5, body.center().y)), "the margin beside it");
-        assert!(m.contains(pt(CX, body.bottom() + i.bottom_room() - 0.5)), "the margin below it");
-        assert!(!m.contains(pt(canvas.right() + 0.5, body.center().y)) && !m.contains(pt(CX, canvas.bottom() + 0.5)));
+        assert!(
+            m.contains(pt(body.x - i.side_room() + 0.5, body.center().y)),
+            "the margin beside it"
+        );
+        assert!(
+            m.contains(pt(CX, body.bottom() + i.bottom_room() - 0.5)),
+            "the margin below it"
+        );
+        assert!(
+            !m.contains(pt(canvas.right() + 0.5, body.center().y))
+                && !m.contains(pt(CX, canvas.bottom() + 0.5))
+        );
     }
 
     #[test]
@@ -5965,9 +7337,19 @@ mod tests {
         let classic = island(Geom::new(150.0, 5.0, 2.5), false).body_rect_at(CX);
         let body = i.body_rect_at(CX);
         let m = hit_mask_for(&i, CX, false, true);
-        assert_eq!(m, HitMask { rect: Some(Rect::new(classic.x, 0.0, classic.w, classic.h)), notch: None, pill: None });
+        assert_eq!(
+            m,
+            HitMask {
+                rect: Some(Rect::new(classic.x, 0.0, classic.w, classic.h)),
+                notch: None,
+                pill: None
+            }
+        );
         assert!(m.contains(pt(CX, 0.0)) && m.contains(pt(body.x + 0.1, classic.h - 0.1)));
-        assert!(!m.contains(pt(CX, classic.h)) && !m.contains(pt(CX, body.center().y)), "below the band, the invisible body included");
+        assert!(
+            !m.contains(pt(CX, classic.h)) && !m.contains(pt(CX, body.center().y)),
+            "below the band, the invisible body included"
+        );
     }
 
     #[test]
@@ -5981,18 +7363,30 @@ mod tests {
         for s in SCALES {
             let x = (CX * s) as i32;
             let top_px = (pill::TOP_GAP * s).round() as i32;
-            assert_eq!(top_px as f32, pill::TOP_GAP * s, "the gap is whole pixels at {s}");
+            assert_eq!(
+                top_px as f32,
+                pill::TOP_GAP * s,
+                "the gap is whole pixels at {s}"
+            );
             for y in 0..top_px {
                 assert!(m.contains(px_centre(x, y, s)), "gap row {y} at {s}");
             }
             let mid = ((body.y + body.h / 2.0) * s) as i32;
             let left = (body.x * s).floor() as i32 - 1;
             let right = (body.right() * s).ceil() as i32;
-            assert!(!m.contains(px_centre(left, mid, s)) && !m.contains(px_centre(right, mid, s)), "beside at {s}");
-                Command::Numa(c) => self.numa_cmd(c),
-            assert!(m.contains(px_centre(left + 2, mid, s)) && m.contains(px_centre(right - 2, mid, s)), "inside the ends at {s}");
+            assert!(
+                !m.contains(px_centre(left, mid, s)) && !m.contains(px_centre(right, mid, s)),
+                "beside at {s}"
+            );
+            assert!(
+                m.contains(px_centre(left + 2, mid, s)) && m.contains(px_centre(right - 2, mid, s)),
+                "inside the ends at {s}"
+            );
             let below = (body.bottom() * s).ceil() as i32;
-            assert!(!m.contains(px_centre(x, below, s)) && m.contains(px_centre(x, below - 1, s)), "the bottom edge at {s}");
+            assert!(
+                !m.contains(px_centre(x, below, s)) && m.contains(px_centre(x, below - 1, s)),
+                "the bottom edge at {s}"
+            );
             assert!(m.contains(px_centre(x, 0, s)), "the top edge at {s}");
         }
     }
@@ -6011,16 +7405,25 @@ mod tests {
                 if (mon_w - w) % 2 != 0 {
                     w += 1;
                 }
-                assert_eq!(classic, (w, ((400.0 * OVERSHOOT + HIT_MARGIN) * s).ceil() as i32), "Classic at {s} on {mon_w}");
+                assert_eq!(
+                    classic,
+                    (w, ((400.0 * OVERSHOOT + HIT_MARGIN) * s).ceil() as i32),
+                    "Classic at {s} on {mon_w}"
+                );
                 assert_eq!((mon_w - classic.0) % 2, 0, "centred on whole pixels");
 
                 i.set_floating(Some(pill::TOP_GAP));
                 let floating = surface_size(&i, 620.0, 400.0, s, mon_w);
-                let want_h = ((400.0 * OVERSHOOT + i.bottom_room() + pill::TOP_GAP) * s).ceil() as i32;
+                let want_h =
+                    ((400.0 * OVERSHOOT + i.bottom_room() + pill::TOP_GAP) * s).ceil() as i32;
                 assert_eq!(floating.1, want_h, "Pill has room for the gap at {s}");
                 assert_eq!((mon_w - floating.0) % 2, 0);
                 i.set_floating(None);
-                assert_eq!(surface_size(&i, 620.0, 400.0, s, mon_w), classic, "back to Classic at {s} on {mon_w}");
+                assert_eq!(
+                    surface_size(&i, 620.0, 400.0, s, mon_w),
+                    classic,
+                    "back to Classic at {s} on {mon_w}"
+                );
             }
         }
     }

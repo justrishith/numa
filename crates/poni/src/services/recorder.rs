@@ -7,15 +7,30 @@
 use poni_core::recorder;
 use windows::core::{HSTRING, PCWSTR};
 use windows::Win32::Foundation::HWND;
-use windows::Win32::Graphics::Gdi::{EnumDisplayDevicesW, GetMonitorInfoW, MonitorFromWindow, DISPLAY_DEVICEW, MONITORINFO, MONITORINFOEXW, MONITOR_DEFAULTTONEAREST};
-use windows::Win32::System::Registry::{RegCloseKey, RegOpenKeyExW, HKEY, HKEY_CLASSES_ROOT, KEY_READ};
+use windows::Win32::Graphics::Gdi::{
+    EnumDisplayDevicesW, GetMonitorInfoW, MonitorFromWindow, DISPLAY_DEVICEW, MONITORINFO,
+    MONITORINFOEXW, MONITOR_DEFAULTTONEAREST,
+};
+use windows::Win32::System::Registry::{
+    RegCloseKey, RegOpenKeyExW, HKEY, HKEY_CLASSES_ROOT, KEY_READ,
+};
 
 /// Whether the recorder is installed: its installer registers the
 /// `oyenza-recorder:` link scheme (per user or for the machine; HKCR shows both).
 pub fn installed() -> bool {
     let scheme = HSTRING::from(recorder::SCHEME);
     let mut key = HKEY::default();
-    if unsafe { RegOpenKeyExW(HKEY_CLASSES_ROOT, PCWSTR(scheme.as_ptr()), 0, KEY_READ, &mut key) }.is_err() {
+    if unsafe {
+        RegOpenKeyExW(
+            HKEY_CLASSES_ROOT,
+            PCWSTR(scheme.as_ptr()),
+            0,
+            KEY_READ,
+            &mut key,
+        )
+    }
+    .is_err()
+    {
         return false;
     }
     unsafe {
@@ -27,7 +42,11 @@ pub fn installed() -> bool {
 /// The Record page's Record: `target` (the screen the island is on, or a
 /// window or an area the recorder's overlay asks for) with `inputs`.
 pub fn record(island: HWND, target: recorder::Target, inputs: recorder::Inputs) {
-    let screen = if target == recorder::Target::Screen { screen_name(island) } else { None };
+    let screen = if target == recorder::Target::Screen {
+        screen_name(island)
+    } else {
+        None
+    };
     crate::shell::open_recorder_link(&recorder::record_link(target, screen.as_deref(), inputs));
 }
 
@@ -63,11 +82,18 @@ fn screen_name(hwnd: HWND) -> Option<String> {
         if !GetMonitorInfoW(monitor, &mut mi as *mut MONITORINFOEXW as *mut MONITORINFO).as_bool() {
             return None;
         }
-        let mut device = DISPLAY_DEVICEW { cb: std::mem::size_of::<DISPLAY_DEVICEW>() as u32, ..Default::default() };
+        let mut device = DISPLAY_DEVICEW {
+            cb: std::mem::size_of::<DISPLAY_DEVICEW>() as u32,
+            ..Default::default()
+        };
         if !EnumDisplayDevicesW(PCWSTR(mi.szDevice.as_ptr()), 0, &mut device, 0).as_bool() {
             return None;
         }
-        let len = device.DeviceString.iter().position(|&c| c == 0).unwrap_or(device.DeviceString.len());
+        let len = device
+            .DeviceString
+            .iter()
+            .position(|&c| c == 0)
+            .unwrap_or(device.DeviceString.len());
         let name = String::from_utf16_lossy(&device.DeviceString[..len]);
         (!name.is_empty()).then_some(name)
     }

@@ -14,7 +14,9 @@ use crate::events::{AppEvent, EventSink};
 use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
 use objc2::{define_class, msg_send, MainThreadMarker, MainThreadOnly};
-use objc2_core_location::{CLAuthorizationStatus, CLError, CLLocation, CLLocationManager, CLLocationManagerDelegate};
+use objc2_core_location::{
+    CLAuthorizationStatus, CLError, CLLocation, CLLocationManager, CLLocationManagerDelegate,
+};
 use objc2_foundation::{NSArray, NSError, NSObject, NSObjectProtocol};
 use std::cell::{Cell, RefCell};
 use std::time::Duration;
@@ -58,7 +60,8 @@ thread_local! {
 pub fn locate(mtm: MainThreadMarker, sink: EventSink) {
     forget();
     let manager = unsafe { CLLocationManager::new() };
-    let delegate: Retained<LocationDelegate> = unsafe { msg_send![LocationDelegate::alloc(mtm), init] };
+    let delegate: Retained<LocationDelegate> =
+        unsafe { msg_send![LocationDelegate::alloc(mtm), init] };
     unsafe {
         manager.setDelegate(Some(ProtocolObject::from_ref(&*delegate)));
         manager.setDesiredAccuracy(ACCURACY_M);
@@ -67,7 +70,17 @@ pub fn locate(mtm: MainThreadMarker, sink: EventSink) {
         c.set(c.get() + 1);
         c.get()
     });
-    ASK.with(|a| *a.borrow_mut() = Some(Ask { manager, _delegate: delegate, sink, n, asked_person: false, requested: false, answered: false }));
+    ASK.with(|a| {
+        *a.borrow_mut() = Some(Ask {
+            manager,
+            _delegate: delegate,
+            sink,
+            n,
+            asked_person: false,
+            requested: false,
+            answered: false,
+        })
+    });
     // macOS also says where the permission stands right after the manager
     // starts (`locationManagerDidChangeAuthorization:`); `step` runs once
     // for each change and does each thing only once.
@@ -98,7 +111,12 @@ pub fn forget() {
 /// Ask macOS for what the permission allows: its question while nobody has
 /// answered it, the fix once allowed.
 fn step() {
-    let Some((manager, asked_person, requested)) = ASK.with(|a| a.borrow().as_ref().filter(|a| !a.answered).map(|a| (a.manager.clone(), a.asked_person, a.requested))) else {
+    let Some((manager, asked_person, requested)) = ASK.with(|a| {
+        a.borrow()
+            .as_ref()
+            .filter(|a| !a.answered)
+            .map(|a| (a.manager.clone(), a.asked_person, a.requested))
+    }) else {
         return;
     };
     // Outside the borrow: Core Location may call the delegate before returning.
@@ -109,7 +127,9 @@ fn step() {
                 unsafe { manager.requestWhenInUseAuthorization() };
             }
         }
-        CLAuthorizationStatus::Denied | CLAuthorizationStatus::Restricted => answer(Located::Denied),
+        CLAuthorizationStatus::Denied | CLAuthorizationStatus::Restricted => {
+            answer(Located::Denied)
+        }
         _ => {
             if !requested {
                 set(|a| a.requested = true);
@@ -164,15 +184,29 @@ define_class!(
         }
 
         #[unsafe(method(locationManager:didUpdateLocations:))]
-        fn did_update_locations(&self, _manager: &CLLocationManager, locations: &NSArray<CLLocation>) {
-            let Some(last) = locations.lastObject() else { return };
+        fn did_update_locations(
+            &self,
+            _manager: &CLLocationManager,
+            locations: &NSArray<CLLocation>,
+        ) {
+            let Some(last) = locations.lastObject() else {
+                return;
+            };
             let c = unsafe { last.coordinate() };
-            answer(if c.latitude.is_finite() && c.longitude.is_finite() { Located::At(c.latitude, c.longitude) } else { Located::Unknown });
+            answer(if c.latitude.is_finite() && c.longitude.is_finite() {
+                Located::At(c.latitude, c.longitude)
+            } else {
+                Located::Unknown
+            });
         }
 
         #[unsafe(method(locationManager:didFailWithError:))]
         fn did_fail(&self, _manager: &CLLocationManager, error: &NSError) {
-            answer(if error.code() == CLError::Denied.0 { Located::Denied } else { Located::Unknown });
+            answer(if error.code() == CLError::Denied.0 {
+                Located::Denied
+            } else {
+                Located::Unknown
+            });
         }
     }
 );

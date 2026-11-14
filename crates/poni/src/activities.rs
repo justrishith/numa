@@ -84,9 +84,7 @@ const BADGE_GAP: f32 = 6.0;
 /// Oyen theme: the head's width (DIPs) in the idle "Oyen" look, beside the
 /// idle clock and in the media pill, and the clock pill's extra width for him.
 const OYEN_IDLE_W: f32 = 30.0;
-const OYEN_CLOCK_W: f32 = 22.0;
 const OYEN_MEDIA_W: f32 = 24.0;
-const OYEN_CLOCK_LEAD: f32 = 12.0 + OYEN_CLOCK_W;
 /// The countdown before a prayer: the moon, then "Maghrib 10 min" (152,
 /// its words' room), then its OK.
 const PRAYER_W: f32 = 152.0 + PRAYER_OK_ROOM;
@@ -189,7 +187,10 @@ pub fn current_activity(st: &AppState) -> Option<Activity> {
         return Some(Activity::Game);
     }
     let media = st.settings.show_media_activity
-        && st.media.as_ref().is_some_and(|m| m.is_playing() || media_grace_end(st).is_some_and(|end| st.now < end));
+        && st
+            .media
+            .as_ref()
+            .is_some_and(|m| m.is_playing() || media_grace_end(st).is_some_and(|end| st.now < end));
     let timer = st.pomodoro.is_active();
     match (media, timer) {
         (true, true) => Some(Activity::MediaTimer),
@@ -213,7 +214,8 @@ pub fn collapsed_mode(st: &AppState) -> Mode {
     // brightness change, a game's readout and a recording (its Stop stays
     // one click away), and shows again after.
     let recording = (st.rec_live() && st.record_on()) || (st.notes.listening() && st.notes_on());
-    let waits = st.notice.as_ref().is_some_and(|n| n.stays()) && (st.hud.is_some() || st.game.active || recording);
+    let waits = st.notice.as_ref().is_some_and(|n| n.stays())
+        && (st.hud.is_some() || st.game.active || recording);
     if st.notice.is_some() && !waits {
         Mode::Notice
     } else if let Some(h) = &st.hud {
@@ -235,7 +237,11 @@ pub fn resting_mode(st: &AppState) -> Mode {
 
 /// A new song's title is showing for its few seconds (`st.ui.peek_until`).
 fn new_song_peek(st: &AppState) -> bool {
-    st.now < st.ui.peek_until && matches!(current_activity(st), Some(Activity::Media | Activity::MediaTimer))
+    st.now < st.ui.peek_until
+        && matches!(
+            current_activity(st),
+            Some(Activity::Media | Activity::MediaTimer)
+        )
 }
 
 /// What sits beside the idle clock: a bolt while charging, the percentage
@@ -265,6 +271,9 @@ pub fn geom(m: &Mode, st: &AppState) -> Geom {
     }
     match m {
         Mode::Idle => match st.settings.idle_style {
+            // The Oyen theme's clock look is the calico cat herself: a tall
+            // enough capsule that her ears clear the top edge.
+            IdleStyle::Clock if oyen::on(st.settings.theme) => Geom::new(72.0, 44.0, 20.0),
             // The status bar is the Pill theme's; the other themes show the clock.
             IdleStyle::Clock | IdleStyle::Status => {
                 let base = if st.settings.use_24h { 84.0 } else { 104.0 };
@@ -273,8 +282,7 @@ pub fn geom(m: &Mode, st: &AppState) -> Geom {
                     Some(ClockBadge::Low(_)) => 34.0,
                     None => 0.0,
                 };
-                let lead = if oyen::on(st.settings.theme) { OYEN_CLOCK_LEAD } else { 0.0 };
-                Geom::new(base + badge + lead, 30.0, 14.0)
+                Geom::new(base + badge, 30.0, 14.0)
             }
             IdleStyle::Minimal => Geom::new(150.0, 26.0, 12.0),
             // A little taller than the eyes, so his ears clear the top edge.
@@ -306,9 +314,25 @@ pub fn geom(m: &Mode, st: &AppState) -> Geom {
         }
         Mode::Activity(Activity::MediaTimer) => Geom::new(132.0, 32.0, 15.0),
         Mode::Activity(Activity::Prayer) => Geom::new(PRAYER_W, 32.0, 15.0),
-        Mode::Activity(Activity::Game) => Geom::new(if game_temp(st).is_some() { GAME_W } else { GAME_NO_TEMP_W }, 32.0, 15.0),
+        Mode::Activity(Activity::Game) => Geom::new(
+            if game_temp(st).is_some() {
+                GAME_W
+            } else {
+                GAME_NO_TEMP_W
+            },
+            32.0,
+            15.0,
+        ),
         Mode::Activity(Activity::Recording) => Geom::new(recording_w(st), 32.0, 15.0),
-        Mode::Activity(Activity::Download) => Geom::new(if download_many(st) { DOWNLOAD_MANY_W } else { DOWNLOAD_W }, 32.0, 15.0),
+        Mode::Activity(Activity::Download) => Geom::new(
+            if download_many(st) {
+                DOWNLOAD_MANY_W
+            } else {
+                DOWNLOAD_W
+            },
+            32.0,
+            15.0,
+        ),
         Mode::Activity(Activity::Notes) => Geom::new(notes_w(st), 32.0, 15.0),
         Mode::Hud(HudTag::Volume) => Geom::new(316.0, 40.0, 19.0),
         Mode::Hud(HudTag::Charging) | Mode::Hud(HudTag::LowBattery) => Geom::new(300.0, 40.0, 19.0),
@@ -334,12 +358,27 @@ pub fn is_live(m: &Mode, st: &AppState) -> bool {
     if let Some(live) = crate::pill::is_live(m, st) {
         return live;
     }
-    let Some(media) = st.media.as_ref() else { return false };
+    let Some(media) = st.media.as_ref() else {
+        // The idle cat animates while NUMA listens or thinks (her ears and
+        // eyes move), even with no media session alive.
+        if *m == Mode::Idle
+            && oyen::on(st.settings.theme)
+            && st.settings.idle_style == IdleStyle::Clock
+        {
+            return matches!(
+                st.ui.numa.phase,
+                crate::state::NumaPhase::Listening | crate::state::NumaPhase::Thinking
+            );
+        }
+        return false;
+    };
     match m {
         Mode::Activity(Activity::Media) if oyen::on(st.settings.theme) => {
             oyen::music_moving(st.now, media.is_playing(), st.media_paused_at, &st.ui.notes)
         }
-        Mode::Activity(Activity::Media) | Mode::Activity(Activity::MediaTimer) => media.is_playing(),
+        Mode::Activity(Activity::Media) | Mode::Activity(Activity::MediaTimer) => {
+            media.is_playing()
+        }
         _ => false,
     }
 }
@@ -361,7 +400,11 @@ pub fn next_wake(m: &Mode, st: &AppState) -> Option<f64> {
         }
     } else if *m == Mode::Idle && st.settings.idle_style == IdleStyle::Eyes {
         let phase = now % BLINK_PERIOD;
-        consider(if phase < BLINK_LEN { now - phase + BLINK_LEN } else { now - phase + BLINK_PERIOD });
+        consider(if phase < BLINK_LEN {
+            now - phase + BLINK_LEN
+        } else {
+            now - phase + BLINK_PERIOD
+        });
     }
     if !matches!(m, Mode::Expanded(_)) {
         if let Some(end) = media_grace_end(st) {
@@ -387,7 +430,11 @@ const BLINK_LEN: f64 = 0.14;
 
 /// Oyen shows in the idle pill (the clock and "Oyen" looks of his theme).
 fn oyen_idle(st: &AppState) -> bool {
-    oyen::on(st.settings.theme) && matches!(st.settings.idle_style, IdleStyle::Clock | IdleStyle::Status | IdleStyle::Eyes)
+    oyen::on(st.settings.theme)
+        && matches!(
+            st.settings.idle_style,
+            IdleStyle::Clock | IdleStyle::Status | IdleStyle::Eyes
+        )
 }
 
 /// Oyen sleeps from midnight to five.
@@ -397,7 +444,10 @@ pub(crate) fn night(st: &AppState) -> bool {
 
 /// Oyen at rest in the idle pill; he follows the cursor while it hovers.
 fn draw_oyen_rest(ui: &mut Ui, st: &AppState, body: Rect, cx: f32, w: f32, bar_y: f32) {
-    let look = ui.input.mouse.map(|p| (p.x - body.center().x) / (body.w / 2.0));
+    let look = ui
+        .input
+        .mouse
+        .map(|p| (p.x - body.center().x) / (body.w / 2.0));
     let (frame, moving) = oyen::rest(st.now, night(st), look);
     if moving {
         ui.request_anim();
@@ -428,14 +478,12 @@ fn snap(ui: &Ui, v: f32) -> f32 {
 fn draw_idle(ui: &mut Ui, st: &mut AppState, body: Rect) {
     let cy = body.center().y;
     match st.settings.idle_style {
+        // Oyen theme: the calico cat IS the clock — she replaces the time
+        // (it shows in the NUMA page's header instead).
+        IdleStyle::Clock if oyen::on(st.settings.theme) => {
+            draw_idle_cat(ui, st, body.center().x, body);
+        }
         IdleStyle::Clock | IdleStyle::Status => {
-            // Oyen theme: he peeks on the left and the clock centres in the rest.
-            let body = if oyen::on(st.settings.theme) {
-                draw_oyen_rest(ui, st, body, body.x + 11.0 + OYEN_CLOCK_W / 2.0, OYEN_CLOCK_W, body.bottom() - 5.0);
-                Rect::new(body.x + OYEN_CLOCK_LEAD, body.y, body.w - OYEN_CLOCK_LEAD, body.h)
-            } else {
-                body
-            };
             let time = fmt_clock(&st.local, st.settings.use_24h);
             let ts = TextStyle::body().weight(Weight::Semibold).tabular();
             let Some(badge) = clock_badge(st) else {
@@ -444,7 +492,10 @@ fn draw_idle(ui: &mut Ui, st: &mut AppState, body: Rect) {
             };
             // Badge + gap + time, centred as one group.
             let (tw, _) = ui.c.measure(&time, &ts, 400.0);
-            let pct_ts = TextStyle::footnote().weight(Weight::Semibold).tabular().color(palette::RED);
+            let pct_ts = TextStyle::footnote()
+                .weight(Weight::Semibold)
+                .tabular()
+                .color(palette::RED);
             let (bw, pct) = match badge {
                 ClockBadge::Charging => (BOLT_VISIBLE, String::new()),
                 ClockBadge::Low(p) => {
@@ -458,16 +509,33 @@ fn draw_idle(ui: &mut Ui, st: &mut AppState, body: Rect) {
                     let r = Rect::new(x0 - BOLT_INSET, cy - BOLT / 2.0, BOLT, BOLT);
                     ui.c.icon(Icon::Bolt, r, palette::GREEN);
                 }
-                ClockBadge::Low(_) => ui.c.text(&pct, Rect::new(x0, body.y, bw + 2.0, body.h), &pct_ts),
+                ClockBadge::Low(_) => {
+                    ui.c.text(&pct, Rect::new(x0, body.y, bw + 2.0, body.h), &pct_ts)
+                }
             }
-            ui.c.text(&time, Rect::new(x0 + bw + BADGE_GAP, body.y, tw + 2.0, body.h), &ts);
+            ui.c.text(
+                &time,
+                Rect::new(x0 + bw + BADGE_GAP, body.y, tw + 2.0, body.h),
+                &ts,
+            );
         }
         IdleStyle::Eyes if oyen::on(st.settings.theme) => {
-            draw_oyen_rest(ui, st, body, body.center().x, OYEN_IDLE_W, body.bottom() - 7.0);
+            draw_oyen_rest(
+                ui,
+                st,
+                body,
+                body.center().x,
+                OYEN_IDLE_W,
+                body.bottom() - 7.0,
+            );
         }
         IdleStyle::Eyes => {
             // Eyes glance toward the cursor while hovering.
-            let look = ui.input.mouse.map(|p| ((p.x - body.center().x) / body.w).clamp(-0.5, 0.5) * 6.0).unwrap_or(0.0);
+            let look = ui
+                .input
+                .mouse
+                .map(|p| ((p.x - body.center().x) / body.w).clamp(-0.5, 0.5) * 6.0)
+                .unwrap_or(0.0);
             draw_eyes(ui, st, body.center().x, cy, look);
         }
         IdleStyle::Minimal | IdleStyle::Hidden => {}
@@ -486,6 +554,30 @@ pub fn draw_eyes(ui: &mut Ui, st: &AppState, cx: f32, cy: f32, look: f32) {
     }
 }
 
+/// The idle cat's head width when it replaces the clock (hero size, not peek).
+const IDLE_CAT_W: f32 = 56.0;
+/// The cat sits on the island's bottom edge (bar_y); the pill is tall enough
+/// (`idle_geom`) that her ears clear the top.
+const IDLE_CAT_BAR_Y_OFFSET: f32 = 7.0;
+
+/// Draw the calico cat at rest in the idle pill (Oyen theme, hero size): she
+/// replaces the clock, her eyes carry the assistant's state, and she sleeps
+/// from midnight to five.
+fn draw_idle_cat(ui: &mut Ui, st: &AppState, cx: f32, body: Rect) {
+    let look = ui
+        .input
+        .mouse
+        .map(|p| ((p.x - cx) / (body.w / 2.0)).clamp(-1.0, 1.0));
+    let mood = crate::oyen::numa_mood(&st.ui.numa.phase, st.local.hour);
+    let (frame, moving) = crate::oyen::numa_frame(mood, st.now, look, crate::oyen::SMALL_EYES);
+    if moving {
+        ui.request_live();
+    }
+    // Draw the full head centered, peeking over the island's bottom edge.
+    let bar_y = body.bottom() - IDLE_CAT_BAR_Y_OFFSET;
+    crate::oyen::peek(ui.c, &frame, cx, bar_y, IDLE_CAT_W, body.y + 1.0);
+}
+
 /// Little equalizer (4 bars): animated while playing, low and static when paused.
 fn equalizer(ui: &mut Ui, r: Rect, color: Color, playing: bool, t: f64) {
     let n = 4;
@@ -493,7 +585,11 @@ fn equalizer(ui: &mut Ui, r: Rect, color: Color, playing: bool, t: f64) {
     let bw = (r.w - gap * (n as f32 - 1.0)) / n as f32;
     for i in 0..n {
         let phase = t * (5.0 + i as f64 * 1.3) + i as f64 * 1.7;
-        let amp = if playing { 0.35 + 0.65 * (0.5 + 0.5 * phase.sin()) as f32 } else { 0.25 };
+        let amp = if playing {
+            0.35 + 0.65 * (0.5 + 0.5 * phase.sin()) as f32
+        } else {
+            0.25
+        };
         let h = (r.h * amp).max(3.0);
         let x = r.x + i as f32 * (bw + gap);
         ui.c.fill_rrect(Rect::new(x, r.center().y - h / 2.0, bw, h), bw / 2.0, color);
@@ -520,7 +616,10 @@ fn phase_color(p: Phase) -> Color {
 }
 
 fn countdown_style(col: Color, paused: bool) -> TextStyle {
-    TextStyle::body().weight(Weight::Semibold).tabular().color(if paused { palette::TEXT_DIM } else { col })
+    TextStyle::body()
+        .weight(Weight::Semibold)
+        .tabular()
+        .color(if paused { palette::TEXT_DIM } else { col })
 }
 
 /// Alpha of the title peek: it grows with the pill (so the growing body
@@ -537,7 +636,11 @@ fn peek_alpha(st: &AppState, w: f32) -> f32 {
 /// when there is room for more than an ellipsis.
 fn draw_peek(ui: &mut Ui, st: &AppState, x0: f32, x1: f32, body: Rect, alpha: f32) {
     let Some(m) = st.media.as_ref() else { return };
-    let (main, rest) = if m.title.trim().is_empty() { (m.artist.trim(), "") } else { (m.title.trim(), m.artist.trim()) };
+    let (main, rest) = if m.title.trim().is_empty() {
+        (m.artist.trim(), "")
+    } else {
+        (m.title.trim(), m.artist.trim())
+    };
     let avail = x1 - x0;
     if main.is_empty() || avail < 20.0 {
         return;
@@ -553,7 +656,11 @@ fn draw_peek(ui: &mut Ui, st: &AppState, x0: f32, x1: f32, body: Rect, alpha: f3
         c.text(main, Rect::new(x0, body.y, tw + 2.0, body.h), &title_st);
         let room = avail - tw;
         if !rest.is_empty() && room >= 32.0 {
-            c.text(&format!(" \u{b7} {rest}"), Rect::new(x0 + tw, body.y, room, body.h), &artist_st);
+            c.text(
+                &format!(" \u{b7} {rest}"),
+                Rect::new(x0 + tw, body.y, room, body.h),
+                &artist_st,
+            );
         }
     });
 }
@@ -589,7 +696,14 @@ pub fn draw_music(ui: &mut Ui, st: &mut AppState, body: Rect, words: bool) {
     }
     if sings {
         use crate::pill::media::{middle, PAUSED_TEXT, TEXT_CLEAR};
-        middle(ui, st, body, art.right() + TEXT_CLEAR, eq.x - TEXT_CLEAR, if playing { 1.0 } else { PAUSED_TEXT });
+        middle(
+            ui,
+            st,
+            body,
+            art.right() + TEXT_CLEAR,
+            eq.x - TEXT_CLEAR,
+            if playing { 1.0 } else { PAUSED_TEXT },
+        );
     } else if alpha > 0.01 {
         draw_peek(ui, st, art.right() + 10.0, eq.x - 10.0, body, alpha);
     }
@@ -615,17 +729,35 @@ fn draw_activity(ui: &mut Ui, st: &mut AppState, a: Activity, body: Rect) {
                 ui.c.icon(Icon::Coffee, glyph, col);
             }
             let text = fmt_countdown(p.remaining(st.now));
-            ui.c.text(&text, Rect::new(body.x + 40.0, body.y, 64.0, body.h), &countdown_style(col, paused));
+            ui.c.text(
+                &text,
+                Rect::new(body.x + 40.0, body.y, 64.0, body.h),
+                &countdown_style(col, paused),
+            );
         }
         Activity::Prayer => {
             // No Oyen here, in any theme: the moon, the minutes and OK only.
-            let Some((prayer, left)) = prayer_countdown(st) else { return };
+            let Some((prayer, left)) = prayer_countdown(st) else {
+                return;
+            };
             let col = st.accent;
-            ui.c.icon(Icon::Moon, Rect::new(body.x + 14.0, cy - 8.0, 16.0, 16.0), col);
+            ui.c.icon(
+                Icon::Moon,
+                Rect::new(body.x + 14.0, cy - 8.0, 16.0, 16.0),
+                col,
+            );
             let text = format!("{} {left} min", prayer.name());
-            let ts = TextStyle::body().weight(Weight::Semibold).tabular().color(col).right();
+            let ts = TextStyle::body()
+                .weight(Weight::Semibold)
+                .tabular()
+                .color(col)
+                .right();
             let end = draw_prayer_ok(ui, body);
-            ui.c.text(&text, Rect::new(body.x + 36.0, body.y, end - body.x - 36.0, body.h), &ts);
+            ui.c.text(
+                &text,
+                Rect::new(body.x + 36.0, body.y, end - body.x - 36.0, body.h),
+                &ts,
+            );
         }
         Activity::Game => draw_game(ui, st, body),
         Activity::Recording => draw_recording(ui, st, body),
@@ -641,7 +773,11 @@ fn draw_activity(ui: &mut Ui, st: &mut AppState, a: Activity, body: Rect) {
             let ts = countdown_style(col, paused);
             let (tw, _) = ui.c.measure(&text, &ts, 200.0);
             let right = body.right() - 14.0;
-            ui.c.text(&text, Rect::new(right - 64.0, body.y, 64.0, body.h), &ts.right());
+            ui.c.text(
+                &text,
+                Rect::new(right - 64.0, body.y, 64.0, body.h),
+                &ts.right(),
+            );
             let c = Point::new(right - tw - 6.0 - 7.0, cy);
             ui.c.ring(c, 7.0, 2.2, p.progress(st.now), RING_TRACK, col);
         }
@@ -652,7 +788,12 @@ fn draw_activity(ui: &mut Ui, st: &mut AppState, a: Activity, body: Rect) {
 /// it at mouse-down, as on a notice's inline pill). Returns where the words
 /// end.
 pub(crate) fn draw_prayer_ok(ui: &mut Ui, body: Rect) -> f32 {
-    let r = Rect::new(body.right() - PRAYER_OK_INSET - PRAYER_OK_W, body.center().y - PRAYER_OK_H / 2.0, PRAYER_OK_W, PRAYER_OK_H);
+    let r = Rect::new(
+        body.right() - PRAYER_OK_INSET - PRAYER_OK_W,
+        body.center().y - PRAYER_OK_H / 2.0,
+        PRAYER_OK_W,
+        PRAYER_OK_H,
+    );
     ui.pill(wid(PRAYER_OK_ID), r, "OK", None, PillStyle::Utility);
     body.right() - PRAYER_OK_ROOM
 }
@@ -661,7 +802,9 @@ pub(crate) fn draw_prayer_ok(ui: &mut Ui, body: Rect) -> f32 {
 /// notes on their way.
 fn notes_w(st: &AppState) -> f32 {
     match st.notes.phase {
-        poni_core::notes::Phase::Listening { .. } if st.notes.elapsed(st.now) >= 3600.0 => NOTES_LONG_W,
+        poni_core::notes::Phase::Listening { .. } if st.notes.elapsed(st.now) >= 3600.0 => {
+            NOTES_LONG_W
+        }
         poni_core::notes::Phase::Listening { .. } => NOTES_W,
         _ => NOTES_WRITING_W,
     }
@@ -673,19 +816,44 @@ fn notes_w(st: &AppState) -> f32 {
 fn draw_notes(ui: &mut Ui, st: &AppState, body: Rect) {
     let cy = body.center().y;
     let listening = st.notes.listening();
-    let what = if listening { crate::oyen::Coach::Listen { level: st.notes.mic.max(st.notes.pc) } } else { crate::oyen::Coach::Write };
-    crate::oyen::coach(ui.c, Point::new(body.x + 12.0 + NOTES_HEAD_W / 2.0, cy - 1.0), NOTES_HEAD_W, ui.now, what);
+    let what = if listening {
+        crate::oyen::Coach::Listen {
+            level: st.notes.mic.max(st.notes.pc),
+        }
+    } else {
+        crate::oyen::Coach::Write
+    };
+    crate::oyen::coach(
+        ui.c,
+        Point::new(body.x + 12.0 + NOTES_HEAD_W / 2.0, cy - 1.0),
+        NOTES_HEAD_W,
+        ui.now,
+        what,
+    );
     // The head follows the voices, and the pencil its line.
     ui.request_live();
     let x = body.x + 12.0 + NOTES_HEAD_W + 8.0;
     if listening {
         ui.c.fill_circle(Point::new(x + 5.0, cy), 5.0, palette::RED);
-        let ts = TextStyle::body().weight(Weight::Semibold).tabular().color(palette::TEXT);
+        let ts = TextStyle::body()
+            .weight(Weight::Semibold)
+            .tabular()
+            .color(palette::TEXT);
         let text = poni_core::notes::fmt_length(st.notes.elapsed(st.now));
-        ui.c.text(&text, Rect::new(x + 14.0, body.y, body.right() - 14.0 - x - 14.0, body.h), &ts.right());
+        ui.c.text(
+            &text,
+            Rect::new(x + 14.0, body.y, body.right() - 14.0 - x - 14.0, body.h),
+            &ts.right(),
+        );
     } else {
-        let ts = TextStyle::footnote().weight(Weight::Semibold).color(palette::TEXT_DIM);
-        ui.c.text("Writing notes\u{2026}", Rect::new(x, body.y, body.right() - 12.0 - x, body.h), &ts);
+        let ts = TextStyle::footnote()
+            .weight(Weight::Semibold)
+            .color(palette::TEXT_DIM);
+        ui.c.text(
+            "Writing notes\u{2026}",
+            Rect::new(x, body.y, body.right() - 12.0 - x, body.h),
+            &ts,
+        );
     }
 }
 
@@ -702,7 +870,11 @@ fn recording_w(st: &AppState) -> f32 {
 fn draw_recording(ui: &mut Ui, st: &AppState, body: Rect) {
     recording_mark(ui, st, Point::new(body.x + 12.0 + 6.0, body.center().y));
     let (text, ts) = recording_time(st);
-    ui.c.text(&text, Rect::new(body.x + 30.0, body.y, body.w - 30.0 - 14.0, body.h), &ts.right());
+    ui.c.text(
+        &text,
+        Rect::new(body.x + 30.0, body.y, body.w - 30.0 - 14.0, body.h),
+        &ts.right(),
+    );
 }
 
 /// The recording's mark at `c`: the red dot; a solid pause mark while
@@ -711,7 +883,9 @@ fn draw_recording(ui: &mut Ui, st: &AppState, body: Rect) {
 pub(crate) fn recording_mark(ui: &mut Ui, st: &AppState, c: Point) {
     match st.rec.phase {
         Some(poni_core::recorder::Phase::Recording) => ui.c.fill_circle(c, 5.0, palette::RED),
-        Some(poni_core::recorder::Phase::Paused) => ui.c.icon(Icon::Pause, Rect::from_center(c, 11.0, 11.0), palette::TEXT),
+        Some(poni_core::recorder::Phase::Paused) => {
+            ui.c.icon(Icon::Pause, Rect::from_center(c, 11.0, 11.0), palette::TEXT)
+        }
         _ => ui.c.stroke_circle(c, 4.4, palette::TEXT_DIM, 1.4),
     }
 }
@@ -720,7 +894,14 @@ pub(crate) fn recording_mark(ui: &mut Ui, st: &AppState, c: Point) {
 /// caller to align. Shared with the notch's right ear.
 pub(crate) fn recording_time(st: &AppState) -> (String, TextStyle) {
     let recording = st.rec.phase == Some(poni_core::recorder::Phase::Recording);
-    let ts = TextStyle::body().weight(Weight::Semibold).tabular().color(if recording { palette::TEXT } else { palette::TEXT_DIM });
+    let ts = TextStyle::body()
+        .weight(Weight::Semibold)
+        .tabular()
+        .color(if recording {
+            palette::TEXT
+        } else {
+            palette::TEXT_DIM
+        });
     (poni_core::recorder::fmt_length(st.rec_elapsed()), ts)
 }
 
@@ -736,7 +917,10 @@ pub(crate) struct DownloadView {
 
 pub(crate) fn download_view(st: &AppState) -> DownloadView {
     let pill = st.downloads.pill();
-    DownloadView { fraction: pill.as_ref().and_then(|p| p.fraction), count: pill.map_or(0, |p| p.count) }
+    DownloadView {
+        fraction: pill.as_ref().and_then(|p| p.fraction),
+        count: pill.map_or(0, |p| p.count),
+    }
 }
 
 /// The count shows beside the download pill's mark: more than one download
@@ -773,20 +957,37 @@ fn draw_download(ui: &mut Ui, st: &AppState, body: Rect) {
     ui.c.ring(c, 9.0, 2.4, fraction.unwrap_or(0.0), RING_TRACK, st.accent);
     arrow_down(ui, c, palette::TEXT);
     if count > 1 {
-        count_chip(ui, count, c.x + 15.0, c.y, 16.0, TextStyle::caption().weight(Weight::Semibold).tabular());
+        count_chip(
+            ui,
+            count,
+            c.x + 15.0,
+            c.y,
+            16.0,
+            TextStyle::caption().weight(Weight::Semibold).tabular(),
+        );
     }
     let (text, col) = match fraction {
         Some(f) => (download_pct(f), palette::TEXT),
         None => ("\u{2013}".to_string(), palette::TEXT_DIM),
     };
-    ui.c.text(&text, Rect::new(body.x + 30.0, body.y, body.w - 30.0 - 14.0, body.h), &ts.color(col));
+    ui.c.text(
+        &text,
+        Rect::new(body.x + 30.0, body.y, body.w - 30.0 - 14.0, body.h),
+        &ts.color(col),
+    );
 }
 
 /// A plain arrow down centred on `c`, 8.5 DIPs tall: `Icon::Download`'s
 /// tray leaves its arrow too small inside the download pill's ring.
 fn arrow_down(ui: &mut Ui, c: Point, color: Color) {
     let (x, y) = (c.x, c.y);
-    let segs = [Seg::MoveTo(x, y - 4.25), Seg::LineTo(x, y + 4.25), Seg::MoveTo(x - 3.5, y + 0.75), Seg::LineTo(x, y + 4.25), Seg::LineTo(x + 3.5, y + 0.75)];
+    let segs = [
+        Seg::MoveTo(x, y - 4.25),
+        Seg::LineTo(x, y + 4.25),
+        Seg::MoveTo(x - 3.5, y + 0.75),
+        Seg::LineTo(x, y + 4.25),
+        Seg::LineTo(x + 3.5, y + 0.75),
+    ];
     ui.c.path(&segs, None, Some((color, 1.6)));
 }
 
@@ -806,9 +1007,14 @@ fn draw_game(ui: &mut Ui, st: &AppState, body: Rect) {
     let dash = || "\u{2013}".to_string();
     let fps = match (st.game.rate, &st.game.access) {
         (Some(r), _) => [(fmt_fps(r.fps), big), (" fps".into(), label)],
-        (None, FpsAccess::Ready | FpsAccess::Unknown | FpsAccess::Checking) => [(dash(), big), (" fps".into(), label)],
+        (None, FpsAccess::Ready | FpsAccess::Unknown | FpsAccess::Checking) => {
+            [(dash(), big), (" fps".into(), label)]
+        }
         // Waiting for the one-time OK: the slot stays, dimmer.
-        (None, _) => [(dash(), big.color(palette::DISABLED)), (" fps".into(), label.color(palette::DISABLED))],
+        (None, _) => [
+            (dash(), big.color(palette::DISABLED)),
+            (" fps".into(), label.color(palette::DISABLED)),
+        ],
     };
     let gpu = match reading.and_then(|r| r.gpu.as_ref()) {
         Some(g) => match g.temp_c {
@@ -817,12 +1023,22 @@ fn draw_game(ui: &mut Ui, st: &AppState, body: Rect) {
         },
         None => dash(),
     };
-    let cpu = reading.and_then(|r| r.cpu.as_ref()).map_or_else(dash, |c| fmt_pct(c.load));
-    let groups = [fps, [("GPU ".into(), label), (gpu, value)], [("CPU ".into(), label), (cpu, value)]];
+    let cpu = reading
+        .and_then(|r| r.cpu.as_ref())
+        .map_or_else(dash, |c| fmt_pct(c.load));
+    let groups = [
+        fps,
+        [("GPU ".into(), label), (gpu, value)],
+        [("CPU ".into(), label), (cpu, value)],
+    ];
 
     const GAP: f32 = 11.0;
-    let widths: Vec<[f32; 2]> = groups.iter().map(|g| g.each_ref().map(|(t, ts)| ui.c.measure(t, ts, 200.0).0)).collect();
-    let total = widths.iter().flatten().sum::<f32>() + (groups.len() - 1) as f32 * (2.0 * GAP + 1.0);
+    let widths: Vec<[f32; 2]> = groups
+        .iter()
+        .map(|g| g.each_ref().map(|(t, ts)| ui.c.measure(t, ts, 200.0).0))
+        .collect();
+    let total =
+        widths.iter().flatten().sum::<f32>() + (groups.len() - 1) as f32 * (2.0 * GAP + 1.0);
     let mut x = (body.center().x - total / 2.0).max(body.x + 12.0);
     let cy = body.center().y;
     for (i, (group, ws)) in groups.iter().zip(&widths).enumerate() {
@@ -874,36 +1090,101 @@ fn draw_hud(ui: &mut Ui, st: &mut AppState, body: Rect) {
                     Some(a) => a,
                     None => Color::white(0.95),
                 };
-                ui.c.fill_rrect(Rect::new(bar.x, bar.y, (bar.w * shown).max(6.0), bar.h), 3.0, level);
+                ui.c.fill_rrect(
+                    Rect::new(bar.x, bar.y, (bar.w * shown).max(6.0), bar.h),
+                    3.0,
+                    level,
+                );
             }
-            let pct = if muted { "Muted".to_string() } else { format!("{}%", (level * 100.0).round() as i32) };
-            ui.c.text(&pct, Rect::new(body.right() - HUD_PAD - 48.0, body.y, 48.0, body.h), &label_st.tabular().right());
+            let pct = if muted {
+                "Muted".to_string()
+            } else {
+                format!("{}%", (level * 100.0).round() as i32)
+            };
+            ui.c.text(
+                &pct,
+                Rect::new(body.right() - HUD_PAD - 48.0, body.y, 48.0, body.h),
+                &label_st.tabular().right(),
+            );
         }
         HudKind::Charging { percent, plugged } => {
-            let (icon, color, label) = if plugged { (Icon::Bolt, palette::GREEN, "Charging") } else { (Icon::Battery, palette::TEXT, "On battery") };
+            let (icon, color, label) = if plugged {
+                (Icon::Bolt, palette::GREEN, "Charging")
+            } else {
+                (Icon::Battery, palette::TEXT, "On battery")
+            };
             ui.c.icon(icon, icon_r, color);
-            ui.c.text(label, Rect::new(body.x + 46.0, body.y, 140.0, body.h), &label_st);
+            ui.c.text(
+                label,
+                Rect::new(body.x + 46.0, body.y, 140.0, body.h),
+                &label_st,
+            );
             battery_badge(ui, body.right() - HUD_PAD, cy, percent, color);
         }
         HudKind::LowBattery { percent } => {
             ui.c.icon(Icon::Battery, icon_r, palette::RED);
-            ui.c.text("Low battery", Rect::new(body.x + 46.0, body.y, 140.0, body.h), &label_st);
+            ui.c.text(
+                "Low battery",
+                Rect::new(body.x + 46.0, body.y, 140.0, body.h),
+                &label_st,
+            );
             battery_badge(ui, body.right() - HUD_PAD, cy, percent, palette::RED);
         }
-        HudKind::Bluetooth { name, connected, battery, audio } => {
+        HudKind::Bluetooth {
+            name,
+            connected,
+            battery,
+            audio,
+        } => {
             let c = Point::new(body.x + 30.0, cy);
-            ui.c.fill_circle(c, 15.0, if connected { palette::BLUE } else { Color::white(0.16) });
-            let glyph = if connected { palette::ON_ACCENT } else { palette::TEXT };
-            ui.c.icon(if audio { Icon::Headphones } else { Icon::Bluetooth }, Rect::from_center(c, 17.0, 17.0), glyph);
+            ui.c.fill_circle(
+                c,
+                15.0,
+                if connected {
+                    palette::BLUE
+                } else {
+                    Color::white(0.16)
+                },
+            );
+            let glyph = if connected {
+                palette::ON_ACCENT
+            } else {
+                palette::TEXT
+            };
+            ui.c.icon(
+                if audio {
+                    Icon::Headphones
+                } else {
+                    Icon::Bluetooth
+                },
+                Rect::from_center(c, 17.0, 17.0),
+                glyph,
+            );
             let text_x = body.x + 54.0;
             let text_right = match battery {
-                Some(b) => battery_badge(ui, body.right() - HUD_PAD, cy, b, if b <= 20 { palette::RED } else { palette::GREEN }) - 12.0,
+                Some(b) => {
+                    battery_badge(
+                        ui,
+                        body.right() - HUD_PAD,
+                        cy,
+                        b,
+                        if b <= 20 {
+                            palette::RED
+                        } else {
+                            palette::GREEN
+                        },
+                    ) - 12.0
+                }
                 None => body.right() - HUD_PAD,
             };
             let tw = text_right - text_x;
             ui.c.text(&name, Rect::new(text_x, cy - 17.0, tw, 18.0), &label_st);
             ui.c.text(
-                if connected { "Connected" } else { "Disconnected" },
+                if connected {
+                    "Connected"
+                } else {
+                    "Disconnected"
+                },
                 Rect::new(text_x, cy + 1.0, tw, 16.0),
                 &TextStyle::footnote().color(palette::TEXT_DIM),
             );
@@ -923,10 +1204,18 @@ fn battery_badge(ui: &mut Ui, right: f32, cy: f32, percent: u8, color: Color) ->
     let x = snap(ui, tx - 6.0 - 1.5 - 20.0);
     let y = snap(ui, cy - 5.0);
     ui.c.stroke_rrect(Rect::new(x, y, 20.0, 10.0), 3.0, palette::TEXT_DIM, 1.3);
-    ui.c.fill_rrect(Rect::new(x + 20.0, y + 3.0, 1.5, 4.0), 0.75, palette::TEXT_DIM);
+    ui.c.fill_rrect(
+        Rect::new(x + 20.0, y + 3.0, 1.5, 4.0),
+        0.75,
+        palette::TEXT_DIM,
+    );
     let p = (percent as f32 / 100.0).clamp(0.0, 1.0);
     if p > 0.0 {
-        ui.c.fill_rrect(Rect::new(x + 2.0, y + 2.0, (16.0 * p).max(3.0), 6.0), 1.5, color);
+        ui.c.fill_rrect(
+            Rect::new(x + 2.0, y + 2.0, (16.0 * p).max(3.0), 6.0),
+            1.5,
+            color,
+        );
     }
     x
 }
@@ -956,16 +1245,34 @@ fn draw_notice(ui: &mut Ui, st: &mut AppState, body: Rect) {
 
     let inline = n.inline.map(|a| {
         let (label, icon, color) = inline_look(st, &n, a);
-        let w = ui.pill_width(label, icon.is_some(), true).max(if icon.is_some() { 76.0 } else { 0.0 });
-        let r = Rect::new(body.right() - 16.0 - w, cy - PILL_SMALL / 2.0, w, PILL_SMALL);
+        let w = ui
+            .pill_width(label, icon.is_some(), true)
+            .max(if icon.is_some() { 76.0 } else { 0.0 });
+        let r = Rect::new(
+            body.right() - 16.0 - w,
+            cy - PILL_SMALL / 2.0,
+            w,
+            PILL_SMALL,
+        );
         (a, label, icon, color, r)
     });
 
     let tx = c.x + 16.0 + 10.0;
-    let text_right = inline.as_ref().map_or(body.right() - 22.0, |(.., r)| r.x - 12.0);
+    let text_right = inline
+        .as_ref()
+        .map_or(body.right() - 22.0, |(.., r)| r.x - 12.0);
     let tw = (text_right - tx).max(0.0);
-    notice_title(ui, &n, Rect::new(tx, cy - 18.0, tw, 20.0), TextStyle::headline());
-    ui.c.text(&n.subtitle, Rect::new(tx, cy + 1.0, tw, 16.0), &TextStyle::footnote().color(palette::TEXT_DIM));
+    notice_title(
+        ui,
+        &n,
+        Rect::new(tx, cy - 18.0, tw, 20.0),
+        TextStyle::headline(),
+    );
+    ui.c.text(
+        &n.subtitle,
+        Rect::new(tx, cy + 1.0, tw, 16.0),
+        &TextStyle::footnote().color(palette::TEXT_DIM),
+    );
 
     // The whole notice is a button (handled on mouse-down by the app); the
     // inline pill is registered after it so it wins the hit test.
@@ -973,9 +1280,17 @@ fn draw_notice(ui: &mut Ui, st: &mut AppState, body: Rect) {
     if let Some((a, label, icon, color, r)) = inline {
         if inline_done(st, a) {
             ui.c.fill_rrect(r, r.h / 2.0, color.with_alpha(0.20));
-            ui.c.icon(Icon::Check, Rect::from_center(r.center(), 14.0, 14.0), color);
+            ui.c.icon(
+                Icon::Check,
+                Rect::from_center(r.center(), 14.0, 14.0),
+                color,
+            );
         } else {
-            let style = if icon.is_some() { PillStyle::Primary(color) } else { PillStyle::Utility };
+            let style = if icon.is_some() {
+                PillStyle::Primary(color)
+            } else {
+                PillStyle::Utility
+            };
             ui.pill(wid("notice.act"), r, label, icon, style);
         }
     }
@@ -983,7 +1298,11 @@ fn draw_notice(ui: &mut Ui, st: &mut AppState, body: Rect) {
 
 /// An inline action's label, icon and colour. Hide is a plain grey pill
 /// beside the notice's own words (no icon, no colour), as in Screen Studio.
-pub(crate) fn inline_look(st: &AppState, n: &Notice, a: InlineAction) -> (&'static str, Option<Icon>, Color) {
+pub(crate) fn inline_look(
+    st: &AppState,
+    n: &Notice,
+    a: InlineAction,
+) -> (&'static str, Option<Icon>, Color) {
     match a {
         // Orange for focus; a break starts in its own green.
         InlineAction::StartFocus => ("Start", Some(Icon::Play), phase_color(st.pomodoro.phase)),
@@ -1016,7 +1335,11 @@ pub(crate) fn text_with_dim(ui: &mut Ui, text: &str, dim: &str, r: Rect, style: 
     ui.c.text(text, Rect::new(r.x, r.y, w + 1.0, r.h), &style);
     let x = r.x + w + TITLE_DIM_GAP;
     if r.right() > x {
-        ui.c.text(dim, Rect::new(x, r.y, r.right() - x, r.h), &style.color(palette::TEXT_DIM));
+        ui.c.text(
+            dim,
+            Rect::new(x, r.y, r.right() - x, r.h),
+            &style.color(palette::TEXT_DIM),
+        );
     }
 }
 
@@ -1064,7 +1387,14 @@ mod tests {
             track_key: key.clone(),
         });
         if let Some(l) = lrc {
-            st.lyrics = LyricsState { track_key: key, status: LyricsStatus::Found, lyrics: Some(parse_lrc(l)), source: "Sample".into(), ruby: Vec::new(), wants_ja_readings: false };
+            st.lyrics = LyricsState {
+                track_key: key,
+                status: LyricsStatus::Found,
+                lyrics: Some(parse_lrc(l)),
+                source: "Sample".into(),
+                ruby: Vec::new(),
+                wants_ja_readings: false,
+            };
         }
         st
     }
@@ -1075,14 +1405,19 @@ mod tests {
         // No lyrics: Classic's compact pill, art and bars.
         assert_eq!(geom(&media, &playing(None)).w, MEDIA_W);
         // Synced lyrics: as wide as its words (what `pill::media` measured).
-        let sung = playing(Some("[00:10.00]Paper lanterns on the line\n[00:14.00]Count the windows\n"));
+        let sung = playing(Some(
+            "[00:10.00]Paper lanterns on the line\n[00:14.00]Count the windows\n",
+        ));
         assert!(crate::pill::lyric::sings(&sung));
         assert_eq!(geom(&media, &sung).w, crate::pill::media::fit_w());
         // Lyrics switched off, or words without timings: compact again.
         let mut off = playing(Some("[00:10.00]Paper lanterns on the line\n"));
         off.settings.lyrics = false;
         assert_eq!(geom(&media, &off).w, MEDIA_W);
-        assert_eq!(geom(&media, &playing(Some("plain words\nno stamps\n"))).w, MEDIA_W);
+        assert_eq!(
+            geom(&media, &playing(Some("plain words\nno stamps\n"))).w,
+            MEDIA_W
+        );
         // Paused, a singing pill keeps its size (the title shows after a while).
         let mut paused = sung;
         paused.media.as_mut().unwrap().timeline = Timeline::new(12.0, 200.0, 0.0, false);
@@ -1096,10 +1431,20 @@ mod tests {
         let media = Mode::Activity(Activity::Media);
         let mut st = playing(Some("[00:10.00]紙の舟よ\n[00:14.00]Paper boats\n"));
         assert_eq!(geom(&media, &st).h, 32.0, "no readings: one row");
-        st.lyrics.ruby = vec![vec![Ruby { text: "紙の舟よ".into(), roman: "kami no fune yo".into() }], Vec::new()];
+        st.lyrics.ruby = vec![
+            vec![Ruby {
+                text: "紙の舟よ".into(),
+                roman: "kami no fune yo".into(),
+            }],
+            Vec::new(),
+        ];
         for theme in [Theme::Classic, Theme::Oyen, Theme::Glass, Theme::Pill] {
             st.settings.theme = theme;
-            assert_eq!(geom(&media, &st).h, crate::pill::media::H_READS, "{theme:?}: the line over its reading");
+            assert_eq!(
+                geom(&media, &st).h,
+                crate::pill::media::H_READS,
+                "{theme:?}: the line over its reading"
+            );
         }
         // Readings switched off: one row again, as for a song without them.
         st.settings.lyrics_pronunciation = false;
@@ -1110,7 +1455,9 @@ mod tests {
     /// prayer clock `secs` before today's Ashar; and today's times there.
     fn before_ashar(secs: i64) -> (AppState, poni_core::prayer::DayTimes) {
         use poni_core::addons::{Status, PRAYER_TIMES};
-        let mut st = playing(Some("[00:10.00]Paper lanterns on the line\n[00:14.00]Count the windows\n"));
+        let mut st = playing(Some(
+            "[00:10.00]Paper lanterns on the line\n[00:14.00]Count the windows\n",
+        ));
         st.addons.insert(PRAYER_TIMES.id, Status::Ready);
         let list = poni_core::prayer::PlaceList::parse(
             r#"{"places":[{"id":"jakarta","label":"Kota Jakarta","kind":"kota","prov":"DKI Jakarta","lat":-6.1833,"lng":106.8333,"tz":"Asia/Jakarta"}]}"#,
@@ -1119,7 +1466,8 @@ mod tests {
         st.prayer.place = list.find("jakarta").cloned();
         st.prayer.places = Some(std::sync::Arc::new(list));
         let site = st.prayer.site().expect("its site");
-        let times = poni_core::prayer::day_times(&site, site.local_day(st.unix)).expect("today's times");
+        let times =
+            poni_core::prayer::day_times(&site, site.local_day(st.unix)).expect("today's times");
         st.prayer.clock_shift = times.ashar - secs - st.unix;
         (st, times)
     }
@@ -1132,7 +1480,10 @@ mod tests {
         assert_eq!(prayer_countdown(&st), Some((Prayer::Ashar, 8)));
         assert_eq!(collapsed_mode(&st), Mode::Activity(Activity::Prayer));
         // ...until OK: the song and its line again, until Ashar.
-        assert_eq!(st.prayer_countdown_ok().map(|m| (m.prayer, m.at)), Some((Prayer::Ashar, times.ashar)));
+        assert_eq!(
+            st.prayer_countdown_ok().map(|m| (m.prayer, m.at)),
+            Some((Prayer::Ashar, times.ashar))
+        );
         assert_eq!(prayer_countdown(&st), None);
         assert_eq!(collapsed_mode(&st), Mode::Activity(Activity::Media));
         st.prayer.clock_shift += 7 * 60;
@@ -1151,25 +1502,51 @@ mod tests {
         assert_eq!(st.prayer.countdown_ok, None);
         // Ashar's countdown still comes in its time.
         st.prayer.clock_shift += 25 * 60;
-        assert_eq!(prayer_countdown(&st).map(|(p, _)| p), Some(poni_core::prayer::Prayer::Ashar));
+        assert_eq!(
+            prayer_countdown(&st).map(|(p, _)| p),
+            Some(poni_core::prayer::Prayer::Ashar)
+        );
     }
 
     #[test]
     fn a_notice_that_stays_waits_under_a_volume_change_and_a_games_readout() {
         let mut st = AppState::new(Settings::default(), Store::default());
-        st.notify(Icon::Download, palette::GREEN, "Update available", "", f64::INFINITY, None);
+        st.notify(
+            Icon::Download,
+            palette::GREEN,
+            "Update available",
+            "",
+            f64::INFINITY,
+            None,
+        );
         assert!(st.notice.as_ref().is_some_and(|n| n.stays()));
         assert_eq!(collapsed_mode(&st), Mode::Notice);
-        st.hud = Some(crate::state::Hud { kind: HudKind::Volume { level: 0.5, muted: false }, until: st.now + 2.0 });
+        st.hud = Some(crate::state::Hud {
+            kind: HudKind::Volume {
+                level: 0.5,
+                muted: false,
+            },
+            until: st.now + 2.0,
+        });
         assert_eq!(collapsed_mode(&st), Mode::Hud(HudTag::Volume));
         st.hud = None;
         st.game.active = true;
         assert_eq!(collapsed_mode(&st), Mode::Activity(Activity::Game));
         st.game.active = false;
-        assert_eq!(collapsed_mode(&st), Mode::Notice, "and back once they're gone");
+        assert_eq!(
+            collapsed_mode(&st),
+            Mode::Notice,
+            "and back once they're gone"
+        );
         // A notice with a time limit still shows over both.
         st.notify(Icon::Download, palette::GREEN, "Saved", "", 5.0, None);
-        st.hud = Some(crate::state::Hud { kind: HudKind::Volume { level: 0.5, muted: false }, until: st.now + 2.0 });
+        st.hud = Some(crate::state::Hud {
+            kind: HudKind::Volume {
+                level: 0.5,
+                muted: false,
+            },
+            until: st.now + 2.0,
+        });
         st.game.active = true;
         assert_eq!(collapsed_mode(&st), Mode::Notice);
     }
@@ -1179,13 +1556,28 @@ mod tests {
         let mut st = AppState::new(Settings::default(), Store::default());
         st.recorder = true;
         st.store.recorder_island = true;
-        st.notify(Icon::Download, palette::GREEN, "Update available", "", f64::INFINITY, None);
+        st.notify(
+            Icon::Download,
+            palette::GREEN,
+            "Update available",
+            "",
+            f64::INFINITY,
+            None,
+        );
         st.rec.phase = Some(poni_core::recorder::Phase::Recording);
-        assert_eq!(collapsed_mode(&st), Mode::Activity(Activity::Recording), "Stop stays one click away");
+        assert_eq!(
+            collapsed_mode(&st),
+            Mode::Activity(Activity::Recording),
+            "Stop stays one click away"
+        );
         st.rec.phase = Some(poni_core::recorder::Phase::Paused);
         assert_eq!(collapsed_mode(&st), Mode::Activity(Activity::Recording));
         st.rec.phase = None;
-        assert_eq!(collapsed_mode(&st), Mode::Notice, "and back once the recording ends");
+        assert_eq!(
+            collapsed_mode(&st),
+            Mode::Notice,
+            "and back once the recording ends"
+        );
         // A notice with a time limit still shows over it.
         st.rec.phase = Some(poni_core::recorder::Phase::Recording);
         st.notify(Icon::Download, palette::GREEN, "Saved", "", 5.0, None);
@@ -1199,7 +1591,11 @@ mod tests {
         assert_eq!(collapsed_mode(&idle), Mode::Idle);
         idle.aside = true;
         assert_eq!(collapsed_mode(&idle), Mode::Aside);
-        assert_eq!(resting_mode(&idle), Mode::Idle, "where it would rest doesn't change");
+        assert_eq!(
+            resting_mode(&idle),
+            Mode::Idle,
+            "where it would rest doesn't change"
+        );
         // The strip is the Hidden look's, whatever the idle look.
         assert_eq!(geom(&Mode::Aside, &idle), hidden_strip());
         idle.settings.idle_style = IdleStyle::Hidden;
@@ -1215,7 +1611,13 @@ mod tests {
         song.now += 3.0;
         assert_eq!(collapsed_mode(&song), Mode::Aside);
         // Pop-ups and notices show over the window as before.
-        song.hud = Some(crate::state::Hud { kind: HudKind::Volume { level: 0.5, muted: false }, until: song.now + 2.0 });
+        song.hud = Some(crate::state::Hud {
+            kind: HudKind::Volume {
+                level: 0.5,
+                muted: false,
+            },
+            until: song.now + 2.0,
+        });
         assert_eq!(collapsed_mode(&song), Mode::Hud(HudTag::Volume));
         // Nothing moving on the strip: no frames while it waits.
         song.hud = None;
@@ -1225,16 +1627,22 @@ mod tests {
 
     /// A download of `url` added to the list (queued).
     fn add(st: &mut AppState, url: &str) -> u64 {
-        st.downloads.add(url.into(), poni_core::ytdlp::Mode::Video, 0)
+        st.downloads
+            .add(url.into(), poni_core::ytdlp::Mode::Video, 0)
     }
 
     /// The Downloader on for an account with Studio Pro, with `n` downloads
     /// starting (no size known yet).
     fn with_downloads(mut st: AppState, n: usize) -> AppState {
         st.downloader_offered = true;
-        st.oyenza.link = crate::state::OyenzaLink::Connected { account: "a•••@example.com".into() };
+        st.oyenza.link = crate::state::OyenzaLink::Connected {
+            account: "a•••@example.com".into(),
+        };
         st.oyenza.pro = Some(true);
-        st.addons.insert(poni_core::addons::DOWNLOADER.id, poni_core::addons::Status::Ready);
+        st.addons.insert(
+            poni_core::addons::DOWNLOADER.id,
+            poni_core::addons::Status::Ready,
+        );
         for i in 0..n {
             let id = add(&mut st, &format!("https://video.blender.org/w/{i}"));
             st.downloads.starting(id);
@@ -1277,13 +1685,22 @@ mod tests {
         for theme in [Theme::Classic, Theme::Oyen, Theme::Glass, Theme::Pill] {
             st.settings.theme = theme;
             assert!(!is_live(&m, &st), "{theme:?}");
-            assert_eq!(next_wake(&m, &st), None, "{theme:?}: it repaints as yt-dlp reports");
+            assert_eq!(
+                next_wake(&m, &st),
+                None,
+                "{theme:?}: it repaints as yt-dlp reports"
+            );
             let g = geom(&m, &st);
             assert_eq!((g.w, g.h), (DOWNLOAD_W, 32.0), "{theme:?}");
         }
         // Saved: the app's notice says so (`App::saved`), the pill has nothing left to show.
         let id = st.downloads.list[0].id;
-        st.downloads.apply(id, poni_core::ytdlp::Line::Done { path: "Sprite Fright.mp4".into() });
+        st.downloads.apply(
+            id,
+            poni_core::ytdlp::Line::Done {
+                path: "Sprite Fright.mp4".into(),
+            },
+        );
         assert_eq!(current_activity(&st), None);
     }
 
@@ -1295,9 +1712,30 @@ mod tests {
         let mut st = with_downloads(AppState::new(Settings::default(), Store::default()), 0);
         let id = add(&mut st, "https://video.blender.org/w/sprite-fright");
         st.downloads.starting(id);
-        assert_eq!(download_view(&st), DownloadView { fraction: None, count: 1 }, "no size yet");
-        st.downloads.apply(id, Line::Progress { done: 12_400_000, total: Some(45_100_000), speed: Some(2.1e6), eta_s: Some(14) });
-        let DownloadView { fraction: Some(f), count: 1 } = download_view(&st) else { panic!("{:?}", download_view(&st)) };
+        assert_eq!(
+            download_view(&st),
+            DownloadView {
+                fraction: None,
+                count: 1
+            },
+            "no size yet"
+        );
+        st.downloads.apply(
+            id,
+            Line::Progress {
+                done: 12_400_000,
+                total: Some(45_100_000),
+                speed: Some(2.1e6),
+                eta_s: Some(14),
+            },
+        );
+        let DownloadView {
+            fraction: Some(f),
+            count: 1,
+        } = download_view(&st)
+        else {
+            panic!("{:?}", download_view(&st))
+        };
         assert_eq!(download_pct(f), "27%");
         for theme in [Theme::Classic, Theme::Pill] {
             st.settings.theme = theme;
@@ -1311,14 +1749,28 @@ mod tests {
             assert_eq!(geom(&m, &st).w, DOWNLOAD_MANY_W, "{theme:?}");
         }
         // Joining the picture and the sound: all its bytes are in.
-        st.downloads.apply(id, Line::Stage(poni_core::ytdlp::Stage::Merging));
-        let DownloadView { fraction: Some(f), count: 2 } = download_view(&st) else { panic!("{:?}", download_view(&st)) };
+        st.downloads
+            .apply(id, Line::Stage(poni_core::ytdlp::Stage::Merging));
+        let DownloadView {
+            fraction: Some(f),
+            count: 2,
+        } = download_view(&st)
+        else {
+            panic!("{:?}", download_view(&st))
+        };
         assert_eq!(download_pct(f), "100%");
     }
 
     #[test]
     fn download_percents_round_to_the_nearest_as_the_page_s_bars_do() {
-        for (f, s) in [(0.0, "0%"), (0.29, "29%"), (0.369, "37%"), (0.996, "99%"), (1.0, "100%"), (1.5, "100%")] {
+        for (f, s) in [
+            (0.0, "0%"),
+            (0.29, "29%"),
+            (0.369, "37%"),
+            (0.996, "99%"),
+            (1.0, "100%"),
+            (1.5, "100%"),
+        ] {
             assert_eq!(download_pct(f), s);
         }
     }

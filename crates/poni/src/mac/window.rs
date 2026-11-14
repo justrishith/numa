@@ -11,13 +11,21 @@
 use crate::notch::Notch;
 use objc2::rc::Retained;
 use objc2::runtime::{AnyClass, AnyObject, ProtocolObject};
-use objc2::{define_class, msg_send, sel, AllocAnyThread, ClassType, MainThreadMarker, MainThreadOnly, Message};
-use objc2_app_kit::{
-    NSAutoresizingMaskOptions, NSBackingStoreType, NSColor, NSDragOperation, NSDraggingContext, NSDraggingInfo, NSDraggingItem, NSDraggingSession,
-    NSDraggingSource, NSEvent, NSGraphicsContext, NSPanel, NSPasteboardTypeFileURL, NSPasteboardURLReadingFileURLsOnlyKey, NSResponder, NSScreen, NSView,
-    NSWindow, NSWindowCollectionBehavior, NSWindowStyleMask, NSWorkspace,
+use objc2::{
+    define_class, msg_send, sel, AllocAnyThread, ClassType, MainThreadMarker, MainThreadOnly,
+    Message,
 };
-use objc2_foundation::{NSArray, NSDictionary, NSNumber, NSObject, NSObjectProtocol, NSPoint, NSRect, NSRunLoop, NSRunLoopCommonModes, NSSize, NSString, NSURL};
+use objc2_app_kit::{
+    NSAutoresizingMaskOptions, NSBackingStoreType, NSColor, NSDragOperation, NSDraggingContext,
+    NSDraggingInfo, NSDraggingItem, NSDraggingSession, NSDraggingSource, NSEvent,
+    NSGraphicsContext, NSPanel, NSPasteboardTypeFileURL, NSPasteboardURLReadingFileURLsOnlyKey,
+    NSResponder, NSScreen, NSView, NSWindow, NSWindowCollectionBehavior, NSWindowStyleMask,
+    NSWorkspace,
+};
+use objc2_foundation::{
+    NSArray, NSDictionary, NSNumber, NSObject, NSObjectProtocol, NSPoint, NSRect, NSRunLoop,
+    NSRunLoopCommonModes, NSSize, NSString, NSURL,
+};
 use objc2_quartz_core::{CADisplayLink, CAFrameRateRange};
 use poni_core::geom::Rect;
 use std::cell::{Cell, RefCell};
@@ -42,9 +50,19 @@ fn dragged_paths(info: &ProtocolObject<dyn NSDraggingInfo>) -> Vec<String> {
     let class: &AnyClass = NSURL::class();
     let classes = NSArray::from_slice(&[class]);
     let yes = NSNumber::numberWithBool(true);
-    let opts = NSDictionary::from_slices(&[unsafe { NSPasteboardURLReadingFileURLsOnlyKey }], &[yes.as_ref() as &AnyObject]);
+    let opts = NSDictionary::from_slices(
+        &[unsafe { NSPasteboardURLReadingFileURLsOnlyKey }],
+        &[yes.as_ref() as &AnyObject],
+    );
     let objs = unsafe { pb.readObjectsForClasses_options(&classes, Some(&opts)) };
-    objs.map(|a| a.iter().filter_map(|o| o.downcast::<NSURL>().ok()).filter_map(|u| u.path()).map(|p| p.to_string()).collect()).unwrap_or_default()
+    objs.map(|a| {
+        a.iter()
+            .filter_map(|o| o.downcast::<NSURL>().ok())
+            .filter_map(|u| u.path())
+            .map(|p| p.to_string())
+            .collect()
+    })
+    .unwrap_or_default()
 }
 
 /// Above the menu bar (24) and its status items, below pop-up menus (101).
@@ -80,7 +98,10 @@ pub fn pick_screen(mtm: MainThreadMarker) -> Option<ScreenInfo> {
         }
     }
     let fake = FAKE_NOTCH.get();
-    best.map(|s| ScreenInfo { notch: fake.or(s.notch), ..s })
+    best.map(|s| ScreenInfo {
+        notch: fake.or(s.notch),
+        ..s
+    })
 }
 
 /// Pretend the screen has a notch (the smoke test), or stop pretending.
@@ -98,9 +119,24 @@ fn screen_info(s: &NSScreen) -> ScreenInfo {
     let inset = s.safeAreaInsets().top;
     let (l, r) = (s.auxiliaryTopLeftArea(), s.auxiliaryTopRightArea());
     let notch_w = f.size.width - l.size.width - r.size.width;
-    let notch = (inset > 0.0 && notch_w > 40.0 && notch_w < f.size.width / 2.0).then(|| Notch { w: notch_w as f32, h: inset as f32 });
-    let cx = if notch.is_some() { l.size.width + notch_w / 2.0 } else { f.size.width / 2.0 };
-    ScreenInfo { x: f.origin.x, y: f.origin.y, w: f.size.width, h: f.size.height, scale: s.backingScaleFactor() as f32, notch, cx }
+    let notch = (inset > 0.0 && notch_w > 40.0 && notch_w < f.size.width / 2.0).then(|| Notch {
+        w: notch_w as f32,
+        h: inset as f32,
+    });
+    let cx = if notch.is_some() {
+        l.size.width + notch_w / 2.0
+    } else {
+        f.size.width / 2.0
+    };
+    ScreenInfo {
+        x: f.origin.x,
+        y: f.origin.y,
+        w: f.size.width,
+        h: f.size.height,
+        scale: s.backingScaleFactor() as f32,
+        notch,
+        cx,
+    }
 }
 
 // ---------------------------------------------------------------- classes
@@ -139,11 +175,27 @@ define_class!(
 /// Input the view forwards to the app.
 #[derive(Clone, Debug)]
 pub enum ViewInput {
-    Down { x: f32, y: f32, double: bool },
-    Up { x: f32, y: f32 },
-    RightUp { x: f32, y: f32 },
-    Wheel { notches: f32 },
-    Key { code: u16, text: String, command: bool },
+    Down {
+        x: f32,
+        y: f32,
+        double: bool,
+    },
+    Up {
+        x: f32,
+        y: f32,
+    },
+    RightUp {
+        x: f32,
+        y: f32,
+    },
+    Wheel {
+        notches: f32,
+    },
+    Key {
+        code: u16,
+        text: String,
+        command: bool,
+    },
 }
 
 define_class!(
@@ -349,21 +401,29 @@ pub fn create(mtm: MainThreadMarker) {
     panel.setIgnoresMouseEvents(true);
     unsafe { panel.setReleasedWhenClosed(false) };
 
-    let view: Retained<IslandView> = unsafe { msg_send![IslandView::alloc(mtm), initWithFrame: rect] };
+    let view: Retained<IslandView> =
+        unsafe { msg_send![IslandView::alloc(mtm), initWithFrame: rect] };
     view.setWantsLayer(true);
     view.registerForDraggedTypes(&NSArray::from_slice(&[unsafe { NSPasteboardTypeFileURL }]));
-    view.setAutoresizingMask(NSAutoresizingMaskOptions::ViewWidthSizable | NSAutoresizingMaskOptions::ViewHeightSizable);
+    view.setAutoresizingMask(
+        NSAutoresizingMaskOptions::ViewWidthSizable | NSAutoresizingMaskOptions::ViewHeightSizable,
+    );
     let root = NSView::initWithFrame(NSView::alloc(mtm), rect);
     root.setWantsLayer(true);
     root.addSubview(&view);
     panel.setContentView(Some(&root));
 
     // The display link drives frames at the screen's refresh rate (macOS 14+).
-    let has_link: bool = unsafe { msg_send![&*view, respondsToSelector: sel!(displayLinkWithTarget:selector:)] };
+    let has_link: bool =
+        unsafe { msg_send![&*view, respondsToSelector: sel!(displayLinkWithTarget:selector:)] };
     let link = has_link.then(|| {
         let target: &AnyObject = view.as_ref();
         let link = unsafe { view.displayLinkWithTarget_selector(target, sel!(step:)) };
-        link.setPreferredFrameRateRange(CAFrameRateRange { minimum: 60.0, maximum: 120.0, preferred: 120.0 });
+        link.setPreferredFrameRateRange(CAFrameRateRange {
+            minimum: 60.0,
+            maximum: 120.0,
+            preferred: 120.0,
+        });
         unsafe { link.addToRunLoop_forMode(&NSRunLoop::mainRunLoop(), NSRunLoopCommonModes) };
         link.setPaused(true);
         link
@@ -372,7 +432,17 @@ pub fn create(mtm: MainThreadMarker) {
         pwarn!("no display link on this macOS; frames come from a 60 Hz timer");
     }
     let frame = panel.frame();
-    WINDOW.with(|w| *w.borrow_mut() = Some(IslandWindow { panel, root, view, link, fallback: None, ignoring: true, frame }));
+    WINDOW.with(|w| {
+        *w.borrow_mut() = Some(IslandWindow {
+            panel,
+            root,
+            view,
+            link,
+            fallback: None,
+            ignoring: true,
+            frame,
+        })
+    });
 }
 
 /// Place the panel: `w`×`h` DIPs hanging from the top of `screen`, its left
@@ -418,11 +488,20 @@ pub fn screen_rect_top_left() -> Option<NSRect> {
     let screens = NSScreen::screens(mtm);
     let primary_h = screens.iter().next().map(|s| s.frame().size.height)?;
     let f = with_window(|win| win.frame)?;
-    let centre = NSPoint::new(f.origin.x + f.size.width / 2.0, f.origin.y + f.size.height / 2.0);
+    let centre = NSPoint::new(
+        f.origin.x + f.size.width / 2.0,
+        f.origin.y + f.size.height / 2.0,
+    );
     let s = screens.iter().map(|s| s.frame()).find(|r| {
-        centre.x >= r.origin.x && centre.x < r.origin.x + r.size.width && centre.y >= r.origin.y && centre.y <= r.origin.y + r.size.height
+        centre.x >= r.origin.x
+            && centre.x < r.origin.x + r.size.width
+            && centre.y >= r.origin.y
+            && centre.y <= r.origin.y + r.size.height
     })?;
-    Some(NSRect::new(NSPoint::new(s.origin.x, primary_h - (s.origin.y + s.size.height)), s.size))
+    Some(NSRect::new(
+        NSPoint::new(s.origin.x, primary_h - (s.origin.y + s.size.height)),
+        s.size,
+    ))
 }
 
 /// Let clicks through to the apps below (true) or take them (false).
@@ -459,7 +538,13 @@ pub fn set_frames(active: bool) {
             let now = crate::clock::mono();
             crate::app::on_frame_tick(now, now + 1.0 / 60.0);
         });
-        let timer = unsafe { objc2_foundation::NSTimer::scheduledTimerWithTimeInterval_repeats_block(1.0 / 60.0, true, &block) };
+        let timer = unsafe {
+            objc2_foundation::NSTimer::scheduledTimerWithTimeInterval_repeats_block(
+                1.0 / 60.0,
+                true,
+                &block,
+            )
+        };
         with_window(|win| win.fallback = Some(timer));
     }
 }
@@ -468,7 +553,10 @@ pub fn set_frames(active: bool) {
 pub fn redraw(dirty: Rect) {
     let view = with_window(|win| win.view.clone());
     if let Some(view) = view {
-        let r = NSRect::new(NSPoint::new(dirty.x as f64, dirty.y as f64), NSSize::new(dirty.w as f64, dirty.h as f64));
+        let r = NSRect::new(
+            NSPoint::new(dirty.x as f64, dirty.y as f64),
+            NSSize::new(dirty.w as f64, dirty.h as f64),
+        );
         view.setNeedsDisplayInRect(r);
         view.displayIfNeeded();
     }
@@ -479,7 +567,10 @@ pub fn pointer() -> Option<(f32, f32)> {
     let p = NSEvent::mouseLocation();
     with_window(|win| {
         let f = win.frame;
-        ((p.x - f.origin.x) as f32, (f.origin.y + f.size.height - p.y) as f32)
+        (
+            (p.x - f.origin.x) as f32,
+            (f.origin.y + f.size.height - p.y) as f32,
+        )
     })
 }
 
@@ -513,10 +604,18 @@ pub fn view() -> Option<Retained<IslandView>> {
 /// the main display (what `screencapture -R` takes).
 pub fn frame_top_left() -> Option<(f64, f64, f64, f64)> {
     let mtm = MainThreadMarker::new()?;
-    let primary_h = NSScreen::screens(mtm).iter().next().map(|s| s.frame().size.height)?;
+    let primary_h = NSScreen::screens(mtm)
+        .iter()
+        .next()
+        .map(|s| s.frame().size.height)?;
     with_window(|win| {
         let f = win.frame;
-        (f.origin.x, primary_h - (f.origin.y + f.size.height), f.size.width, f.size.height)
+        (
+            f.origin.x,
+            primary_h - (f.origin.y + f.size.height),
+            f.size.width,
+            f.size.height,
+        )
     })
 }
 
@@ -524,23 +623,34 @@ pub fn frame_top_left() -> Option<(f64, f64, f64, f64)> {
 /// (the smoke run pictures where the island sits along the top edge).
 pub fn screen_top_left(screen: &ScreenInfo, h: f64) -> Option<(f64, f64, f64, f64)> {
     let mtm = MainThreadMarker::new()?;
-    let primary_h = NSScreen::screens(mtm).iter().next().map(|s| s.frame().size.height)?;
+    let primary_h = NSScreen::screens(mtm)
+        .iter()
+        .next()
+        .map(|s| s.frame().size.height)?;
     Some((screen.x, primary_h - (screen.y + screen.h), screen.w, h))
 }
 
 /// Start dragging `paths` out of the island, from the press in progress.
 /// Returns false when there is no press to start from.
 pub fn begin_drag(paths: &[String]) -> bool {
-    let (Some(view), Some(event)) = (view(), LAST_MOUSE.with(|m| m.borrow().clone())) else { return false };
+    let (Some(view), Some(event)) = (view(), LAST_MOUSE.with(|m| m.borrow().clone())) else {
+        return false;
+    };
     let at = view.convertPoint_fromView(event.locationInWindow(), None);
     let items: Vec<Retained<NSDraggingItem>> = paths
         .iter()
         .enumerate()
         .map(|(i, p)| {
             let url = NSURL::fileURLWithPath(&NSString::from_str(p));
-            let item = NSDraggingItem::initWithPasteboardWriter(NSDraggingItem::alloc(), ProtocolObject::from_ref(&*url));
+            let item = NSDraggingItem::initWithPasteboardWriter(
+                NSDraggingItem::alloc(),
+                ProtocolObject::from_ref(&*url),
+            );
             let icon = NSWorkspace::sharedWorkspace().iconForFile(&NSString::from_str(p));
-            let frame = NSRect::new(NSPoint::new(at.x - 24.0 + 6.0 * i as f64, at.y - 24.0 + 6.0 * i as f64), NSSize::new(48.0, 48.0));
+            let frame = NSRect::new(
+                NSPoint::new(at.x - 24.0 + 6.0 * i as f64, at.y - 24.0 + 6.0 * i as f64),
+                NSSize::new(48.0, 48.0),
+            );
             unsafe { item.setDraggingFrame_contents(frame, Some(&icon)) };
             item
         })
@@ -549,6 +659,10 @@ pub fn begin_drag(paths: &[String]) -> bool {
         return false;
     }
     crate::dragdrop::set_dragging_out(true);
-    let _session = view.beginDraggingSessionWithItems_event_source(&NSArray::from_retained_slice(&items), &event, ProtocolObject::from_ref(&*view));
+    let _session = view.beginDraggingSessionWithItems_event_source(
+        &NSArray::from_retained_slice(&items),
+        &event,
+        ProtocolObject::from_ref(&*view),
+    );
     true
 }

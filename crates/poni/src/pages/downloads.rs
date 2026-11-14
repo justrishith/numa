@@ -52,7 +52,11 @@ const FADE: f32 = 14.0;
 /// Press-and-move distance (DIPs) that drags a finished file out (the Shelf's).
 const DRAG_START: f32 = 6.0;
 /// Where Show in folder shows the file.
-const REVEAL: &str = if cfg!(target_os = "macos") { "Show in Finder" } else { "Show in folder" };
+const REVEAL: &str = if cfg!(target_os = "macos") {
+    "Show in Finder"
+} else {
+    "Show in folder"
+};
 
 /// What the page keeps between frames.
 #[derive(Clone, Debug, Default)]
@@ -88,7 +92,11 @@ pub fn note(st: &mut AppState, text: &'static str) {
 
 /// When the message ends (the app's wake timer takes it away).
 pub fn next_wake(st: &AppState) -> Option<f64> {
-    st.ui.downloads.note.map(|(_, until)| until).filter(|&until| until > st.now)
+    st.ui
+        .downloads
+        .note
+        .map(|(_, until)| until)
+        .filter(|&until| until > st.now)
 }
 
 pub fn draw(ui: &mut Ui, st: &mut AppState, area: Rect) {
@@ -102,18 +110,33 @@ pub fn draw(ui: &mut Ui, st: &mut AppState, area: Rect) {
     let mut top = area.y + LIST_TOP;
     if let Some((text, _)) = st.ui.downloads.note.filter(|&(_, until)| until > st.now) {
         let x = area.x + FIELD_TEXT_X;
-        ui.c.text(text, Rect::new(x, top - 4.0, (area.right() - x).max(0.0), 16.0), &TextStyle::footnote().color(palette::TEXT_DIM));
+        ui.c.text(
+            text,
+            Rect::new(x, top - 4.0, (area.right() - x).max(0.0), 16.0),
+            &TextStyle::footnote().color(palette::TEXT_DIM),
+        );
         top += NOTE_H;
     }
     let list_r = Rect::new(area.x, top, area.w, (area.bottom() - top).max(0.0));
     // A link copied before the page came up waits above the list.
     let used = super::downloads_offer::draw(ui, st, list_r);
-    let list_r = Rect::new(list_r.x, list_r.y + used, list_r.w, (list_r.h - used).max(0.0));
+    let list_r = Rect::new(
+        list_r.x,
+        list_r.y + used,
+        list_r.w,
+        (list_r.h - used).max(0.0),
+    );
     if st.downloads.list.is_empty() {
         let s = &mut st.ui.downloads;
         s.scroll = 0.0;
         s.shown_scroll = 0.0;
-        super::empty_state(ui, list_r, Icon::Download, "Paste a link to save its video or sound.", "yt-dlp does the work; files go to your Downloads folder.");
+        super::empty_state(
+            ui,
+            list_r,
+            Icon::Download,
+            "Paste a link to save its video or sound.",
+            "yt-dlp does the work; files go to your Downloads folder.",
+        );
     } else {
         list(ui, st, list_r);
     }
@@ -134,19 +157,51 @@ fn link_row(ui: &mut Ui, st: &mut AppState, r: Rect) {
     let field = Rect::new(r.x, r.y, (paste.x - PILL_GAP - r.x).max(0.0), r.h);
 
     let s = &mut st.ui.downloads;
-    let typed = ui.text_input_row(wid("downloads.link"), field, &mut s.link, "Paste a link", LINK_MAX, accent, Some(Icon::Plus));
+    let typed = ui.text_input_row(
+        wid("downloads.link"),
+        field,
+        &mut s.link,
+        "Paste a link",
+        LINK_MAX,
+        accent,
+        Some(Icon::Plus),
+    );
     let sel = if s.mode == Mode::Audio { 1 } else { 0 };
-    if let Some(i) = super::settings::picker(ui, "downloads.mode", mode_x, r.center().y - PICKER_H / 2.0, PICKER_H, &modes, sel) {
+    if let Some(i) = super::settings::picker(
+        ui,
+        "downloads.mode",
+        mode_x,
+        r.center().y - PICKER_H / 2.0,
+        PICKER_H,
+        &modes,
+        sel,
+    ) {
         s.mode = if i == 1 { Mode::Audio } else { Mode::Video };
     }
     let url = downloads::link_in(&s.link);
     let go_clicked = if url.is_some() {
-        ui.pill(wid("downloads.go"), go, "Download", Some(Icon::Download), PillStyle::Primary(accent)).clicked
+        ui.pill(
+            wid("downloads.go"),
+            go,
+            "Download",
+            Some(Icon::Download),
+            PillStyle::Primary(accent),
+        )
+        .clicked
     } else {
         disabled_pill(ui, go, "Download", Icon::Download);
         false
     };
-    if ui.pill(wid("downloads.paste"), paste, "Paste", Some(Icon::Clipboard), PillStyle::Utility).clicked {
+    if ui
+        .pill(
+            wid("downloads.paste"),
+            paste,
+            "Paste",
+            Some(Icon::Clipboard),
+            PillStyle::Utility,
+        )
+        .clicked
+    {
         st.cmd(Command::Download(DownloadCmd::PasteLink));
     }
     // The new row comes in at the top of the list. The app empties the field
@@ -169,7 +224,11 @@ fn list(ui: &mut Ui, st: &mut AppState, r: Rect) {
     let s = &mut st.ui.downloads;
     let finished = jobs.iter().any(|j| !j.state.live());
     let foot = Rect::new(r.x, r.bottom() - PILL_SMALL, r.w, PILL_SMALL);
-    let view_h = if finished { foot.y - FOOT_GAP - r.y } else { r.h };
+    let view_h = if finished {
+        foot.y - FOOT_GAP - r.y
+    } else {
+        r.h
+    };
     let view = Rect::new(r.x, r.y, r.w, view_h.max(0.0));
 
     // The wheel is taken only when there's more than shows (otherwise it
@@ -181,7 +240,11 @@ fn list(ui: &mut Ui, st: &mut AppState, r: Rect) {
     s.scroll = s.scroll.clamp(0.0, max_scroll);
     // After an idle gap (the frame clock was parked) step as if one frame passed.
     let now = ui.now;
-    let dt = if now > s.drawn { (now - s.drawn).min(1.0 / 30.0) as f32 } else { 0.0 };
+    let dt = if now > s.drawn {
+        (now - s.drawn).min(1.0 / 30.0) as f32
+    } else {
+        0.0
+    };
     s.drawn = now;
     let (scroll, moving) = super::tasks::glide(s.shown_scroll.clamp(0.0, max_scroll), s.scroll, dt);
     s.shown_scroll = scroll;
@@ -194,7 +257,11 @@ fn list(ui: &mut Ui, st: &mut AppState, r: Rect) {
     for (i, job) in jobs.iter().enumerate() {
         let row = Rect::new(view.x, view.y + i as f32 * ROW_H - scroll, view.w, ROW_H);
         if row.bottom() > view.y && row.y < view.bottom() {
-            let v = RowView { job, bar: downloads.progress(job.id), accent };
+            let v = RowView {
+                job,
+                bar: downloads.progress(job.id),
+                accent,
+            };
             draw_row(ui, v, row, view, &mut s.dragging, &mut cmds);
         }
     }
@@ -202,13 +269,26 @@ fn list(ui: &mut Ui, st: &mut AppState, r: Rect) {
         super::tasks::fade(ui, Rect::new(view.x, view.y, view.w, FADE), true);
     }
     if scroll < max_scroll - 0.5 {
-        super::tasks::fade(ui, Rect::new(view.x, view.bottom() - FADE, view.w, FADE), false);
+        super::tasks::fade(
+            ui,
+            Rect::new(view.x, view.bottom() - FADE, view.w, FADE),
+            false,
+        );
     }
     ui.c.unclip();
 
     if finished {
         let w = ui.pill_width("Clear finished", false, true);
-        if ui.pill(wid("downloads.clear"), Rect::new(foot.right() - w, foot.y, w, PILL_SMALL), "Clear finished", None, PillStyle::Utility).clicked {
+        if ui
+            .pill(
+                wid("downloads.clear"),
+                Rect::new(foot.right() - w, foot.y, w, PILL_SMALL),
+                "Clear finished",
+                None,
+                PillStyle::Utility,
+            )
+            .clicked
+        {
             cmds.push(Command::Download(DownloadCmd::ClearDone));
         }
     }
@@ -265,21 +345,39 @@ struct RowView<'a> {
 /// (orange once it failed) with a bar while the bytes come in and while
 /// they're joined, and its buttons on the right. Buttons the list's edges
 /// (`view`) cut into don't show: none takes a click outside the list.
-fn draw_row(ui: &mut Ui, v: RowView, r: Rect, view: Rect, dragging: &mut bool, cmds: &mut Vec<Command>) {
+fn draw_row(
+    ui: &mut Ui,
+    v: RowView,
+    r: Rect,
+    view: Rect,
+    dragging: &mut bool,
+    cmds: &mut Vec<Command>,
+) {
     let RowView { job, bar, accent } = v;
     let cy = r.center().y;
     let c = Point::new(r.x + BADGE / 2.0, cy);
     ui.c.fill_circle(c, BADGE / 2.0, accent.with_alpha(0.18));
     match badge_letter(job) {
-        Some(l) => ui.c.text(&l, Rect::from_center(c, BADGE, BADGE), &TextStyle::headline().color(accent).center()),
-        None => ui.c.icon(Icon::Download, Rect::from_center(c, 18.0, 18.0), accent),
+        Some(l) => ui.c.text(
+            &l,
+            Rect::from_center(c, BADGE, BADGE),
+            &TextStyle::headline().color(accent).center(),
+        ),
+        None => {
+            ui.c.icon(Icon::Download, Rect::from_center(c, 18.0, 18.0), accent)
+        }
     }
 
     // A finished file drags out of its row, as from the Shelf (the buttons,
     // registered after the row, keep their clicks).
     if let State::Done { path, .. } = &job.state {
         let top = r.y.max(view.y);
-        let hit = Rect::new(r.x, top, r.w, (r.bottom().min(view.bottom()) - top).max(0.0));
+        let hit = Rect::new(
+            r.x,
+            top,
+            r.w,
+            (r.bottom().min(view.bottom()) - top).max(0.0),
+        );
         let resp = ui.interact(wid_n("downloads.row", job.id), hit, CursorKind::Arrow);
         if resp.pressed && !*dragging {
             if let Some((dx, dy)) = resp.drag {
@@ -295,10 +393,16 @@ fn draw_row(ui: &mut Ui, v: RowView, r: Rect, view: Rect, dragging: &mut bool, c
     let (mut left, mut right) = (r.right(), r.right());
     for &act in row_acts(&job.state).iter().rev() {
         let (b, gap) = match act {
-            RowAct::Remove => (Rect::new(right - REMOVE, cy - REMOVE / 2.0, REMOVE, REMOVE), REMOVE_GAP),
+            RowAct::Remove => (
+                Rect::new(right - REMOVE, cy - REMOVE / 2.0, REMOVE, REMOVE),
+                REMOVE_GAP,
+            ),
             _ => {
                 let w = ui.pill_width(act.label(), false, true);
-                (Rect::new(right - w, cy - PILL_SMALL / 2.0, w, PILL_SMALL), PILL_GAP)
+                (
+                    Rect::new(right - w, cy - PILL_SMALL / 2.0, w, PILL_SMALL),
+                    PILL_GAP,
+                )
             }
         };
         left = b.x;
@@ -307,12 +411,50 @@ fn draw_row(ui: &mut Ui, v: RowView, r: Rect, view: Rect, dragging: &mut bool, c
             continue;
         }
         let clicked = match act {
-            RowAct::Stop | RowAct::Cancel => ui.pill(wid_n("downloads.stop", job.id), b, act.label(), None, PillStyle::Utility).clicked,
-            RowAct::Open => ui.pill(wid_n("downloads.open", job.id), b, act.label(), None, PillStyle::Neutral).clicked,
-            RowAct::Reveal => ui.pill(wid_n("downloads.reveal", job.id), b, act.label(), None, PillStyle::Utility).clicked,
+            RowAct::Stop | RowAct::Cancel => {
+                ui.pill(
+                    wid_n("downloads.stop", job.id),
+                    b,
+                    act.label(),
+                    None,
+                    PillStyle::Utility,
+                )
+                .clicked
+            }
+            RowAct::Open => {
+                ui.pill(
+                    wid_n("downloads.open", job.id),
+                    b,
+                    act.label(),
+                    None,
+                    PillStyle::Neutral,
+                )
+                .clicked
+            }
+            RowAct::Reveal => {
+                ui.pill(
+                    wid_n("downloads.reveal", job.id),
+                    b,
+                    act.label(),
+                    None,
+                    PillStyle::Utility,
+                )
+                .clicked
+            }
             RowAct::Remove => {
-                let color = if ui.hovered(b) { palette::TEXT } else { palette::TEXT_DIM };
-                ui.icon_button(wid_n("downloads.remove", job.id), b, Icon::Close, color, 12.0).clicked
+                let color = if ui.hovered(b) {
+                    palette::TEXT
+                } else {
+                    palette::TEXT_DIM
+                };
+                ui.icon_button(
+                    wid_n("downloads.remove", job.id),
+                    b,
+                    Icon::Close,
+                    color,
+                    12.0,
+                )
+                .clicked
             }
         };
         if clicked {
@@ -328,14 +470,36 @@ fn draw_row(ui: &mut Ui, v: RowView, r: Rect, view: Rect, dragging: &mut bool, c
 
     let x = r.x + TEXT_X;
     let w = (left - 12.0 - x).max(0.0);
-    let title = job.title.as_deref().filter(|t| !t.trim().is_empty()).unwrap_or_else(|| link_text(&job.url));
-    ui.c.text(title, Rect::new(x, r.y + 3.0, w, 20.0), &TextStyle::headline());
-    let line_color = if matches!(job.state, State::Failed(_)) { palette::ORANGE } else { palette::TEXT_DIM };
-    ui.c.text(&downloads::line(job), Rect::new(x, r.y + 22.0, w, 17.0), &TextStyle::footnote().color(line_color));
+    let title = job
+        .title
+        .as_deref()
+        .filter(|t| !t.trim().is_empty())
+        .unwrap_or_else(|| link_text(&job.url));
+    ui.c.text(
+        title,
+        Rect::new(x, r.y + 3.0, w, 20.0),
+        &TextStyle::headline(),
+    );
+    let line_color = if matches!(job.state, State::Failed(_)) {
+        palette::ORANGE
+    } else {
+        palette::TEXT_DIM
+    };
+    ui.c.text(
+        &downloads::line(job),
+        Rect::new(x, r.y + 22.0, w, 17.0),
+        &TextStyle::footnote().color(line_color),
+    );
     if let Some(p) = bar {
         // At the whole percent the island's pill says (`downloads::percent`).
         let p = downloads::percent(p) as f32 / 100.0;
-        ui.progress_bar(wid_n("downloads.bar", job.id), Rect::new(x, r.y + 40.0, w, BAR_H), p, accent, false);
+        ui.progress_bar(
+            wid_n("downloads.bar", job.id),
+            Rect::new(x, r.y + 40.0, w, BAR_H),
+            p,
+            accent,
+            false,
+        );
     }
 }
 
@@ -348,7 +512,10 @@ fn draw_row(ui: &mut Ui, v: RowView, r: Rect, view: Rect, dragging: &mut bool, c
 /// changes; the preview names a site from its address alone the same way
 /// (`ytdlp_info::site_name` with no extractor gives the domain).
 fn badge_letter(job: &Job) -> Option<String> {
-    host(&job.url).chars().find(|c| c.is_alphanumeric()).map(|c| c.to_uppercase().collect())
+    host(&job.url)
+        .chars()
+        .find(|c| c.is_alphanumeric())
+        .map(|c| c.to_uppercase().collect())
 }
 
 /// A link as its row shows it until the title comes: without "https://" or
@@ -362,19 +529,30 @@ fn link_text(url: &str) -> &str {
 /// The link's site ("video.blender.org"), without "www." or a phone's "m."
 /// (m.youtube.com is youtube.com), or the port.
 fn host(url: &str) -> &str {
-    let h = link_text(url).split(['/', '?', '#', ':']).next().unwrap_or("");
-    h.strip_prefix("www.").or_else(|| h.strip_prefix("m.")).unwrap_or(h)
+    let h = link_text(url)
+        .split(['/', '?', '#', ':'])
+        .next()
+        .unwrap_or("");
+    h.strip_prefix("www.")
+        .or_else(|| h.strip_prefix("m."))
+        .unwrap_or(h)
 }
 
 /// A Small capsule drawn inert (Focus's and Record's look at the small
 /// size, no hit registered): Download, until there's a link.
 fn disabled_pill(ui: &mut Ui, r: Rect, label: &str, icon: Icon) {
     ui.c.fill_rrect(r, r.h / 2.0, palette::SURFACE.mul_alpha(0.6));
-    let st = TextStyle::footnote().weight(Weight::Semibold).color(palette::DISABLED);
+    let st = TextStyle::footnote()
+        .weight(Weight::Semibold)
+        .color(palette::DISABLED);
     let tw = ui.c.measure(label, &st, r.w).0;
     let (isz, gap) = (13.0, 6.0);
     let x = r.x + (r.w - isz - gap - tw) / 2.0;
-    ui.c.icon(icon, Rect::new(x, r.center().y - isz / 2.0, isz, isz), palette::DISABLED);
+    ui.c.icon(
+        icon,
+        Rect::new(x, r.center().y - isz / 2.0, isz, isz),
+        palette::DISABLED,
+    );
     ui.c.text(label, Rect::new(x + isz + gap, r.y, tw + 2.0, r.h), &st);
 }
 
@@ -386,7 +564,16 @@ mod tests {
     use poni_core::ytdlp::Stage;
 
     fn job(url: &str, site: Option<&str>) -> Job {
-        Job { id: 1, url: url.into(), mode: Mode::Video, title: None, site: site.map(str::to_string), thumbnail: None, state: State::Queued, added: 0 }
+        Job {
+            id: 1,
+            url: url.into(),
+            mode: Mode::Video,
+            title: None,
+            site: site.map(str::to_string),
+            thumbnail: None,
+            state: State::Queued,
+            added: 0,
+        }
     }
 
     #[test]
@@ -394,13 +581,32 @@ mod tests {
         // Waiting its turn: Cancel, the same command, which takes it off the list.
         assert_eq!(row_acts(&State::Queued), [RowAct::Cancel]);
         assert_eq!(RowAct::Cancel.label(), "Cancel");
-        let downloading = State::Downloading { done: 1, total: None, speed: None, eta_s: None };
-        for running in [State::Starting, State::Solving, downloading, State::Finishing(Stage::Merging)] {
+        let downloading = State::Downloading {
+            done: 1,
+            total: None,
+            speed: None,
+            eta_s: None,
+        };
+        for running in [
+            State::Starting,
+            State::Solving,
+            downloading,
+            State::Finishing(Stage::Merging),
+        ] {
             assert_eq!(row_acts(&running), [RowAct::Stop], "{running:?}");
         }
-        let done = State::Done { path: "C:\\Users\\a\\Downloads\\Big Buck Bunny.mp4".into(), size: 4_200_000 };
-        assert_eq!(row_acts(&done), [RowAct::Open, RowAct::Reveal, RowAct::Remove]);
-        assert_eq!(row_acts(&State::Failed("This video is private.".into())), [RowAct::Remove]);
+        let done = State::Done {
+            path: "C:\\Users\\a\\Downloads\\Big Buck Bunny.mp4".into(),
+            size: 4_200_000,
+        };
+        assert_eq!(
+            row_acts(&done),
+            [RowAct::Open, RowAct::Reveal, RowAct::Remove]
+        );
+        assert_eq!(
+            row_acts(&State::Failed("This video is private.".into())),
+            [RowAct::Remove]
+        );
         assert_eq!(row_acts(&State::Stopped), [RowAct::Remove]);
     }
 
@@ -408,16 +614,54 @@ mod tests {
     fn the_badge_keeps_the_link_s_letter_once_yt_dlp_names_the_site() {
         let letter = |url, site| badge_letter(&job(url, site));
         let film = "https://video.blender.org/w/b29290cc-dc51-4a12-bcb2-2aa5fece7605";
-        assert_eq!(letter(film, None).as_deref(), Some("V"), "before yt-dlp starts");
-        assert_eq!(letter(film, Some("PeerTube")).as_deref(), Some("V"), "and after: never P");
-        assert_eq!(letter("https://archive.org/details/BigBuckBunny_124", Some("Internet Archive")).as_deref(), Some("A"));
-        assert_eq!(letter("https://www.youtube.com/watch?v=x", None).as_deref(), Some("Y"));
-        assert_eq!(letter("https://m.youtube.com/watch?v=x", Some("YouTube")).as_deref(), Some("Y"), "a phone's link, the same site");
-        assert_eq!(letter("https://music.youtube.com/watch?v=x", None).as_deref(), Some("M"));
-        assert_eq!(letter("http://video.blender.org:443/w/b29", Some(" ")).as_deref(), Some("V"));
-        assert_eq!(link_text("https://archive.org/details/BigBuckBunny_124"), "archive.org/details/BigBuckBunny_124");
-        assert_eq!(link_text("https://me:secret@archive.org/details/x@y"), "archive.org/details/x@y", "never a password");
-        assert_eq!(letter("https://me:secret@www.archive.org", None).as_deref(), Some("A"));
+        assert_eq!(
+            letter(film, None).as_deref(),
+            Some("V"),
+            "before yt-dlp starts"
+        );
+        assert_eq!(
+            letter(film, Some("PeerTube")).as_deref(),
+            Some("V"),
+            "and after: never P"
+        );
+        assert_eq!(
+            letter(
+                "https://archive.org/details/BigBuckBunny_124",
+                Some("Internet Archive")
+            )
+            .as_deref(),
+            Some("A")
+        );
+        assert_eq!(
+            letter("https://www.youtube.com/watch?v=x", None).as_deref(),
+            Some("Y")
+        );
+        assert_eq!(
+            letter("https://m.youtube.com/watch?v=x", Some("YouTube")).as_deref(),
+            Some("Y"),
+            "a phone's link, the same site"
+        );
+        assert_eq!(
+            letter("https://music.youtube.com/watch?v=x", None).as_deref(),
+            Some("M")
+        );
+        assert_eq!(
+            letter("http://video.blender.org:443/w/b29", Some(" ")).as_deref(),
+            Some("V")
+        );
+        assert_eq!(
+            link_text("https://archive.org/details/BigBuckBunny_124"),
+            "archive.org/details/BigBuckBunny_124"
+        );
+        assert_eq!(
+            link_text("https://me:secret@archive.org/details/x@y"),
+            "archive.org/details/x@y",
+            "never a password"
+        );
+        assert_eq!(
+            letter("https://me:secret@www.archive.org", None).as_deref(),
+            Some("A")
+        );
     }
 
     #[test]

@@ -54,7 +54,10 @@ const WHEEL_LINE: f32 = 1.0;
 const VIEW_ID: &str = "script.view";
 
 fn read_style() -> TextStyle {
-    TextStyle::new(READ_SIZE).weight(Weight::Semibold).line_spacing(LEADING).top()
+    TextStyle::new(READ_SIZE)
+        .weight(Weight::Semibold)
+        .line_spacing(LEADING)
+        .top()
 }
 
 fn row_h() -> f32 {
@@ -83,7 +86,11 @@ thread_local! {
 }
 
 fn take_cache() -> Box<Cache> {
-    CACHE.try_with(|c| c.take()).ok().flatten().unwrap_or_default()
+    CACHE
+        .try_with(|c| c.take())
+        .ok()
+        .flatten()
+        .unwrap_or_default()
 }
 
 fn put_cache(c: Box<Cache>) {
@@ -109,7 +116,11 @@ impl Cache {
         let st = read_style();
         let widths = &mut self.widths;
         let c = &mut *ui.c;
-        self.lines = model::wrap(text, width, |w| *widths.entry(w.to_string()).or_insert_with(|| c.measure(w, &st, f32::MAX).0));
+        self.lines = model::wrap(text, width, |w| {
+            *widths
+                .entry(w.to_string())
+                .or_insert_with(|| c.measure(w, &st, f32::MAX).0)
+        });
     }
 }
 
@@ -132,7 +143,10 @@ pub fn height(_st: &AppState) -> f32 {
 pub fn next_wake(st: &AppState) -> Option<f64> {
     let wpm = st.store.script.pace();
     let line = with_lines(|lines| st.script.next_change(lines, wpm));
-    let note = st.script_note.map(|(_, until)| until).filter(|&until| until > st.now);
+    let note = st
+        .script_note
+        .map(|(_, until)| until)
+        .filter(|&until| until > st.now);
     match (line, note) {
         (Some(a), Some(b)) => Some(a.min(b)),
         (a, b) => a.or(b),
@@ -160,8 +174,13 @@ pub fn note(st: &mut AppState, text: &'static str) {
 /// Files dropped while this page shows: the first text file becomes the
 /// script. True when one did (the drop is then not for the Shelf).
 pub fn take_drop(st: &mut AppState, paths: &[String]) -> bool {
-    let Some(path) = paths.iter().find(|p| model::is_text_file(p)) else { return false };
-    let read = std::fs::metadata(path).ok().filter(|m| m.len() <= model::MAX_FILE_BYTES).and_then(|_| std::fs::read(path).ok());
+    let Some(path) = paths.iter().find(|p| model::is_text_file(p)) else {
+        return false;
+    };
+    let read = std::fs::metadata(path)
+        .ok()
+        .filter(|m| m.len() <= model::MAX_FILE_BYTES)
+        .and_then(|_| std::fs::read(path).ok());
     match read.as_deref().and_then(model::decode) {
         Some(text) => set_text(st, text),
         None => note(st, "No text in that file"),
@@ -187,16 +206,40 @@ pub fn draw(ui: &mut Ui, st: &mut AppState, area: Rect) {
 
 fn draw_empty(ui: &mut Ui, st: &mut AppState, area: Rect) {
     let top = Rect::new(area.x, area.y, area.w, area.h - 52.0);
-    super::empty_state(ui, top, Icon::Script, "Paste a script to read", "Copy it anywhere, then press Paste. Or drop a .txt file here.");
+    super::empty_state(
+        ui,
+        top,
+        Icon::Script,
+        "Paste a script to read",
+        "Copy it anywhere, then press Paste. Or drop a .txt file here.",
+    );
     let label = "Paste";
     let w = ui.pill_width(label, true, false);
-    let r = Rect::new(area.center().x - w / 2.0, top.bottom() - 6.0, w, PILL_REGULAR);
-    if ui.pill(wid("script.paste.empty"), r, label, Some(Icon::Clipboard), PillStyle::Primary(st.accent)).clicked {
+    let r = Rect::new(
+        area.center().x - w / 2.0,
+        top.bottom() - 6.0,
+        w,
+        PILL_REGULAR,
+    );
+    if ui
+        .pill(
+            wid("script.paste.empty"),
+            r,
+            label,
+            Some(Icon::Clipboard),
+            PillStyle::Primary(st.accent),
+        )
+        .clicked
+    {
         st.cmd(Command::ScriptPaste);
     }
     if let Some(text) = live_note(ui, st) {
         let y = r.bottom() + 4.0;
-        ui.c.text(text, Rect::new(area.x, y, area.w, 16.0), &TextStyle::footnote().color(palette::TEXT_DIM).center());
+        ui.c.text(
+            text,
+            Rect::new(area.x, y, area.w, 16.0),
+            &TextStyle::footnote().color(palette::TEXT_DIM).center(),
+        );
     }
 }
 
@@ -219,9 +262,15 @@ fn draw_reading(ui: &mut Ui, st: &mut AppState, area: Rect, cache: &mut Cache) {
     let focused = ui.input.focused == Some(wid(VIEW_ID));
     let row = row_h();
     let anchor_y = view.y + ANCHOR_ROWS * row;
-    let hovered_row = ui.input.mouse.filter(|_| resp.hovered).map(|m| (cache.pos + (m.y - anchor_y) / row).floor() as isize);
+    let hovered_row = ui
+        .input
+        .mouse
+        .filter(|_| resp.hovered)
+        .map(|m| (cache.pos + (m.y - anchor_y) / row).floor() as isize);
     if resp.clicked {
-        if let Some(r) = hovered_row.filter(|&r| r >= 0 && (r as usize) < lines.len() && r as usize != cur) {
+        if let Some(r) =
+            hovered_row.filter(|&r| r >= 0 && (r as usize) < lines.len() && r as usize != cur)
+        {
             st.script.seek(r as usize, &lines, now);
         }
     }
@@ -239,7 +288,8 @@ fn draw_reading(ui: &mut Ui, st: &mut AppState, area: Rect, cache: &mut Cache) {
     }
     let notches = ui.wheel_in(view);
     if notches != 0.0 {
-        st.script.step(-(notches / WHEEL_LINE).round() as isize, &lines, now);
+        st.script
+            .step(-(notches / WHEEL_LINE).round() as isize, &lines, now);
     }
 
     // Glide to the line to say.
@@ -279,17 +329,30 @@ fn draw_reading(ui: &mut Ui, st: &mut AppState, area: Rect, cache: &mut Cache) {
         let d = i as f32 - cache.pos;
         // The line to say 1.0; the next ones step down so the eye finds the
         // line after; the ones already said dimmer still.
-        let base = if d >= 0.0 { 1.0 - 0.45 * d.min(1.0) - 0.12 * (d - 1.0).clamp(0.0, 2.0) } else { 1.0 - 0.72 * (-d).min(1.0) };
+        let base = if d >= 0.0 {
+            1.0 - 0.45 * d.min(1.0) - 0.12 * (d - 1.0).clamp(0.0, 2.0)
+        } else {
+            1.0 - 0.72 * (-d).min(1.0)
+        };
         let mut alpha = base.clamp(0.0, 1.0) * fade;
         if hovered_row == Some(i as isize) && i != cur && fade > 0.4 {
-            let pill = Rect::new(view.x - 6.0, y - 2.0, view.w + 12.0, READ_SIZE * LEADING + 4.0);
+            let pill = Rect::new(
+                view.x - 6.0,
+                y - 2.0,
+                view.w + 12.0,
+                READ_SIZE * LEADING + 4.0,
+            );
             ui.c.fill_rrect(pill, 8.0, Color::white(0.07 * fade));
             alpha = alpha.max(0.7 * fade);
         }
         if alpha <= 0.01 {
             continue;
         }
-        ui.c.text(&lines[i].text, Rect::new(view.x, y, view.w, READ_SIZE * LEADING + 2.0), &style.clone().color(Color::white(alpha)));
+        ui.c.text(
+            &lines[i].text,
+            Rect::new(view.x, y, view.w, READ_SIZE * LEADING + 2.0),
+            &style.clone().color(Color::white(alpha)),
+        );
     }
     ui.c.set_text_snap(snap_was);
     ui.c.unclip();
@@ -327,43 +390,113 @@ fn draw_bar(ui: &mut Ui, st: &mut AppState, area: Rect, y: f32, lines: &[Line], 
     };
     let w = ui.pill_width(label, true, false).max(READ_MIN_W);
     let read_r = Rect::new(area.x, y, w, PILL_REGULAR);
-    if ui.pill(wid("script.read"), read_r, label, Some(icon), PillStyle::Primary(st.accent)).clicked {
+    if ui
+        .pill(
+            wid("script.read"),
+            read_r,
+            label,
+            Some(icon),
+            PillStyle::Primary(st.accent),
+        )
+        .clicked
+    {
         st.script.toggle(now, lines);
     }
     let mut x = read_r.right() + PILL_GAP;
     let cy = y + PILL_REGULAR / 2.0;
     let btn = |x: f32| Rect::new(x, cy - ICON_BTN / 2.0, ICON_BTN, ICON_BTN);
     if st.script.active {
-        if ui.icon_button(wid("script.stop"), btn(x), Icon::Stop, palette::TEXT_DIM, 15.0).clicked {
+        if ui
+            .icon_button(
+                wid("script.stop"),
+                btn(x),
+                Icon::Stop,
+                palette::TEXT_DIM,
+                15.0,
+            )
+            .clicked
+        {
             st.script.stop(now);
         }
-    } else if ui.icon_button(wid("script.restart"), btn(x), Icon::Reset, palette::TEXT_DIM, 15.0).clicked {
+    } else if ui
+        .icon_button(
+            wid("script.restart"),
+            btn(x),
+            Icon::Reset,
+            palette::TEXT_DIM,
+            15.0,
+        )
+        .clicked
+    {
         st.script.restart(now);
     }
     x += ICON_BTN + PILL_GAP;
 
     // Pace: − 140 wpm +
-    if ui.icon_button(wid("script.slower"), btn(x), Icon::Minus, palette::TEXT_DIM, 14.0).clicked {
+    if ui
+        .icon_button(
+            wid("script.slower"),
+            btn(x),
+            Icon::Minus,
+            palette::TEXT_DIM,
+            14.0,
+        )
+        .clicked
+    {
         set_pace(st, lines, wpm.saturating_sub(WPM_STEP));
     }
     x += ICON_BTN;
     let pace = format!("{wpm} wpm");
-    ui.c.text(&pace, Rect::new(x, y, PACE_LABEL_W, PILL_REGULAR), &TextStyle::body().weight(Weight::Semibold).tabular().center());
+    ui.c.text(
+        &pace,
+        Rect::new(x, y, PACE_LABEL_W, PILL_REGULAR),
+        &TextStyle::body()
+            .weight(Weight::Semibold)
+            .tabular()
+            .center(),
+    );
     x += PACE_LABEL_W;
-    if ui.icon_button(wid("script.faster"), btn(x), Icon::Plus, palette::TEXT_DIM, 14.0).clicked {
+    if ui
+        .icon_button(
+            wid("script.faster"),
+            btn(x),
+            Icon::Plus,
+            palette::TEXT_DIM,
+            14.0,
+        )
+        .clicked
+    {
         set_pace(st, lines, wpm + WPM_STEP);
     }
     x += ICON_BTN + PILL_GAP + 4.0;
 
     // Right: Clear, then Paste (a new script replaces this one), then Record.
     let clear_r = btn(area.right() - ICON_BTN);
-    if ui.icon_button(wid("script.clear"), clear_r, Icon::Trash, palette::TEXT_DIM, 14.0).clicked {
+    if ui
+        .icon_button(
+            wid("script.clear"),
+            clear_r,
+            Icon::Trash,
+            palette::TEXT_DIM,
+            14.0,
+        )
+        .clicked
+    {
         set_text(st, String::new());
     }
     let paste = "Paste";
     let pw = ui.pill_width(paste, true, false);
     let paste_r = Rect::new(clear_r.x - PILL_GAP - pw, y, pw, PILL_REGULAR);
-    if ui.pill(wid("script.paste"), paste_r, paste, Some(Icon::Clipboard), PillStyle::Utility).clicked {
+    if ui
+        .pill(
+            wid("script.paste"),
+            paste_r,
+            paste,
+            Some(Icon::Clipboard),
+            PillStyle::Utility,
+        )
+        .clicked
+    {
         st.cmd(Command::ScriptPaste);
     }
 
@@ -371,8 +504,18 @@ fn draw_bar(ui: &mut Ui, st: &mut AppState, area: Rect, y: f32, lines: &[Line], 
     let mut hint = None;
     if st.recorder {
         let record_r = btn(paste_r.x - PILL_GAP - ICON_BTN);
-        let resp = ui.icon_button(wid("script.record"), record_r, Icon::Record, palette::RED, RECORD_ICON);
-        ui.c.icon(Icon::Circle, Rect::from_center(record_r.center(), RECORD_ICON, RECORD_ICON), palette::TEXT_DIM);
+        let resp = ui.icon_button(
+            wid("script.record"),
+            record_r,
+            Icon::Record,
+            palette::RED,
+            RECORD_ICON,
+        );
+        ui.c.icon(
+            Icon::Circle,
+            Rect::from_center(record_r.center(), RECORD_ICON, RECORD_ICON),
+            palette::TEXT_DIM,
+        );
         if resp.clicked {
             st.cmd(Command::RecordScreen);
             note(st, "Opening the recorder");
@@ -402,7 +545,16 @@ fn draw_bar(ui: &mut Ui, st: &mut AppState, area: Rect, y: f32, lines: &[Line], 
 /// script; otherwise whether screen shares can see it, in fewer words when
 /// that doesn't fit in `room` (Record takes some of it).
 #[allow(clippy::too_many_arguments)]
-fn status_line(ui: &mut Ui, st: &AppState, now: f64, lines: &[Line], wpm: u32, focused: bool, room: f32, style: &TextStyle) -> String {
+fn status_line(
+    ui: &mut Ui,
+    st: &AppState,
+    now: f64,
+    lines: &[Line],
+    wpm: u32,
+    focused: bool,
+    room: f32,
+    style: &TextStyle,
+) -> String {
     if let Some(text) = live_note(ui, st) {
         return text.into();
     }
@@ -411,14 +563,23 @@ fn status_line(ui: &mut Ui, st: &AppState, now: f64, lines: &[Line], wpm: u32, f
     }
     if st.script.playing() {
         let left = st.script.remaining(now, lines, wpm);
-        return if left < 60.0 { "Under a minute left".into() } else { format!("About {} min left", (left / 60.0).round() as u32) };
+        return if left < 60.0 {
+            "Under a minute left".into()
+        } else {
+            format!("About {} min left", (left / 60.0).round() as u32)
+        };
     }
     let (full, short) = match st.script_hidden {
         Some(true) => ("Hidden from screen shares", "Hidden from shares"),
         _ if cfg!(target_os = "macos") => ("Shows in full-screen shares", "Shows in shares"),
         _ => ("Shows in screen shares", "Shows in shares"),
     };
-    if ui.c.measure(full, style, f32::MAX).0 <= room { full } else { short }.into()
+    if ui.c.measure(full, style, f32::MAX).0 <= room {
+        full
+    } else {
+        short
+    }
+    .into()
 }
 
 /// A message from the app while it lasts ([`next_wake`] brings the frame
@@ -433,8 +594,16 @@ fn draw_drop_hint(ui: &mut Ui, area: Rect) {
     ui.c.fill_rrect(r, 12.0, Color::rgba(0.0, 0.0, 0.0, 0.72));
     ui.c.stroke_rrect(r, 12.0, Color::white(0.35), 1.5);
     let c = r.center();
-    ui.c.icon(Icon::File, Rect::from_center(Point::new(c.x, c.y - 14.0), 24.0, 24.0), Color::white(0.8));
-    ui.c.text("Drop a .txt file to read it", Rect::new(r.x, c.y + 6.0, r.w, 20.0), &TextStyle::headline().center());
+    ui.c.icon(
+        Icon::File,
+        Rect::from_center(Point::new(c.x, c.y - 14.0), 24.0, 24.0),
+        Color::white(0.8),
+    );
+    ui.c.text(
+        "Drop a .txt file to read it",
+        Rect::new(r.x, c.y + 6.0, r.w, 20.0),
+        &TextStyle::headline().center(),
+    );
 }
 
 fn smoothstep(x: f32) -> f32 {

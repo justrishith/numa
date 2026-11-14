@@ -23,7 +23,12 @@ impl App {
         let now = self.st.now;
         let signed_in = matches!(self.st.oyenza.link, OyenzaLink::Connected { .. });
         let away = self.away.0 || self.away.1;
-        let shown = self.expanded && self.st.page == PageKind::Ielts && self.st.ielts_on() && signed_in && !away && !self.fullscreen_hidden;
+        let shown = self.expanded
+            && self.st.page == PageKind::Ielts
+            && self.st.ielts_on()
+            && signed_in
+            && !away
+            && !self.fullscreen_hidden;
         if shown != self.ielts_shown {
             self.ielts_shown = shown;
             let fx = self.st.ielts.show(shown, now);
@@ -87,7 +92,11 @@ impl App {
         let failed = self.ielts.voice.failed();
         self.ielts.voice.stop();
         // A line that couldn't play shows its words for their reading time.
-        let fx = if failed { self.st.ielts.voice_failed(now) } else { self.st.ielts.voice_ended(now) };
+        let fx = if failed {
+            self.st.ielts.voice_failed(now)
+        } else {
+            self.st.ielts.voice_ended(now)
+        };
         self.ielts_do(fx);
     }
 
@@ -150,7 +159,9 @@ impl App {
                     Vec::new()
                 }
                 Effect::ResumeMusic => {
-                    if std::mem::take(&mut self.ielts_music) && self.st.media.as_ref().is_some_and(|m| !m.is_playing()) {
+                    if std::mem::take(&mut self.ielts_music)
+                        && self.st.media.as_ref().is_some_and(|m| !m.is_playing())
+                    {
                         self.st.media_cmd(MediaCmd::PlayPause);
                     }
                     Vec::new()
@@ -167,7 +178,13 @@ impl App {
     pub(super) fn ielts_off(&mut self) {
         let now = self.st.now;
         // Everything Udahan does but read the ladder again.
-        let fx = self.st.ielts.quit(now).into_iter().filter(|e| *e != Effect::Call(Call::Me)).collect();
+        let fx = self
+            .st
+            .ielts
+            .quit(now)
+            .into_iter()
+            .filter(|e| *e != Effect::Call(Call::Me))
+            .collect();
         self.ielts_do(fx);
         self.ielts.close();
         self.st.ielts = Default::default();

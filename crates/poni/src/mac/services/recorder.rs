@@ -10,7 +10,9 @@
 
 use objc2::MainThreadMarker;
 use objc2_app_kit::{NSRunningApplication, NSScreen, NSWorkspace};
-use objc2_core_foundation::{kCFRunLoopCommonModes, CFData, CFMessagePort, CFRetained, CFRunLoop, CFRunLoopSource, CFString};
+use objc2_core_foundation::{
+    kCFRunLoopCommonModes, CFData, CFMessagePort, CFRetained, CFRunLoop, CFRunLoopSource, CFString,
+};
 use objc2_foundation::{NSString, NSURL};
 use poni_core::recorder;
 use std::ffi::c_void;
@@ -23,16 +25,23 @@ const RECORDER_ID: &str = "com.oyenza.studio.recorder";
 /// Whether some app opens `oyenza-recorder:` links, i.e. the recorder is
 /// installed. Read when the menu bar's menu is built.
 pub fn installed() -> bool {
-    let Some(url) = NSURL::URLWithString(&NSString::from_str(&format!("{}://", recorder::SCHEME))) else {
+    let Some(url) = NSURL::URLWithString(&NSString::from_str(&format!("{}://", recorder::SCHEME)))
+    else {
         return false;
     };
-    NSWorkspace::sharedWorkspace().URLForApplicationToOpenURL(&url).is_some()
+    NSWorkspace::sharedWorkspace()
+        .URLForApplicationToOpenURL(&url)
+        .is_some()
 }
 
 /// The Record page's Record: `target` (the island's screen, or a window or
 /// an area the recorder's overlay asks for) with `inputs`.
 pub fn record(mtm: MainThreadMarker, target: recorder::Target, inputs: recorder::Inputs) {
-    let screen = if target == recorder::Target::Screen { screen_name(mtm) } else { None };
+    let screen = if target == recorder::Target::Screen {
+        screen_name(mtm)
+    } else {
+        None
+    };
     super::open(&recorder::record_link(target, screen.as_deref(), inputs));
 }
 
@@ -51,7 +60,9 @@ pub fn stop() {
 /// The recorder is still running (it quits or crashes mid-recording: the
 /// island lets go of the recording).
 pub fn running() -> bool {
-    NSRunningApplication::runningApplicationsWithBundleIdentifier(&NSString::from_str(RECORDER_ID)).count() > 0
+    NSRunningApplication::runningApplicationsWithBundleIdentifier(&NSString::from_str(RECORDER_ID))
+        .count()
+        > 0
 }
 
 /// The island's message port on the main run loop, kept for the app's life.
@@ -67,16 +78,32 @@ pub fn listen() -> Option<Port> {
     let name = CFString::from_str(PORT);
     // SAFETY: a null context and no should-free flag are allowed; the callout
     // only reads the request's bytes while it runs.
-    let port = unsafe { CFMessagePort::new_local(None, Some(&*name), Some(on_request), std::ptr::null_mut(), std::ptr::null_mut()) }?;
+    let port = unsafe {
+        CFMessagePort::new_local(
+            None,
+            Some(&*name),
+            Some(on_request),
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+        )
+    }?;
     let source = CFMessagePort::new_run_loop_source(None, Some(&*port), 0)?;
     // Common modes: the recorder's word arrives while a menu is open too.
     CFRunLoop::main()?.add_source(Some(&*source), unsafe { kCFRunLoopCommonModes });
-    Some(Port { _port: port, _source: source })
+    Some(Port {
+        _port: port,
+        _source: source,
+    })
 }
 
 /// One request through the port: "1" when the island took the message, "0"
 /// when it didn't, or couldn't read it. CF releases the reply.
-unsafe extern "C-unwind" fn on_request(_port: *mut CFMessagePort, msgid: i32, data: *const CFData, _info: *mut c_void) -> *const CFData {
+unsafe extern "C-unwind" fn on_request(
+    _port: *mut CFMessagePort,
+    msgid: i32,
+    data: *const CFData,
+    _info: *mut c_void,
+) -> *const CFData {
     let taken = msgid as usize == recorder::COPYDATA_ID
         && unsafe { data.as_ref() }
             .map(|d| d.to_vec())
@@ -103,7 +130,10 @@ fn screen_name(mtm: MainThreadMarker) -> Option<String> {
         .iter()
         .find(|s| {
             let f = s.frame();
-            f.origin.x == island.x && f.origin.y == island.y && f.size.width == island.w && f.size.height == island.h
+            f.origin.x == island.x
+                && f.origin.y == island.y
+                && f.size.width == island.w
+                && f.size.height == island.h
         })
         .map(|s| s.localizedName().to_string())
 }

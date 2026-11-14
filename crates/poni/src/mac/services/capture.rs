@@ -99,17 +99,37 @@ struct AudioBufferList {
     buffers: [AudioBuffer; 1],
 }
 
-type IoProc = extern "C" fn(u32, *const c_void, *const AudioBufferList, *const c_void, *mut AudioBufferList, *const c_void, *mut c_void) -> i32;
+type IoProc = extern "C" fn(
+    u32,
+    *const c_void,
+    *const AudioBufferList,
+    *const c_void,
+    *mut AudioBufferList,
+    *const c_void,
+    *mut c_void,
+) -> i32;
 /// `AudioHardwareCreateProcessTap` and `AudioHardwareDestroyProcessTap` (macOS 14.2).
 type CreateTap = unsafe extern "C" fn(*mut AnyObject, *mut u32) -> i32;
 type DestroyTap = unsafe extern "C" fn(u32) -> i32;
 
 #[link(name = "CoreAudio", kind = "framework")]
 extern "C" {
-    fn AudioObjectGetPropertyData(id: u32, addr: *const Addr, qual_size: u32, qual: *const c_void, size: *mut u32, data: *mut c_void) -> i32;
+    fn AudioObjectGetPropertyData(
+        id: u32,
+        addr: *const Addr,
+        qual_size: u32,
+        qual: *const c_void,
+        size: *mut u32,
+        data: *mut c_void,
+    ) -> i32;
     fn AudioHardwareCreateAggregateDevice(desc: *const c_void, out: *mut u32) -> i32;
     fn AudioHardwareDestroyAggregateDevice(id: u32) -> i32;
-    fn AudioDeviceCreateIOProcID(device: u32, proc_: IoProc, client: *mut c_void, out: *mut *mut c_void) -> i32;
+    fn AudioDeviceCreateIOProcID(
+        device: u32,
+        proc_: IoProc,
+        client: *mut c_void,
+        out: *mut *mut c_void,
+    ) -> i32;
     fn AudioDeviceDestroyIOProcID(device: u32, proc_id: *mut c_void) -> i32;
     fn AudioDeviceStart(device: u32, proc_id: *mut c_void) -> i32;
     fn AudioDeviceStop(device: u32, proc_id: *mut c_void) -> i32;
@@ -123,22 +143,43 @@ const RTLD_DEFAULT: *mut c_void = -2isize as *mut c_void;
 
 /// A property of a Core Audio object as plain data (`qual`: its qualifier).
 fn get<T: Copy + Default>(id: u32, selector: u32, scope: u32, qual: Option<&i32>) -> Option<T> {
-    let addr = Addr { selector, scope, element: 0 };
+    let addr = Addr {
+        selector,
+        scope,
+        element: 0,
+    };
     let mut v = T::default();
     let mut size = std::mem::size_of::<T>() as u32;
-    let (qs, qp) = qual.map_or((0, std::ptr::null()), |q| (std::mem::size_of::<i32>() as u32, (q as *const i32).cast()));
+    let (qs, qp) = qual.map_or((0, std::ptr::null()), |q| {
+        (std::mem::size_of::<i32>() as u32, (q as *const i32).cast())
+    });
     // SAFETY: `v` is plain data of the size passed.
-    let r = unsafe { AudioObjectGetPropertyData(id, &addr, qs, qp, &mut size, (&mut v as *mut T).cast()) };
+    let r = unsafe {
+        AudioObjectGetPropertyData(id, &addr, qs, qp, &mut size, (&mut v as *mut T).cast())
+    };
     (r == 0).then_some(v)
 }
 
 /// A device's UID (a CFString Core Audio hands over, released here).
 fn uid(id: u32) -> Option<String> {
-    let addr = Addr { selector: DEVICE_UID, scope: SCOPE_GLOBAL, element: 0 };
+    let addr = Addr {
+        selector: DEVICE_UID,
+        scope: SCOPE_GLOBAL,
+        element: 0,
+    };
     let mut p: *mut NSString = std::ptr::null_mut();
     let mut size = std::mem::size_of::<*mut NSString>() as u32;
     // SAFETY: the property is a CFStringRef we own (+1), toll-free an NSString.
-    let r = unsafe { AudioObjectGetPropertyData(id, &addr, 0, std::ptr::null(), &mut size, (&mut p as *mut *mut NSString).cast()) };
+    let r = unsafe {
+        AudioObjectGetPropertyData(
+            id,
+            &addr,
+            0,
+            std::ptr::null(),
+            &mut size,
+            (&mut p as *mut *mut NSString).cast(),
+        )
+    };
     if r != 0 || p.is_null() {
         return None;
     }
@@ -196,15 +237,25 @@ impl Queue {
                     return;
                 }
                 self.fit(b.channels as usize);
-                self.downmix.push(std::slice::from_raw_parts(b.data as *const u8, b.bytes as usize), &mut self.out);
+                self.downmix.push(
+                    std::slice::from_raw_parts(b.data as *const u8, b.bytes as usize),
+                    &mut self.out,
+                );
             } else {
                 self.fit(n);
-                let frames = (0..n).map(|c| (*first.add(c)).bytes as usize / 4).min().unwrap_or(0);
+                let frames = (0..n)
+                    .map(|c| (*first.add(c)).bytes as usize / 4)
+                    .min()
+                    .unwrap_or(0);
                 self.scratch.clear();
                 for f in 0..frames {
                     for c in 0..n {
                         let b = &*first.add(c);
-                        let v = if b.data.is_null() { 0.0 } else { *(b.data as *const f32).add(f) };
+                        let v = if b.data.is_null() {
+                            0.0
+                        } else {
+                            *(b.data as *const f32).add(f)
+                        };
                         self.scratch.extend_from_slice(&v.to_le_bytes());
                     }
                 }
@@ -328,7 +379,16 @@ impl Source {
     }
 
     fn new(kind: Kind, what: &'static str) -> Source {
-        Source { kind, what, run: None, pending: None, failed_on: None, id: 0, pcm: Vec::with_capacity(RATE as usize / 4), level: 0.0 }
+        Source {
+            kind,
+            what,
+            run: None,
+            pending: None,
+            failed_on: None,
+            id: 0,
+            pcm: Vec::with_capacity(RATE as usize / 4),
+            level: 0.0,
+        }
     }
 
     pub fn open(&mut self) -> Result<(), MicError> {
@@ -351,7 +411,9 @@ impl Source {
         if fresh {
             let output = default_device(DEFAULT_OUTPUT);
             if self.failed_on == Some(output) {
-                return Err(MicError::Failed("the tap didn't work on this output device".into()));
+                return Err(MicError::Failed(
+                    "the tap didn't work on this output device".into(),
+                ));
             }
             let (tx, rx) = mpsc::channel();
             std::thread::Builder::new()
@@ -362,8 +424,15 @@ impl Source {
                 .map_err(|e| MicError::Failed(format!("no thread for the tap ({e})")))?;
             self.pending = Some(rx);
         }
-        let Some(rx) = self.pending.as_ref() else { return Err(MicError::Failed("no tap".into())) };
-        let got = if fresh { rx.recv_timeout(TAP_WAIT).map_err(|e| e == RecvTimeoutError::Timeout) } else { rx.try_recv().map_err(|e| e == TryRecvError::Empty) };
+        let Some(rx) = self.pending.as_ref() else {
+            return Err(MicError::Failed("no tap".into()));
+        };
+        let got = if fresh {
+            rx.recv_timeout(TAP_WAIT)
+                .map_err(|e| e == RecvTimeoutError::Timeout)
+        } else {
+            rx.try_recv().map_err(|e| e == TryRecvError::Empty)
+        };
         match got {
             Ok(r) => {
                 self.pending = None;
@@ -406,18 +475,26 @@ impl Source {
     /// Not open (macOS still asking, say), or the Mac's default device
     /// changed (a headset plugged in): open it again.
     pub fn moved(&self) -> bool {
-        let which = if self.kind == Kind::Mic { DEFAULT_INPUT } else { DEFAULT_OUTPUT };
+        let which = if self.kind == Kind::Mic {
+            DEFAULT_INPUT
+        } else {
+            DEFAULT_OUTPUT
+        };
         self.run.is_none() || default_device(which) != self.id
     }
 }
 
-
 /// Start our IOProc on `device`, its frames in format `f` going to a queue.
 fn start(device: u32, f: &Asbd, tap: Option<(u32, u32)>) -> Result<Running, MicError> {
     if f.format != LPCM || f.flags & FLAG_FLOAT == 0 || f.bits != 32 {
-        return Err(MicError::Failed(format!("the sound comes as {:08x}/{:x}/{} bits, not 32-bit float", f.format, f.flags, f.bits)));
+        return Err(MicError::Failed(format!(
+            "the sound comes as {:08x}/{:x}/{} bits, not 32-bit float",
+            f.format, f.flags, f.bits
+        )));
     }
-    let feed = Box::new(Feed { q: Mutex::new(Queue::new(f)) });
+    let feed = Box::new(Feed {
+        q: Mutex::new(Queue::new(f)),
+    });
     let mut proc_id: *mut c_void = std::ptr::null_mut();
     let client = (&*feed as *const Feed).cast_mut().cast::<c_void>();
     // SAFETY: the feed outlives the IOProc (`Source::close`).
@@ -432,7 +509,12 @@ fn start(device: u32, f: &Asbd, tap: Option<(u32, u32)>) -> Result<Running, MicE
         }
         return Err(MicError::Failed(format!("the device didn't start ({r})")));
     }
-    Ok(Running { device, proc_id, feed, tap })
+    Ok(Running {
+        device,
+        proc_id,
+        feed,
+        tap,
+    })
 }
 
 /// The default microphone, once macOS allows it. Not asked yet: macOS asks
@@ -450,13 +532,27 @@ fn open_mic() -> Result<(u32, Running), MicError> {
     }
     if permission != AVAudioApplicationRecordPermission::Granted {
         crate::pinfo!("notes: macOS asks the person for the microphone");
-        let answered = RcBlock::new(|granted: Bool| crate::pinfo!("notes: the microphone {}", if granted.as_bool() { "allowed" } else { "turned down" }));
+        let answered = RcBlock::new(|granted: Bool| {
+            crate::pinfo!(
+                "notes: the microphone {}",
+                if granted.as_bool() {
+                    "allowed"
+                } else {
+                    "turned down"
+                }
+            )
+        });
         unsafe { AVAudioApplication::requestRecordPermissionWithCompletionHandler(&answered) };
         return Err(MicError::Denied);
     }
-    let f = get::<Asbd>(id, STREAM_FORMAT, SCOPE_INPUT, None).ok_or_else(|| MicError::Failed("the microphone's format".into()))?;
+    let f = get::<Asbd>(id, STREAM_FORMAT, SCOPE_INPUT, None)
+        .ok_or_else(|| MicError::Failed("the microphone's format".into()))?;
     let run = start(id, &f, None)?;
-    crate::pinfo!("notes: microphone: device {id}, {:.0} Hz, {} channel(s)", f.rate, f.channels);
+    crate::pinfo!(
+        "notes: microphone: device {id}, {:.0} Hz, {} channel(s)",
+        f.rate,
+        f.channels
+    );
     Ok((id, run))
 }
 
@@ -470,27 +566,42 @@ fn tap_fn<T: Copy>(name: &std::ffi::CStr) -> Option<T> {
 /// The Mac's own sound: a tap of every app but this one, in a private
 /// aggregate device clocked by the default output device.
 fn open_pc() -> Result<(u32, Running), MicError> {
-    let (Some(create), Some(class)) = (tap_fn::<CreateTap>(c"AudioHardwareCreateProcessTap"), AnyClass::get(c"CATapDescription")) else {
+    let (Some(create), Some(class)) = (
+        tap_fn::<CreateTap>(c"AudioHardwareCreateProcessTap"),
+        AnyClass::get(c"CATapDescription"),
+    ) else {
         // macOS 14.0 and 14.1: no taps, so the microphone records alone.
         return Err(MicError::NoDevice);
     };
     let output = default_device(DEFAULT_OUTPUT);
     let output_uid = uid(output).ok_or(MicError::NoDevice)?;
     // This app's own sounds (the island's chimes) stay out of the notes.
-    let me = get::<u32>(SYSTEM, PID_TO_PROCESS, SCOPE_GLOBAL, Some(&(std::process::id() as i32))).unwrap_or(0);
-    let exclude: Retained<NSArray<NSNumber>> = NSArray::from_retained_slice(&if me != 0 { vec![NSNumber::new_u32(me)] } else { Vec::new() });
+    let me = get::<u32>(
+        SYSTEM,
+        PID_TO_PROCESS,
+        SCOPE_GLOBAL,
+        Some(&(std::process::id() as i32)),
+    )
+    .unwrap_or(0);
+    let exclude: Retained<NSArray<NSNumber>> = NSArray::from_retained_slice(&if me != 0 {
+        vec![NSNumber::new_u32(me)]
+    } else {
+        Vec::new()
+    });
     // SAFETY: CATapDescription's own initializer and properties (macOS 14.2),
     // each setter only where the class answers to it.
     let desc: Retained<AnyObject> = unsafe {
         let a: Allocated<AnyObject> = msg_send![class, alloc];
-        let d: Option<Retained<AnyObject>> = msg_send![a, initStereoGlobalTapButExcludeProcesses: &*exclude];
+        let d: Option<Retained<AnyObject>> =
+            msg_send![a, initStereoGlobalTapButExcludeProcesses: &*exclude];
         let d = d.ok_or_else(|| MicError::Failed("no tap description".into()))?;
         let answers = |s| -> bool { msg_send![&*d, respondsToSelector: s] };
         if answers(sel!(setPrivateTap:)) {
             let _: () = msg_send![&*d, setPrivateTap: true];
         }
         if answers(sel!(setName:)) {
-            let _: () = msg_send![&*d, setName: &*NSString::from_str("Oyenza Studio meeting notes")];
+            let _: () =
+                msg_send![&*d, setName: &*NSString::from_str("Oyenza Studio meeting notes")];
         }
         d
     };
@@ -523,7 +634,11 @@ fn open_pc() -> Result<(u32, Running), MicError> {
             return Err(e);
         }
     };
-    crate::pinfo!("notes: the Mac's sound: tap {tap}, aggregate device {aggregate}, {:.0} Hz, {} channel(s)", f.rate, f.channels);
+    crate::pinfo!(
+        "notes: the Mac's sound: tap {tap}, aggregate device {aggregate}, {:.0} Hz, {} channel(s)",
+        f.rate,
+        f.channels
+    );
     match start(aggregate, &f, Some((aggregate, tap))) {
         Ok(run) => {
             crate::pinfo!("notes: the Mac's sound: started");
@@ -548,14 +663,18 @@ fn any<T: Message>(o: Retained<T>) -> Retained<AnyObject> {
 /// A private aggregate device: the output device for its clock, and the tap.
 fn aggregate(output_uid: &str, tap_uid: &str) -> Result<u32, MicError> {
     let s = NSString::from_str;
-    let dict = |pairs: Vec<(&str, Retained<AnyObject>)>| -> Retained<NSDictionary<NSString, AnyObject>> {
-        let keys: Vec<Retained<NSString>> = pairs.iter().map(|(k, _)| s(k)).collect();
-        let keys: Vec<&NSString> = keys.iter().map(|k| &**k).collect();
-        let values: Vec<&AnyObject> = pairs.iter().map(|(_, v)| &**v).collect();
-        NSDictionary::from_slices(&keys, &values)
-    };
+    let dict =
+        |pairs: Vec<(&str, Retained<AnyObject>)>| -> Retained<NSDictionary<NSString, AnyObject>> {
+            let keys: Vec<Retained<NSString>> = pairs.iter().map(|(k, _)| s(k)).collect();
+            let keys: Vec<&NSString> = keys.iter().map(|k| &**k).collect();
+            let values: Vec<&AnyObject> = pairs.iter().map(|(_, v)| &**v).collect();
+            NSDictionary::from_slices(&keys, &values)
+        };
     let sub = dict(vec![("uid", any(s(output_uid)))]);
-    let tap = dict(vec![("uid", any(s(tap_uid))), ("drift", any(NSNumber::new_bool(true)))]);
+    let tap = dict(vec![
+        ("uid", any(s(tap_uid))),
+        ("drift", any(NSNumber::new_bool(true))),
+    ]);
     let unique = format!("com.oyenza.studio.notes.{}", std::process::id());
     let desc = dict(vec![
         ("name", any(s("Oyenza Studio meeting notes"))),

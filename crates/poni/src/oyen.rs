@@ -36,7 +36,72 @@ const FLOAT_ON_LIGHT: f32 = 0.85;
 const MARK_W: f32 = 104.0;
 const BAR_TOP: f32 = 23.0;
 /// The mark's small cut grows the eyes for sizes of 32 px and below.
-const SMALL_EYES: f64 = 1.19;
+pub const SMALL_EYES: f64 = 1.19;
+
+// ---------------------------------------------------------------- the calico coat
+//
+// NUMA's cat wears a calico coat: a warm cream base with a ginger patch over
+// the right ear and a charcoal one over the left. The coat belongs to Poni's
+// renderer only — `poni_core::oyen` and the Oyenza mark stay brand orange
+// (`badge`/`app_icon` draw the plain mark), so the app icon and the logo
+// never change.
+/// The coat's base: warm cream, not white, so it sits well on the dark glass.
+const CREAM: Color = Color::hex(0xFFF1DE);
+/// The ginger patch: Oyen's own orange.
+const GINGER: Color = ORANGE;
+/// The charcoal patch: warm dark, clearly not the eyes' ink.
+const CHARCOAL: Color = Color::hex(0x4A3F3B);
+
+/// The ginger patch, in mark units — a blob over the right ear and right
+/// forehead. Its edges may overrun the head: the patch is clipped to the
+/// head's own outline, so the fit is exact however the head squashes.
+const PATCH_GINGER: &str =
+    "M62 -62L62 8C50 12 36 8 30 -2C24 -10 20 -26 10 -34C14 -46 20 -56 28 -64Z";
+/// The charcoal patch over the left ear and left forehead, same deal.
+const PATCH_CHARCOAL: &str =
+    "M-62 -62L-30 -64C-24 -52 -26 -40 -34 -30C-40 -22 -46 -14 -58 -10L-62 -10Z";
+
+/// The two coat patches, parsed once (ginger first, charcoal second).
+fn patches() -> &'static [Vec<Seg>; 2] {
+    static P: OnceLock<[Vec<Seg>; 2]> = OnceLock::new();
+    P.get_or_init(|| [PATCH_GINGER, PATCH_CHARCOAL].map(|d| svgpath::parse(d).unwrap_or_default()))
+}
+
+/// `segs` (mark units) mapped through the head's current transform.
+fn patch_segs(segs: &[Seg], map: &impl Fn(oyen::Point) -> Point) -> Vec<Seg> {
+    segs.iter()
+        .map(|s| match *s {
+            Seg::MoveTo(x, y) => {
+                let a = map(oyen::Point::new(x as f64, y as f64));
+                Seg::MoveTo(a.x, a.y)
+            }
+            Seg::LineTo(x, y) => {
+                let a = map(oyen::Point::new(x as f64, y as f64));
+                Seg::LineTo(a.x, a.y)
+            }
+            Seg::QuadTo(x1, y1, x, y) => {
+                let (c, a) = (
+                    map(oyen::Point::new(x1 as f64, y1 as f64)),
+                    map(oyen::Point::new(x as f64, y as f64)),
+                );
+                Seg::QuadTo(c.x, c.y, a.x, a.y)
+            }
+            Seg::CubicTo(x1, y1, x2, y2, x, y) => {
+                let (c1, c2, a) = (
+                    map(oyen::Point::new(x1 as f64, y1 as f64)),
+                    map(oyen::Point::new(x2 as f64, y2 as f64)),
+                    map(oyen::Point::new(x as f64, y as f64)),
+                );
+                Seg::CubicTo(c1.x, c1.y, c2.x, c2.y, a.x, a.y)
+            }
+            Seg::ArcTo(rx, ry, rot, large, sweep, x, y) => {
+                let a = map(oyen::Point::new(x as f64, y as f64));
+                Seg::ArcTo(rx, ry, rot, large, sweep, a.x, a.y)
+            }
+            Seg::Close => Seg::Close,
+        })
+        .collect()
+}
 
 /// How long one rest cycle lasts: a blink at its start, an ear flick every
 /// third cycle. Between moves Oyen is a still frame, so the app sleeps.
@@ -79,7 +144,10 @@ fn rest_eyes(now: f64, night: bool, look: Option<f32>, eyes: f64) -> (Frame, boo
         return (oyen::frame(Mood::Sleep, 0.6, Input::default(), eyes), false);
     }
     if let Some(x) = look {
-        let input = Input { pencil: x.clamp(-1.0, 1.0) as f64, ..Input::default() };
+        let input = Input {
+            pencil: x.clamp(-1.0, 1.0) as f64,
+            ..Input::default()
+        };
         return (oyen::frame(Mood::Nulis, 0.0, input, eyes), false);
     }
     let phase = now.rem_euclid(REST_CYCLE);
@@ -97,13 +165,27 @@ fn rest_eyes(now: f64, night: bool, look: Option<f32>, eyes: f64) -> (Frame, boo
 /// (the lean straightens out first).
 pub fn music(now: f64, playing: bool, paused_at: Option<f64>) -> Frame {
     let (mut f, lean) = if playing {
-        (oyen::frame(Mood::Happy, now.rem_euclid(Mood::Happy.loop_secs()), Input::default(), SMALL_EYES), lean(now))
+        (
+            oyen::frame(
+                Mood::Happy,
+                now.rem_euclid(Mood::Happy.loop_secs()),
+                Input::default(),
+                SMALL_EYES,
+            ),
+            lean(now),
+        )
     } else {
         let left = paused_at.map_or(0.0, |p| 1.0 - smooth(((now - p) / SETTLE) as f32) as f64);
-        (oyen::frame(Mood::Oyen, 0.0, Input::default(), SMALL_EYES), paused_at.map_or(0.0, lean) * left)
+        (
+            oyen::frame(Mood::Oyen, 0.0, Input::default(), SMALL_EYES),
+            paused_at.map_or(0.0, lean) * left,
+        )
     };
     if lean != 0.0 {
-        f.head = f.head.then(Affine::rotation_about(lean, oyen::Point::new(0.0, oyen::CHIN)));
+        f.head = f.head.then(Affine::rotation_about(
+            lean,
+            oyen::Point::new(0.0, oyen::CHIN),
+        ));
     }
     f
 }
@@ -186,14 +268,62 @@ struct Flight {
 /// him or further out; two go up the narrow side on his right, far enough
 /// apart that they never meet there.
 const FLIGHTS: [Flight; 8] = [
-    Flight { x: -16.5, drift: -7.0, pair: false, deep: true, phase: 0.0 },
-    Flight { x: 15.0, drift: 2.5, pair: true, deep: false, phase: 0.35 },
-    Flight { x: -26.0, drift: -6.0, pair: true, deep: false, phase: 0.6 },
-    Flight { x: -17.0, drift: -6.5, pair: true, deep: true, phase: 0.8 },
-    Flight { x: -25.5, drift: -7.0, pair: false, deep: false, phase: 0.25 },
-    Flight { x: 16.0, drift: 3.0, pair: false, deep: true, phase: 0.15 },
-    Flight { x: -17.5, drift: -6.0, pair: false, deep: true, phase: 0.45 },
-    Flight { x: -27.0, drift: -6.5, pair: true, deep: false, phase: 0.7 },
+    Flight {
+        x: -16.5,
+        drift: -7.0,
+        pair: false,
+        deep: true,
+        phase: 0.0,
+    },
+    Flight {
+        x: 15.0,
+        drift: 2.5,
+        pair: true,
+        deep: false,
+        phase: 0.35,
+    },
+    Flight {
+        x: -26.0,
+        drift: -6.0,
+        pair: true,
+        deep: false,
+        phase: 0.6,
+    },
+    Flight {
+        x: -17.0,
+        drift: -6.5,
+        pair: true,
+        deep: true,
+        phase: 0.8,
+    },
+    Flight {
+        x: -25.5,
+        drift: -7.0,
+        pair: false,
+        deep: false,
+        phase: 0.25,
+    },
+    Flight {
+        x: 16.0,
+        drift: 3.0,
+        pair: false,
+        deep: true,
+        phase: 0.15,
+    },
+    Flight {
+        x: -17.5,
+        drift: -6.0,
+        pair: false,
+        deep: true,
+        phase: 0.45,
+    },
+    Flight {
+        x: -27.0,
+        drift: -6.5,
+        pair: true,
+        deep: false,
+        phase: 0.7,
+    },
 ];
 
 /// ♪ and ♫ (original drawings), about 10 units tall around (0, 0): tilted
@@ -226,16 +356,23 @@ pub fn notes(c: &mut Canvas, notes: &Notes, now: f64, cx: f32, bar_y: f32, clip:
         let f = &FLIGHTS[b.rem_euclid(FLIGHTS.len() as i64) as usize];
         let age = now - b as f64 * BEAT;
         let u = (age / NOTE_LIFE).clamp(0.0, 1.0) as f32;
-        let alpha = ((age / 0.08).min(1.0) as f32) * (1.0 - smooth((u - 0.55) / 0.45)) * if f.x < 0.0 { left } else { 1.0 };
+        let alpha = ((age / 0.08).min(1.0) as f32)
+            * (1.0 - smooth((u - 0.55) / 0.45))
+            * if f.x < 0.0 { left } else { 1.0 };
         if alpha <= 0.004 {
             continue;
         }
         // Off quickly, slowing as it climbs; a little sway and spin all the way.
         let rise = 1.0 - (1.0 - u).powf(1.6);
         let turn = TAU * (u * 1.1 + f.phase);
-        let at = Point::new(cx + f.x + f.drift * rise + 1.4 * turn.sin(), bar_y - NOTE_START - NOTE_RISE * rise);
+        let at = Point::new(
+            cx + f.x + f.drift * rise + 1.4 * turn.sin(),
+            bar_y - NOTE_START - NOTE_RISE * rise,
+        );
         let spin = f.x.signum() * 9.0 + 12.0 * (0.85 * turn + 0.6).sin();
-        let size = if f.deep { 0.8 } else { 0.72 } * (0.4 + 0.6 * back_out((age / POP) as f32)) * (1.0 - 0.15 * u);
+        let size = if f.deep { 0.8 } else { 0.72 }
+            * (0.4 + 0.6 * back_out((age / POP) as f32))
+            * (1.0 - 0.15 * u);
         let color = if f.deep { FOLD } else { ORANGE };
         let segs = place(glyph(f.pair), at, spin, size);
         c.with_alpha(alpha, |c| c.unthemed(|c| c.path(&segs, Some(color), None)));
@@ -246,7 +383,12 @@ pub fn notes(c: &mut Canvas, notes: &Notes, now: f64, cx: f32, bar_y: f32, clip:
 /// `segs` turned `deg` degrees clockwise, scaled by `k` and moved to `at`.
 fn place(segs: &[Seg], at: Point, deg: f32, k: f32) -> Vec<Seg> {
     let (sin, cos) = deg.to_radians().sin_cos();
-    let map = |x: f32, y: f32| (at.x + k * (x * cos - y * sin), at.y + k * (x * sin + y * cos));
+    let map = |x: f32, y: f32| {
+        (
+            at.x + k * (x * cos - y * sin),
+            at.y + k * (x * sin + y * cos),
+        )
+    };
     segs.iter()
         .map(|s| match *s {
             Seg::MoveTo(x, y) => {
@@ -321,16 +463,33 @@ pub enum TabMove {
 /// (`look`, -1 left .. 1 right of him). At night he sleeps. Returns whether he
 /// is moving by himself (the caller keeps frames coming until he stops).
 #[allow(clippy::too_many_arguments)]
-pub fn tab(c: &mut Canvas, center: Point, w: f32, clip: Rect, now: f64, moved: Option<(TabMove, f64)>, night: bool, look: Option<f32>) -> bool {
+pub fn tab(
+    c: &mut Canvas,
+    center: Point,
+    w: f32,
+    clip: Rect,
+    now: f64,
+    moved: Option<(TabMove, f64)>,
+    night: bool,
+    look: Option<f32>,
+) -> bool {
     // At night he rises asleep, without the wave.
     let arrive = if night { TAB_RISE } else { TAB_ARRIVE };
     let (frame, rise, moving) = match moved.map(|(m, at)| (m, now - at)) {
         Some((TabMove::Arrive, s)) if s < arrive => {
             let rise = 1.0 - back_out((s / TAB_RISE) as f32);
-            let frame = if night { oyen::frame(Mood::Sleep, 0.6, Input::default(), SMALL_EYES) } else { oyen::frame(Mood::Hello, s, Input::default(), SMALL_EYES) };
+            let frame = if night {
+                oyen::frame(Mood::Sleep, 0.6, Input::default(), SMALL_EYES)
+            } else {
+                oyen::frame(Mood::Hello, s, Input::default(), SMALL_EYES)
+            };
             (frame, rise, true)
         }
-        Some((TabMove::Picked, s)) if s < Mood::Happy.loop_secs() && !night => (oyen::frame(Mood::Happy, s, Input::default(), SMALL_EYES), 0.0, true),
+        Some((TabMove::Picked, s)) if s < Mood::Happy.loop_secs() && !night => (
+            oyen::frame(Mood::Happy, s, Input::default(), SMALL_EYES),
+            0.0,
+            true,
+        ),
         _ => {
             let (frame, moving) = rest(now, night, look);
             (frame, 0.0, moving)
@@ -338,7 +497,12 @@ pub fn tab(c: &mut Canvas, center: Point, w: f32, clip: Rect, now: f64, moved: O
     };
     let k = w / MARK_W;
     c.clip(clip);
-    draw(c, &frame, Point::new(center.x, center.y + 12.0 * k + rise * clip.h), k);
+    draw(
+        c,
+        &frame,
+        Point::new(center.x, center.y + 12.0 * k + rise * clip.h),
+        k,
+    );
     c.unclip();
     moving
 }
@@ -386,29 +550,69 @@ const WRITE_LINE_S: f64 = 1.6;
 /// centred on `center`. Returns whether he moves by himself (the page keeps
 /// frames coming meanwhile).
 pub fn coach(c: &mut Canvas, center: Point, w: f32, now: f64, what: Coach) -> bool {
-    let eyes = if w * c.scale() <= 32.0 { SMALL_EYES } else { 1.0 };
+    let eyes = if w * c.scale() <= 32.0 {
+        SMALL_EYES
+    } else {
+        1.0
+    };
     let (frame, moving) = match what {
         Coach::Rest { look } => rest_eyes(now, false, look, eyes),
         Coach::Talk { since } => (talk((now - since).max(0.0), eyes), true),
         Coach::Listen { level } => {
             let mut f = oyen::frame(Mood::Nulis, 0.0, Input::default(), eyes);
-            f.head = f.head.then(Affine::translation(0.0, -LISTEN_LIFT * level.clamp(0.0, 1.0) as f64));
+            f.head = f.head.then(Affine::translation(
+                0.0,
+                -LISTEN_LIFT * level.clamp(0.0, 1.0) as f64,
+            ));
             (f, false)
         }
-        Coach::Think => (oyen::frame(Mood::Think, now.rem_euclid(Mood::Think.loop_secs()), Input::default(), eyes), true),
-        Coach::Proud { since } if now - since < PROUD_S => (oyen::frame(Mood::Happy, (now - since).max(0.0), Input::default(), eyes), true),
+        Coach::Think => (
+            oyen::frame(
+                Mood::Think,
+                now.rem_euclid(Mood::Think.loop_secs()),
+                Input::default(),
+                eyes,
+            ),
+            true,
+        ),
+        Coach::Proud { since } if now - since < PROUD_S => (
+            oyen::frame(Mood::Happy, (now - since).max(0.0), Input::default(), eyes),
+            true,
+        ),
         Coach::Proud { .. } => rest_eyes(now, false, None, eyes),
         Coach::Sorry { since } => {
             let t = (now - since).max(0.0);
-            (oyen::frame(Mood::Sad, t, Input::default(), eyes), t < Mood::Sad.loop_secs())
+            (
+                oyen::frame(Mood::Sad, t, Input::default(), eyes),
+                t < Mood::Sad.loop_secs(),
+            )
         }
         Coach::Write => {
             // Across the line in 1.6 s, then back to the next one.
             let line = (now / WRITE_LINE_S).fract();
-            let pencil = Input { pencil: 2.0 * line - 1.0, ..Input::default() };
-            (oyen::frame(Mood::Nulis, now.rem_euclid(Mood::Nulis.loop_secs()), pencil, eyes), true)
+            let pencil = Input {
+                pencil: 2.0 * line - 1.0,
+                ..Input::default()
+            };
+            (
+                oyen::frame(
+                    Mood::Nulis,
+                    now.rem_euclid(Mood::Nulis.loop_secs()),
+                    pencil,
+                    eyes,
+                ),
+                true,
+            )
         }
-        Coach::Logged { since } if now - since < Mood::Tercatat.loop_secs() => (oyen::frame(Mood::Tercatat, (now - since).max(0.0), Input::default(), eyes), true),
+        Coach::Logged { since } if now - since < Mood::Tercatat.loop_secs() => (
+            oyen::frame(
+                Mood::Tercatat,
+                (now - since).max(0.0),
+                Input::default(),
+                eyes,
+            ),
+            true,
+        ),
         Coach::Logged { .. } => rest_eyes(now, false, None, eyes),
     };
     let k = w / MARK_W;
@@ -427,7 +631,11 @@ fn talk(t: f64, eyes: f64) -> Frame {
     let talking = PHRASE_S * PHRASE_ON;
     // Eased in and out at the phrase's ends, so a breath never jumps.
     let edge = (p / 0.12).min((talking - p) / 0.12).clamp(0.0, 1.0);
-    let b = if p < talking { (PI * TALK_HZ * t).sin().abs().powf(1.6) * edge } else { 0.0 };
+    let b = if p < talking {
+        (PI * TALK_HZ * t).sin().abs().powf(1.6) * edge
+    } else {
+        0.0
+    };
     let syllable = Affine::translation(0.0, -oyen::CHIN)
         .then(Affine::scale(1.0 + 0.025 * b, 1.0 - 0.045 * b))
         .then(Affine::translation(0.0, oyen::CHIN - 2.5 * b));
@@ -435,14 +643,106 @@ fn talk(t: f64, eyes: f64) -> Frame {
     f
 }
 
+// ---------------------------------------------------------------- NUMA's face
+
+/// The mood NUMA's cat wears, from the assistant's phase and the hour.
+/// Midnight to five she is asleep, whatever the phase says.
+pub fn numa_mood(phase: &crate::state::NumaPhase, hour: u8) -> Mood {
+    if hour < 5 {
+        return Mood::Sleep;
+    }
+    match phase {
+        crate::state::NumaPhase::Listening => Mood::Listen,
+        crate::state::NumaPhase::Thinking => Mood::Think,
+        crate::state::NumaPhase::Error(_) => Mood::Sad,
+        crate::state::NumaPhase::Idle => Mood::Oyen,
+    }
+}
+
+/// One frame of [`numa_mood`]'s mood (or an override like [`Mood::Wow`], for
+/// eyes locked on an approval that needs her human). `eyes` is the eye scale
+/// (the mark's small cut for small sizes). Returns the frame and whether it
+/// moves on its own (the caller keeps frames coming).
+pub fn numa_frame(mood: Mood, now: f64, look: Option<f32>, eyes: f64) -> (Frame, bool) {
+    match mood {
+        Mood::Sleep => (oyen::frame(Mood::Sleep, 0.6, Input::default(), eyes), false),
+        // Rest: a blink now and then, eyes on the cursor while it hovers.
+        Mood::Oyen => rest(now, false, look),
+        Mood::Listen => (
+            oyen::frame(
+                Mood::Listen,
+                now.rem_euclid(Mood::Listen.loop_secs()),
+                Input::default(),
+                eyes,
+            ),
+            true,
+        ),
+        Mood::Think => (
+            oyen::frame(
+                Mood::Think,
+                now.rem_euclid(Mood::Think.loop_secs()),
+                Input::default(),
+                eyes,
+            ),
+            true,
+        ),
+        Mood::Wow => (
+            oyen::frame(
+                Mood::Wow,
+                now.rem_euclid(Mood::Wow.loop_secs()),
+                Input::default(),
+                eyes,
+            ),
+            true,
+        ),
+        // The droop draws still: the phase holds until the user speaks again.
+        Mood::Sad => (oyen::frame(Mood::Sad, 0.0, Input::default(), eyes), false),
+        _ => rest(now, false, look),
+    }
+}
+
+/// NUMA's face on her page: the full head `w` DIPs wide, head and ears
+/// centred on `center`. `waiting`: a gateway run needs approval — her eyes
+/// lock forward (the Wow mood) so it cannot be missed. Returns whether she
+/// moves by herself (the page keeps frames coming meanwhile).
+pub fn numa_face(
+    c: &mut Canvas,
+    center: Point,
+    w: f32,
+    now: f64,
+    phase: &crate::state::NumaPhase,
+    look: Option<f32>,
+    waiting: bool,
+    hour: u8,
+) -> bool {
+    let eyes = if w * c.scale() <= 32.0 {
+        SMALL_EYES
+    } else {
+        1.0
+    };
+    let mood = if waiting && matches!(phase, crate::state::NumaPhase::Idle) {
+        Mood::Wow
+    } else {
+        numa_mood(phase, hour)
+    };
+    let (frame, moving) = numa_frame(mood, now, look, eyes);
+    let k = w / MARK_W;
+    draw(c, &frame, Point::new(center.x, center.y + 12.0 * k), k);
+    moving
+}
+
 /// Oyen whole and still, as on the Oyenza mark: his head `w` DIPs wide, head
 /// and ears centred on `center`. The mark fits a 108-unit square whose
 /// middle is 12 units above its origin.
 fn badge(c: &mut Canvas, center: Point, w: f32) {
     let k = w / MARK_W;
-    let eyes = if w * c.scale() <= 32.0 { SMALL_EYES } else { 1.0 };
+    let eyes = if w * c.scale() <= 32.0 {
+        SMALL_EYES
+    } else {
+        1.0
+    };
     let frame = oyen::frame(Mood::Oyen, 0.0, Input::default(), eyes);
-    draw(c, &frame, Point::new(center.x, center.y + 12.0 * k), k);
+    draw_mark(c, &frame, Point::new(center.x, center.y + 12.0 * k), k);
 }
 
 /// The Oyenza app's icon, `size` DIPs square and centred on `center`: Oyen on
@@ -452,19 +752,40 @@ fn badge(c: &mut Canvas, center: Point, w: f32) {
 pub fn app_icon(c: &mut Canvas, center: Point, size: f32) {
     let tile = Rect::new(center.x - size / 2.0, center.y - size / 2.0, size, size);
     c.unthemed(|c| c.fill_rrect(tile, size * 0.2237, ICON_TILE));
-    badge(c, Point::new(center.x, center.y + 0.013 * size), 0.617 * size);
+    badge(
+        c,
+        Point::new(center.x, center.y + 0.013 * size),
+        0.617 * size,
+    );
 }
 
 /// One frame of the face, the mark's (0, 0) at `origin`, `k` DIPs per unit.
 /// Same layering as the app: a raised ear tip behind the head, a folded one
-/// on it, then eyes and extras. Oyen keeps his own colours in every theme.
+/// on it, then eyes and extras. The living cat wears the calico coat in every
+/// theme; the plain brand mark (`badge`) keeps Oyen's orange.
 fn draw(c: &mut Canvas, f: &Frame, origin: Point, k: f32) {
     let look = c.look();
-    let float = if look.light { look.ink.with_alpha(FLOAT_ON_LIGHT) } else { FLOAT };
-    c.unthemed(|c| draw_face(c, f, origin, k, float));
+    let float = if look.light {
+        look.ink.with_alpha(FLOAT_ON_LIGHT)
+    } else {
+        FLOAT
+    };
+    c.unthemed(|c| draw_face(c, f, origin, k, float, true));
 }
 
-fn draw_face(c: &mut Canvas, f: &Frame, origin: Point, k: f32, float: Color) {
+/// The brand mark: the same face, always in Oyen's own orange (the app icon,
+/// the Oyenza mark) — never in the calico coat.
+fn draw_mark(c: &mut Canvas, f: &Frame, origin: Point, k: f32) {
+    let look = c.look();
+    let float = if look.light {
+        look.ink.with_alpha(FLOAT_ON_LIGHT)
+    } else {
+        FLOAT
+    };
+    c.unthemed(|c| draw_face(c, f, origin, k, float, false));
+}
+
+fn draw_face(c: &mut Canvas, f: &Frame, origin: Point, k: f32, float: Color, calico: bool) {
     let h = f.head;
     let map = |p: oyen::Point| {
         let q = h.apply(p);
@@ -472,11 +793,28 @@ fn draw_face(c: &mut Canvas, f: &Frame, origin: Point, k: f32, float: Color) {
     };
     // Strokes scale with the head (it squashes a few percent when bouncing).
     let stroke_k = k * ((h.a * h.d - h.b * h.c).abs().sqrt() as f32);
-    let tip = if f.tip.faces_up { ORANGE } else { FOLD };
+    // The fold is the left ear: a calico's dark patch covers it whole, so
+    // the ear reads charcoal rather than showing the mark's burnt orange.
+    let tip = if calico {
+        CHARCOAL
+    } else if f.tip.faces_up {
+        GINGER
+    } else {
+        FOLD
+    };
     if f.tip.behind_head {
         c.path(&segs(&f.tip.path, &map), Some(tip), None);
     }
-    c.path(&segs(oyen::head_path(), &map), Some(ORANGE), None);
+    // The coat: cream base, then the two patches clipped to the head's own
+    // outline so they fit exactly however the head squashes or tilts.
+    let coat = if calico { CREAM } else { ORANGE };
+    c.path(&segs(oyen::head_path(), &map), Some(coat), None);
+    if calico {
+        c.push_outline_mask(&segs(oyen::head_path(), &map));
+        c.path(&patch_segs(&patches()[0], &map), Some(GINGER), None);
+        c.path(&patch_segs(&patches()[1], &map), Some(CHARCOAL), None);
+        c.pop_shape_mask();
+    }
     if !f.tip.behind_head {
         c.path(&segs(&f.tip.path, &map), Some(tip), None);
     }
@@ -532,6 +870,38 @@ mod tests {
             notes.step(t, playing);
             t += 1.0 / 60.0;
         }
+    }
+
+    // NUMA's cat wears the phase in her eyes — and the clock over it:
+    // midnight to five she sleeps, whatever the assistant is doing.
+    #[test]
+    fn numa_mood_follows_phase_and_night() {
+        use crate::state::NumaPhase;
+        assert_eq!(numa_mood(&NumaPhase::Idle, 14), Mood::Oyen);
+        assert_eq!(numa_mood(&NumaPhase::Listening, 14), Mood::Listen);
+        assert_eq!(numa_mood(&NumaPhase::Thinking, 14), Mood::Think);
+        assert_eq!(numa_mood(&NumaPhase::Error("x".into()), 14), Mood::Sad);
+        // Night wins over every phase.
+        assert_eq!(numa_mood(&NumaPhase::Listening, 3), Mood::Sleep);
+        assert_eq!(numa_mood(&NumaPhase::Thinking, 0), Mood::Sleep);
+        // Five in the morning she is awake again.
+        assert_eq!(numa_mood(&NumaPhase::Idle, 5), Mood::Oyen);
+    }
+
+    #[test]
+    fn numa_frame_sleeps_still_at_night_and_moves_while_listening() {
+        // Sleep draws one still frame: no breathing frames at night.
+        let (_, moving) = numa_frame(Mood::Sleep, 123.4, None, SMALL_EYES);
+        assert!(!moving);
+        // Listening keeps frames coming (the loop animates).
+        let (_, moving) = numa_frame(Mood::Listen, 10.0, None, SMALL_EYES);
+        assert!(moving);
+        // Rest with no cursor: still between blinks, moving inside one
+        // (the cycle blinks in its first 0.4 s of every 6.5 s).
+        let (_, moving) = numa_frame(Mood::Oyen, 10.0, None, SMALL_EYES);
+        assert!(!moving);
+        let (_, moving) = numa_frame(Mood::Oyen, 6.7, None, SMALL_EYES);
+        assert!(moving);
     }
 
     #[test]

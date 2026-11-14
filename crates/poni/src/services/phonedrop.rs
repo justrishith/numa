@@ -10,12 +10,15 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use windows::Win32::Foundation::{ERROR_BUFFER_OVERFLOW, NO_ERROR};
 use windows::Win32::NetworkManagement::IpHelper::{
-    GetAdaptersAddresses, GAA_FLAG_INCLUDE_GATEWAYS, GAA_FLAG_SKIP_ANYCAST, GAA_FLAG_SKIP_DNS_SERVER, GAA_FLAG_SKIP_MULTICAST, IP_ADAPTER_ADDRESSES_LH,
+    GetAdaptersAddresses, GAA_FLAG_INCLUDE_GATEWAYS, GAA_FLAG_SKIP_ANYCAST,
+    GAA_FLAG_SKIP_DNS_SERVER, GAA_FLAG_SKIP_MULTICAST, IP_ADAPTER_ADDRESSES_LH,
     IP_ADAPTER_UNICAST_ADDRESS_LH,
 };
 use windows::Win32::NetworkManagement::Ndis::IfOperStatusUp;
 use windows::Win32::Networking::WinSock::{AF_INET, SOCKADDR_IN};
-use windows::Win32::Security::Cryptography::{BCryptGenRandom, BCRYPT_ALG_HANDLE, BCRYPT_USE_SYSTEM_PREFERRED_RNG};
+use windows::Win32::Security::Cryptography::{
+    BCryptGenRandom, BCRYPT_ALG_HANDLE, BCRYPT_USE_SYSTEM_PREFERRED_RNG,
+};
 
 /// Tried first so the address stays the same from one session to the next;
 /// any free port when it's taken.
@@ -32,17 +35,25 @@ impl PhoneDrop {
     /// Start serving and return the link for the QR code. `Err` holds a
     /// sentence for the island.
     pub fn start(sink: EventSink, offer: Vec<PathBuf>) -> Result<(PhoneDrop, String), String> {
-        let ip = lan_ipv4().ok_or_else(|| "This PC isn't on a Wi-Fi or wired network.".to_string())?;
+        let ip =
+            lan_ipv4().ok_or_else(|| "This PC isn't on a Wi-Fi or wired network.".to_string())?;
         let inbox = crate::paths::phone_inbox_dir();
-        std::fs::create_dir_all(&inbox).map_err(|e| format!("Couldn't make the folder {} ({e}).", inbox.display()))?;
-        let secret = random_token().ok_or_else(|| "Windows couldn't make a secret link.".to_string())?;
+        std::fs::create_dir_all(&inbox)
+            .map_err(|e| format!("Couldn't make the folder {} ({e}).", inbox.display()))?;
+        let secret =
+            random_token().ok_or_else(|| "Windows couldn't make a secret link.".to_string())?;
         let sink = Mutex::new(sink);
         let send: Arc<dyn Fn(poni_core::phonedrop::Event) + Send + Sync> = Arc::new(move |e| {
             if let Ok(s) = sink.lock() {
                 s.send(AppEvent::Phone(e));
             }
         });
-        let cfg = Config::new(SocketAddr::new(IpAddr::V4(ip), PORT), secret, pc_name(), inbox.clone());
+        let cfg = Config::new(
+            SocketAddr::new(IpAddr::V4(ip), PORT),
+            secret,
+            pc_name(),
+            inbox.clone(),
+        );
         let first = send.clone();
         let server = match Server::start(cfg.clone(), move |e| first(e)) {
             Ok(s) => s,
@@ -51,12 +62,17 @@ impl PhoneDrop {
                 let mut cfg = cfg;
                 cfg.bind.set_port(0);
                 let again = send.clone();
-                Server::start(cfg, move |e| again(e)).map_err(|e| format!("Couldn't open a network port ({e})."))?
+                Server::start(cfg, move |e| again(e))
+                    .map_err(|e| format!("Couldn't open a network port ({e})."))?
             }
         };
         server.set_offer(offer);
         // Never log the link: it carries the secret.
-        crate::pinfo!("phone drop: listening on {}, saving to {}", server.addr(), inbox.display());
+        crate::pinfo!(
+            "phone drop: listening on {}, saving to {}",
+            server.addr(),
+            inbox.display()
+        );
         let url = server.url();
         Ok((PhoneDrop { server }, url))
     }
@@ -88,7 +104,13 @@ impl PhoneDrop {
 /// 16 bytes from the system RNG as an upper-case base32 secret.
 fn random_token() -> Option<String> {
     let mut b = [0u8; 16];
-    let status = unsafe { BCryptGenRandom(BCRYPT_ALG_HANDLE::default(), &mut b, BCRYPT_USE_SYSTEM_PREFERRED_RNG) };
+    let status = unsafe {
+        BCryptGenRandom(
+            BCRYPT_ALG_HANDLE::default(),
+            &mut b,
+            BCRYPT_USE_SYSTEM_PREFERRED_RNG,
+        )
+    };
     status.is_ok().then(|| token::base32(&b))
 }
 
@@ -102,14 +124,19 @@ pub(crate) fn pc_name() -> String {
     }
     if len > 0 {
         let mut buf = vec![0u16; len as usize];
-        if unsafe { GetComputerNameExW(ComputerNameDnsHostname, PWSTR(buf.as_mut_ptr()), &mut len) }.is_ok() {
+        if unsafe { GetComputerNameExW(ComputerNameDnsHostname, PWSTR(buf.as_mut_ptr()), &mut len) }
+            .is_ok()
+        {
             let name = String::from_utf16_lossy(&buf[..(len as usize).min(buf.len())]);
             if !name.trim().is_empty() {
                 return name;
             }
         }
     }
-    std::env::var("COMPUTERNAME").ok().filter(|s| !s.trim().is_empty()).unwrap_or_else(|| "your PC".into())
+    std::env::var("COMPUTERNAME")
+        .ok()
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| "your PC".into())
 }
 
 /// The address a phone on the same Wi-Fi can reach: an IPv4 address of an
@@ -153,13 +180,17 @@ fn rank(if_type: u32, gateway: bool, ip: Ipv4Addr) -> i32 {
 
 /// (IfType, has a gateway, address) for every IPv4 address of every adapter that is up.
 fn adapter_ipv4s() -> Vec<(u32, bool, Ipv4Addr)> {
-    let flags = GAA_FLAG_INCLUDE_GATEWAYS | GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST | GAA_FLAG_SKIP_DNS_SERVER;
+    let flags = GAA_FLAG_INCLUDE_GATEWAYS
+        | GAA_FLAG_SKIP_ANYCAST
+        | GAA_FLAG_SKIP_MULTICAST
+        | GAA_FLAG_SKIP_DNS_SERVER;
     let mut size: u32 = 16 * 1024;
     for _ in 0..4 {
         // u64 storage keeps the structures 8-byte aligned.
         let mut buf = vec![0u64; (size as usize).div_ceil(8)];
         let head = buf.as_mut_ptr() as *mut IP_ADAPTER_ADDRESSES_LH;
-        let r = unsafe { GetAdaptersAddresses(AF_INET.0 as u32, flags, None, Some(head), &mut size) };
+        let r =
+            unsafe { GetAdaptersAddresses(AF_INET.0 as u32, flags, None, Some(head), &mut size) };
         if r == ERROR_BUFFER_OVERFLOW.0 {
             continue;
         }
@@ -196,7 +227,11 @@ fn adapter_ipv4s() -> Vec<(u32, bool, Ipv4Addr)> {
 /// ranking as [`lan_ipv4`]): the direct link of a paired phone offers each
 /// one. Up to three, no loopback, link-local or CGNAT/Tailscale addresses.
 pub(crate) fn lan_addresses() -> Vec<IpAddr> {
-    let mut ranked: Vec<(i32, Ipv4Addr)> = adapter_ipv4s().into_iter().map(|(t, g, ip)| (rank(t, g, ip), ip)).filter(|(s, _)| *s > 0).collect();
+    let mut ranked: Vec<(i32, Ipv4Addr)> = adapter_ipv4s()
+        .into_iter()
+        .map(|(t, g, ip)| (rank(t, g, ip), ip))
+        .filter(|(s, _)| *s > 0)
+        .collect();
     ranked.sort_by_key(|a| std::cmp::Reverse(a.0));
     let mut out: Vec<IpAddr> = Vec::new();
     for (_, ip) in ranked {

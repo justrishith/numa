@@ -47,7 +47,13 @@ pub fn height(_st: &AppState) -> f32 {
 /// paused), "Opening the recorder" giving up, an error going away.
 pub fn next_wake(st: &AppState) -> Option<f64> {
     let mut next = st.rec_next_second().map(|b| st.now + b);
-    for t in [Some(st.rec.opening_until), st.rec.error.as_ref().map(|e| e.1)].into_iter().flatten() {
+    for t in [
+        Some(st.rec.opening_until),
+        st.rec.error.as_ref().map(|e| e.1),
+    ]
+    .into_iter()
+    .flatten()
+    {
         if t > st.now {
             next = Some(next.map_or(t, |n| n.min(t)));
         }
@@ -77,17 +83,40 @@ fn draw_choices(ui: &mut Ui, st: &mut AppState, area: Rect) {
     let r = Rect::new(area.x, ay, w, PILL_REGULAR);
     if opening {
         disabled_pill(ui, r, label, Icon::Record);
-    } else if ui.pill(wid("record.start"), r, label, Some(Icon::Record), PillStyle::Primary(palette::RED)).clicked {
+    } else if ui
+        .pill(
+            wid("record.start"),
+            r,
+            label,
+            Some(Icon::Record),
+            PillStyle::Primary(palette::RED),
+        )
+        .clicked
+    {
         st.cmd(Command::Record);
     }
     let (status, color) = match &st.rec.error {
         Some((text, until)) if st.now < *until => (text.clone(), palette::ORANGE),
-        _ if opening => ("Opening the recorder\u{2026}".to_string(), palette::TEXT_DIM),
-        _ => (target_hint(st.settings.record.target).to_string(), palette::TEXT_DIM),
+        _ if opening => (
+            "Opening the recorder\u{2026}".to_string(),
+            palette::TEXT_DIM,
+        ),
+        _ => (
+            target_hint(st.settings.record.target).to_string(),
+            palette::TEXT_DIM,
+        ),
     };
     let sx = r.right() + 14.0;
-    ui.c.text(&status, Rect::new(sx, ay, (area.right() - sx).max(0.0), PILL_REGULAR), &TextStyle::body().color(color));
-    foot(ui, area, "Oyenza Studio Recorder makes the video. The island stays out of it.");
+    ui.c.text(
+        &status,
+        Rect::new(sx, ay, (area.right() - sx).max(0.0), PILL_REGULAR),
+        &TextStyle::body().color(color),
+    );
+    foot(
+        ui,
+        area,
+        "Oyenza Studio Recorder makes the video. The island stays out of it.",
+    );
 }
 
 fn target_hint(t: Target) -> &'static str {
@@ -114,7 +143,12 @@ fn draw_targets(ui: &mut Ui, st: &mut AppState, x0: f32, y: f32) -> f32 {
     let cells: Vec<(Target, Rect)> = Target::ALL
         .into_iter()
         .map(|t| {
-            let w = (CELL_PAD + CELL_ICON + ICON_GAP + ui.c.measure(t.label(), &label_st, 200.0).0 + CELL_PAD).ceil();
+            let w = (CELL_PAD
+                + CELL_ICON
+                + ICON_GAP
+                + ui.c.measure(t.label(), &label_st, 200.0).0
+                + CELL_PAD)
+                .ceil();
             let r = Rect::new(x, y + SEG_INSET, w, inner_h);
             x += w;
             (t, r)
@@ -129,21 +163,36 @@ fn draw_targets(ui: &mut Ui, st: &mut AppState, x0: f32, y: f32) -> f32 {
             ui.c.fill_rrect(*r, inner_h / 2.0, Color::white(0.16));
             palette::TEXT
         } else {
-            let resp = ui.button(wid_n("record.target", i as u64), Rect::new(r.x, y, r.w, ROW_H));
+            let resp = ui.button(
+                wid_n("record.target", i as u64),
+                Rect::new(r.x, y, r.w, ROW_H),
+            );
             if resp.clicked {
                 choice = Some(*t);
             }
             if resp.pressed || resp.hovered {
-                ui.c.fill_rrect(*r, inner_h / 2.0, Color::white(if resp.pressed { 0.10 } else { 0.06 }));
+                ui.c.fill_rrect(
+                    *r,
+                    inner_h / 2.0,
+                    Color::white(if resp.pressed { 0.10 } else { 0.06 }),
+                );
                 palette::TEXT
             } else {
                 palette::TEXT_DIM
             }
         };
         let ix = r.x + CELL_PAD;
-        ui.c.icon(target_icon(*t), Rect::new(ix, r.center().y - CELL_ICON / 2.0, CELL_ICON, CELL_ICON), color);
+        ui.c.icon(
+            target_icon(*t),
+            Rect::new(ix, r.center().y - CELL_ICON / 2.0, CELL_ICON, CELL_ICON),
+            color,
+        );
         let tx = ix + CELL_ICON + ICON_GAP;
-        ui.c.text(t.label(), Rect::new(tx, y, (r.right() - tx).max(0.0), ROW_H), &label_st.color(color));
+        ui.c.text(
+            t.label(),
+            Rect::new(tx, y, (r.right() - tx).max(0.0), ROW_H),
+            &label_st.color(color),
+        );
     }
     if let Some(t) = choice {
         st.settings.record.target = t;
@@ -156,9 +205,19 @@ fn draw_targets(ui: &mut Ui, st: &mut AppState, x0: f32, y: f32) -> f32 {
 /// only when the labels don't fit.
 fn draw_inputs(ui: &mut Ui, st: &mut AppState, x0: f32, x1: f32, y: f32) {
     let rec = st.settings.record;
-    let chips = [(Icon::Camera, "Camera", rec.camera), (Icon::Mic, "Mic", rec.microphone), (Icon::Volume, "Sound", rec.system_audio)];
+    let chips = [
+        (Icon::Camera, "Camera", rec.camera),
+        (Icon::Mic, "Mic", rec.microphone),
+        (Icon::Volume, "Sound", rec.system_audio),
+    ];
     let label_st = TextStyle::body().weight(Weight::Semibold);
-    let full: Vec<f32> = chips.iter().map(|(_, l, _)| (CELL_PAD + CELL_ICON + ICON_GAP + ui.c.measure(l, &label_st, 200.0).0 + CELL_PAD).ceil()).collect();
+    let full: Vec<f32> = chips
+        .iter()
+        .map(|(_, l, _)| {
+            (CELL_PAD + CELL_ICON + ICON_GAP + ui.c.measure(l, &label_st, 200.0).0 + CELL_PAD)
+                .ceil()
+        })
+        .collect();
     let labels = full.iter().sum::<f32>() + CHIP_GAP * 2.0 <= x1 - x0;
     let widths: Vec<f32> = if labels { full } else { vec![ROW_H + 8.0; 3] };
     let mut x = x1 - widths.iter().sum::<f32>() - CHIP_GAP * 2.0;
@@ -178,17 +237,34 @@ fn draw_inputs(ui: &mut Ui, st: &mut AppState, x0: f32, x1: f32, y: f32) {
             (false, _, false) => palette::SURFACE,
         };
         ui.c.fill_rrect(r, ROW_H / 2.0, fill);
-        let color = if *on { palette::TEXT } else { palette::TEXT_DIM };
-        let ix = if labels { r.x + CELL_PAD } else { r.center().x - CELL_ICON / 2.0 };
+        let color = if *on {
+            palette::TEXT
+        } else {
+            palette::TEXT_DIM
+        };
+        let ix = if labels {
+            r.x + CELL_PAD
+        } else {
+            r.center().x - CELL_ICON / 2.0
+        };
         let ir = Rect::new(ix, r.center().y - CELL_ICON / 2.0, CELL_ICON, CELL_ICON);
         ui.c.icon(*icon, ir, color);
         if !*on {
             // Off: struck through, as Windows marks a muted microphone.
-            ui.c.line(Point::new(ir.x, ir.bottom()), Point::new(ir.right(), ir.y), color, 1.6);
+            ui.c.line(
+                Point::new(ir.x, ir.bottom()),
+                Point::new(ir.right(), ir.y),
+                color,
+                1.6,
+            );
         }
         if labels {
             let tx = ix + CELL_ICON + ICON_GAP;
-            ui.c.text(label, Rect::new(tx, y, (r.right() - tx).max(0.0), ROW_H), &label_st.color(color));
+            ui.c.text(
+                label,
+                Rect::new(tx, y, (r.right() - tx).max(0.0), ROW_H),
+                &label_st.color(color),
+            );
         }
     }
     if let Some(i) = flip {
@@ -213,13 +289,28 @@ fn draw_recording(ui: &mut Ui, st: &mut AppState, area: Rect) {
     let dot = Point::new(area.x + DOT_R + 1.0, cy);
     match phase {
         Phase::Recording => ui.c.fill_circle(dot, DOT_R, palette::RED),
-        Phase::Paused => ui.c.icon(Icon::Pause, Rect::from_center(dot, 14.0, 14.0), palette::TEXT_DIM),
+        Phase::Paused => ui.c.icon(
+            Icon::Pause,
+            Rect::from_center(dot, 14.0, 14.0),
+            palette::TEXT_DIM,
+        ),
         _ => ui.c.stroke_circle(dot, DOT_R - 0.8, palette::TEXT_DIM, 1.6),
     }
     let time = fmt_length(st.rec_elapsed());
-    let time_color = if phase == Phase::Recording { palette::TEXT } else { palette::TEXT_DIM };
-    let time_st = TextStyle::new(ts::DISPLAY).weight(Weight::Semibold).tabular().color(time_color);
-    ui.c.text(&time, Rect::new(area.x + TIME_X, y, 160.0, time_h), &time_st);
+    let time_color = if phase == Phase::Recording {
+        palette::TEXT
+    } else {
+        palette::TEXT_DIM
+    };
+    let time_st = TextStyle::new(ts::DISPLAY)
+        .weight(Weight::Semibold)
+        .tabular()
+        .color(time_color);
+    ui.c.text(
+        &time,
+        Rect::new(area.x + TIME_X, y, 160.0, time_h),
+        &time_st,
+    );
     let status = match phase {
         Phase::Starting => match st.settings.record.target {
             Target::Screen => "Starting\u{2026}",
@@ -231,7 +322,11 @@ fn draw_recording(ui: &mut Ui, st: &mut AppState, area: Rect) {
         Phase::Stopping => "Saving\u{2026}",
         Phase::Idle => "",
     };
-    ui.c.text(status, Rect::new(area.x + TIME_X, y + time_h + 2.0, 240.0, 18.0), &TextStyle::footnote().color(palette::TEXT_DIM));
+    ui.c.text(
+        status,
+        Rect::new(area.x + TIME_X, y + time_h + 2.0, 240.0, 18.0),
+        &TextStyle::footnote().color(palette::TEXT_DIM),
+    );
 
     // Stop on the right, Pause or Resume before it.
     let stop = "Stop";
@@ -240,18 +335,47 @@ fn draw_recording(ui: &mut Ui, st: &mut AppState, area: Rect) {
     let busy = matches!(phase, Phase::Starting | Phase::Stopping);
     if phase == Phase::Stopping {
         disabled_pill(ui, stop_r, stop, Icon::Stop);
-    } else if ui.pill(wid("record.stop"), stop_r, stop, Some(Icon::Stop), PillStyle::Primary(palette::RED)).clicked {
+    } else if ui
+        .pill(
+            wid("record.stop"),
+            stop_r,
+            stop,
+            Some(Icon::Stop),
+            PillStyle::Primary(palette::RED),
+        )
+        .clicked
+    {
         st.cmd(Command::RecordStop);
     }
-    let (label, icon, cmd) = if paused { ("Resume", Icon::Play, Command::RecordResume) } else { ("Pause", Icon::Pause, Command::RecordPause) };
-    let pw = ["Pause", "Resume"].iter().map(|l| ui.pill_width(l, true, false)).fold(0.0, f32::max);
+    let (label, icon, cmd) = if paused {
+        ("Resume", Icon::Play, Command::RecordResume)
+    } else {
+        ("Pause", Icon::Pause, Command::RecordPause)
+    };
+    let pw = ["Pause", "Resume"]
+        .iter()
+        .map(|l| ui.pill_width(l, true, false))
+        .fold(0.0, f32::max);
     let pause_r = Rect::new(stop_r.x - PILL_GAP - pw, stop_r.y, pw, PILL_REGULAR);
     if busy {
         disabled_pill(ui, pause_r, label, icon);
-    } else if ui.pill(wid("record.pause"), pause_r, label, Some(icon), PillStyle::Neutral).clicked {
+    } else if ui
+        .pill(
+            wid("record.pause"),
+            pause_r,
+            label,
+            Some(icon),
+            PillStyle::Neutral,
+        )
+        .clicked
+    {
         st.cmd(cmd);
     }
-    foot(ui, area, "Stop saves it and opens the recorder's editor. The island stays out of the video.");
+    foot(
+        ui,
+        area,
+        "Stop saves it and opens the recorder's editor. The island stays out of the video.",
+    );
 }
 
 fn foot(ui: &mut Ui, area: Rect, text: &str) {
@@ -262,11 +386,17 @@ fn foot(ui: &mut Ui, area: Rect, text: &str) {
 /// A pill that can't be pressed right now (Focus's look for Reset while idle).
 fn disabled_pill(ui: &mut Ui, r: Rect, label: &str, icon: Icon) {
     ui.c.fill_rrect(r, r.h / 2.0, palette::SURFACE.mul_alpha(0.6));
-    let st = TextStyle::body().weight(Weight::Semibold).color(palette::DISABLED);
+    let st = TextStyle::body()
+        .weight(Weight::Semibold)
+        .color(palette::DISABLED);
     let tw = ui.c.measure(label, &st, r.w).0;
     let (isz, gap) = (14.0, 6.0);
     let x = r.x + (r.w - isz - gap - tw) / 2.0;
-    ui.c.icon(icon, Rect::new(x, r.center().y - isz / 2.0, isz, isz), palette::DISABLED);
+    ui.c.icon(
+        icon,
+        Rect::new(x, r.center().y - isz / 2.0, isz, isz),
+        palette::DISABLED,
+    );
     ui.c.text(label, Rect::new(x + isz + gap, r.y, tw + 2.0, r.h), &st);
 }
 
@@ -278,7 +408,13 @@ mod tests {
     use poni_core::store::Store;
 
     fn state() -> AppState {
-        let mut st = AppState::new(Settings::default(), Store { recorder_island: true, ..Store::default() });
+        let mut st = AppState::new(
+            Settings::default(),
+            Store {
+                recorder_island: true,
+                ..Store::default()
+            },
+        );
         st.recorder = true;
         st.now = 100.0;
         st
@@ -292,11 +428,18 @@ mod tests {
         st.rec.elapsed_ms = 41_250;
         st.rec.at = 99.5;
         let wake = next_wake(&st).unwrap();
-        assert!((wake - (st.now + 0.25)).abs() < 1e-6, "41.75 s in: the next second is a quarter away ({wake})");
+        assert!(
+            (wake - (st.now + 0.25)).abs() < 1e-6,
+            "41.75 s in: the next second is a quarter away ({wake})"
+        );
         st.rec.phase = Some(Phase::Paused);
         assert_eq!(next_wake(&st), None, "paused: the time stands still");
         st.rec.opening_until = 104.0;
-        assert_eq!(next_wake(&st), Some(104.0), "Opening the recorder gives up then");
+        assert_eq!(
+            next_wake(&st),
+            Some(104.0),
+            "Opening the recorder gives up then"
+        );
     }
 
     #[test]

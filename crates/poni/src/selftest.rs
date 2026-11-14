@@ -40,39 +40,45 @@ use crate::pages::{self, PageKind};
 use crate::paths;
 use crate::png;
 use crate::state::{
-    AgendaState, AppState, CityFile, FpsAccess, GameState, Hud, HudKind, InlineAction, Locate, LyricsState, LyricsStatus, MediaSession, Notice, NoticeAction, OyenzaLink,
-    OyenzaState, PhoneAsk, PairedPhone, PhoneDrop, PhoneTransfer, PhoneView, PowerState, PrayerState, SysStats, VolumeState,
+    AgendaState, AppState, CityFile, FpsAccess, GameState, Hud, HudKind, InlineAction, Locate,
+    LyricsState, LyricsStatus, MediaSession, Notice, NoticeAction, OyenzaLink, OyenzaState,
+    PairedPhone, PhoneAsk, PhoneDrop, PhoneTransfer, PhoneView, PowerState, PrayerState, SysStats,
+    VolumeState,
 };
 use crate::ui::wid;
-use poni_core::addons::{Status as AddonStatus, DOWNLOADER, HEALTH, IELTS, JAPANESE_READINGS, MEETING_NOTES, NOTIFICATIONS, PRAYER_TIMES, SCRIPT_READER, STOCKS, SYSTEM};
-use poni_core::notifications::NotificationSettings;
+use poni_core::addons::{
+    Status as AddonStatus, DOWNLOADER, HEALTH, IELTS, JAPANESE_READINGS, MEETING_NOTES,
+    NOTIFICATIONS, PRAYER_TIMES, SCRIPT_READER, STOCKS, SYSTEM,
+};
+use poni_core::frames::FrameRate;
 use poni_core::geom::{palette, Color, Point, Rect};
 use poni_core::health::{HealthDay, HealthSnapshot, HealthSource};
 use poni_core::lrc::{parse_lrc, Lyrics};
+use poni_core::notifications::NotificationSettings;
 use poni_core::oyenza::{Activity, Bill, Day, DayPick, Saved, Seen, Txn, WalletRef};
 use poni_core::phonedrop::QrMatrix;
-use poni_core::prayer::{PlaceList, World};
 use poni_core::pomodoro::{Phase as PomoPhase, RunState};
 use poni_core::power::{PowerReading, PsuReading, Rail};
+use poni_core::prayer::{PlaceList, World};
 use poni_core::settings::{IdleStyle, Theme};
 use poni_core::shelf::ShelfItem;
-use poni_core::frames::FrameRate;
 use poni_core::sysmon::{
-    AppUse, BatteryReading, CoreKind, CoreLoad, CpuReading, DiskActivity, Drive, GpuReading, MemoryReading, Module, Monitor, NetReading, Reading,
-    Series, HISTORY_LEN,
+    AppUse, BatteryReading, CoreKind, CoreLoad, CpuReading, DiskActivity, Drive, GpuReading,
+    MemoryReading, Module, Monitor, NetReading, Reading, Series, HISTORY_LEN,
 };
 use poni_core::timeline::Timeline;
 use serde::Serialize;
 use std::cell::Cell;
 use std::fs;
+use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
-use std::path::PathBuf;
 use std::thread::JoinHandle;
 use std::time::Instant;
 use windows::Win32::Foundation::{HWND, RECT};
 use windows::Win32::UI::WindowsAndMessaging::{
-    GetWindowLongPtrW, GetWindowRect, IsWindowVisible, GWL_EXSTYLE, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST,
+    GetWindowLongPtrW, GetWindowRect, IsWindowVisible, GWL_EXSTYLE, WS_EX_LAYERED,
+    WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST,
 };
 
 // ---------------------------------------------------------------- timing
@@ -100,7 +106,7 @@ const CLICK_TIMEOUT: f64 = 1.5;
 /// 3.5 s, the Classic runs' IELTS turn of about 26 s and notes turn of about
 /// 5 s, which the deadline leaves out, or 40 s more for the animation runs,
 /// stays under it), the Wine runner 180 s.
-const SCENE_DEADLINE: f64 = 90.0;
+const SCENE_DEADLINE: f64 = 92.0;
 /// Give up waiting for PNG writers at this point: 3.5 s after the scene
 /// deadline, so the last scenes' pictures get their time however long the
 /// run took. (It was a fixed 43.5 s, left behind when SCENE_DEADLINE went
@@ -220,8 +226,16 @@ const PAIR_URL: &str = "https://drop.oyenza.com/p#k=AAECAwQFBgcICQoLDA0ODw";
 fn fake_paired(scene: Scene, unix: i64) -> Vec<PairedPhone> {
     match scene {
         Scene::ShelfPaired | Scene::ShelfPairedPhones | Scene::PairedNotice => vec![
-            PairedPhone { room: "geDM0jEhk4eiOz_li-FtORW2YlPBbebr7NsHjLkHI_4".into(), name: "Pixel 10".into(), seen: unix - 5 * 60 },
-            PairedPhone { room: "ZmFrZS1yb29tLWZvci10aGUtc2VsZi10ZXN0LWlwaG9u".into(), name: "iPhone".into(), seen: unix - 2 * 86_400 - 3600 },
+            PairedPhone {
+                room: "geDM0jEhk4eiOz_li-FtORW2YlPBbebr7NsHjLkHI_4".into(),
+                name: "Pixel 10".into(),
+                seen: unix - 5 * 60,
+            },
+            PairedPhone {
+                room: "ZmFrZS1yb29tLWZvci10aGUtc2VsZi10ZXN0LWlwaG9u".into(),
+                name: "iPhone".into(),
+                seen: unix - 2 * 86_400 - 3600,
+            },
         ],
         _ => Vec::new(),
     }
@@ -229,42 +243,92 @@ fn fake_paired(scene: Scene, unix: i64) -> Vec<PairedPhone> {
 
 /// Phone drop as each phone scene shows it (None = closed).
 fn fake_phone(scene: Scene, now: f64) -> Option<PhoneDrop> {
-    let ready = PhoneDrop { url: PHONE_URL.into(), qr: QrMatrix::encode(PHONE_URL), ..Default::default() };
-    let files = vec![("IMG_2041.HEIC".to_string(), 2_480_112u64), ("IMG_2042.HEIC".to_string(), 2_391_870), ("Harbor walk.mov".to_string(), 18_402_331)];
+    let ready = PhoneDrop {
+        url: PHONE_URL.into(),
+        qr: QrMatrix::encode(PHONE_URL),
+        ..Default::default()
+    };
+    let files = vec![
+        ("IMG_2041.HEIC".to_string(), 2_480_112u64),
+        ("IMG_2042.HEIC".to_string(), 2_391_870),
+        ("Harbor walk.mov".to_string(), 18_402_331),
+    ];
     let total = files.iter().map(|f| f.1).sum();
     match scene {
         Scene::ShelfPhone => Some(ready),
         Scene::ShelfPhoneAsk => Some(PhoneDrop {
             visitor: Some("iPhone".into()),
-            ask: Some(PhoneAsk { id: 7, from: "iPhone".into(), files, total }),
+            ask: Some(PhoneAsk {
+                id: 7,
+                from: "iPhone".into(),
+                files,
+                total,
+            }),
             ..ready
         }),
         Scene::ShelfPhoneReceive => Some(PhoneDrop {
             visitor: Some("iPhone".into()),
-            transfer: Some(PhoneTransfer { id: 7, from: "iPhone".into(), file: 2, files: 3, done: 9_100_000, total }),
+            transfer: Some(PhoneTransfer {
+                id: 7,
+                from: "iPhone".into(),
+                file: 2,
+                files: 3,
+                done: 9_100_000,
+                total,
+            }),
             ..ready
         }),
-        Scene::ShelfPairing => Some(PhoneDrop { view: PhoneView::Pairing { url: PAIR_URL.into(), qr: QrMatrix::encode(PAIR_URL), until: now + 580.0 }, ..ready }),
+        Scene::ShelfPairing => Some(PhoneDrop {
+            view: PhoneView::Pairing {
+                url: PAIR_URL.into(),
+                qr: QrMatrix::encode(PAIR_URL),
+                until: now + 580.0,
+            },
+            ..ready
+        }),
         Scene::ShelfPaired => Some(PhoneDrop {
             outcome: Some(("Pixel 10 is paired".into(), true, now + 60.0)),
-            outcome_line: Some("It can now send from any network, even with this panel closed.".into()),
+            outcome_line: Some(
+                "It can now send from any network, even with this panel closed.".into(),
+            ),
             ..ready
         }),
-        Scene::ShelfPairedPhones => Some(PhoneDrop { view: PhoneView::Paired, ..ready }),
+        Scene::ShelfPairedPhones => Some(PhoneDrop {
+            view: PhoneView::Paired,
+            ..ready
+        }),
         _ => None,
     }
 }
 
 /// Paths of the sample apps (keys for their icons only; never opened) and their tile colours.
 const SAMPLE_ICONS: [(&str, u32); 8] = [
-    ("C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe", 0x1A9FD9),
-    ("C:\\Users\\Sample\\AppData\\Roaming\\Spotify\\Spotify.exe", 0x1DB954),
+    (
+        "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",
+        0x1A9FD9,
+    ),
+    (
+        "C:\\Users\\Sample\\AppData\\Roaming\\Spotify\\Spotify.exe",
+        0x1DB954,
+    ),
     ("C:\\Windows\\explorer.exe", 0xF2C14E),
-    ("C:\\Users\\Sample\\AppData\\Local\\Programs\\Microsoft VS Code\\Code.exe", 0x2F80ED),
+    (
+        "C:\\Users\\Sample\\AppData\\Local\\Programs\\Microsoft VS Code\\Code.exe",
+        0x2F80ED,
+    ),
     ("C:\\Windows\\System32\\dwm.exe", 0x00A4EF),
-    ("C:\\Users\\Sample\\AppData\\Local\\Discord\\app-1.0.9200\\Discord.exe", 0x5865F2),
-    ("C:\\ProgramData\\Microsoft\\Windows Defender\\Platform\\4.18.25010.11-0\\MsMpEng.exe", 0x0078D4),
-    ("C:\\Program Files\\Microsoft Office\\root\\Office16\\WINWORD.EXE", 0x2B579A),
+    (
+        "C:\\Users\\Sample\\AppData\\Local\\Discord\\app-1.0.9200\\Discord.exe",
+        0x5865F2,
+    ),
+    (
+        "C:\\ProgramData\\Microsoft\\Windows Defender\\Platform\\4.18.25010.11-0\\MsMpEng.exe",
+        0x0078D4,
+    ),
+    (
+        "C:\\Program Files\\Microsoft Office\\root\\Office16\\WINWORD.EXE",
+        0x2B579A,
+    ),
 ];
 
 /// A plain rounded tile standing in for an app icon, laid out like the
@@ -293,12 +357,30 @@ fn sample_icon(rgb: u32) -> Image {
 fn sample_app(i: usize, name: &str, cpu: f32, memory: u64, io: f64) -> AppUse {
     let path = SAMPLE_ICONS[i].0;
     let image = path.rsplit('\\').next().unwrap_or(path).to_lowercase();
-    AppUse { image, name: name.into(), path: Some(path.into()), pid: 1000 + i as u64, cpu, memory, io, processes: 1 }
+    AppUse {
+        image,
+        name: name.into(),
+        path: Some(path.into()),
+        pid: 1000 + i as u64,
+        cpu,
+        memory,
+        io,
+        processes: 1,
+    }
 }
 
 /// The kernel's own entry: no file, so the page shows Windows' mark.
 fn sample_system(cpu: f32, memory: u64, io: f64) -> AppUse {
-    AppUse { image: "system".into(), name: "System".into(), path: None, pid: 4, cpu, memory, io, processes: 1 }
+    AppUse {
+        image: "system".into(),
+        name: "System".into(),
+        path: None,
+        pid: 4,
+        cpu,
+        memory,
+        io,
+        processes: 1,
+    }
 }
 
 /// The System page's sample minute (all made up): a laptop with a hybrid
@@ -313,16 +395,66 @@ fn fake_system(scene: Scene) -> Monitor {
     for i in 0..HISTORY_LEN {
         let t = i as f32;
         let last = i + 1 == HISTORY_LEN;
-        let spike = if (38..45).contains(&i) { 0.22 * ((t - 38.0) / 6.0 * std::f32::consts::PI).sin() } else { 0.0 };
-        let cpu = if last { 0.23 } else { (0.19 + 0.05 * (t / 4.3).sin() + 0.03 * (t / 1.7 + 1.1).sin() + spike).clamp(0.03, 0.95) };
-        let gpu = if last { 0.31 } else { (0.24 + 0.08 * (t / 5.1 + 0.4).sin() + 0.04 * (t / 2.3).sin() + if (18..30).contains(&i) { 0.3 } else { 0.0 }).clamp(0.02, 0.98) };
-        let burst = |at: usize, len: usize, peak: f64| if (at..at + len).contains(&i) { peak * (((i - at) as f64 + 0.5) / len as f64 * std::f64::consts::PI).sin() } else { 0.0 };
-        let read = if last { 1.2 * MIB } else { 0.15 * MIB + burst(12, 6, 6.5 * MIB) + burst(41, 4, 2.8 * MIB) };
-        let write = if last { 0.33 * MIB } else { 0.05 * MIB + burst(20, 9, 1.9 * MIB) };
-        let down = if last { 1.2 * MIB } else { 0.08 * MIB + burst(5, 14, 3.4 * MIB) + burst(46, 10, 1.6 * MIB) };
-        let up = if last { 0.082 * MIB } else { 0.02 * MIB + burst(25, 8, 0.6 * MIB) };
-        let sample = Sample { cpu, gpu, mem: 0.6 + 0.004 * (t / 6.0).sin(), read, write, down, up, t };
-        let desktop = matches!(scene, Scene::SystemMemory | Scene::SystemPower | Scene::SystemPowerEstimate);
+        let spike = if (38..45).contains(&i) {
+            0.22 * ((t - 38.0) / 6.0 * std::f32::consts::PI).sin()
+        } else {
+            0.0
+        };
+        let cpu = if last {
+            0.23
+        } else {
+            (0.19 + 0.05 * (t / 4.3).sin() + 0.03 * (t / 1.7 + 1.1).sin() + spike).clamp(0.03, 0.95)
+        };
+        let gpu = if last {
+            0.31
+        } else {
+            (0.24
+                + 0.08 * (t / 5.1 + 0.4).sin()
+                + 0.04 * (t / 2.3).sin()
+                + if (18..30).contains(&i) { 0.3 } else { 0.0 })
+            .clamp(0.02, 0.98)
+        };
+        let burst = |at: usize, len: usize, peak: f64| {
+            if (at..at + len).contains(&i) {
+                peak * (((i - at) as f64 + 0.5) / len as f64 * std::f64::consts::PI).sin()
+            } else {
+                0.0
+            }
+        };
+        let read = if last {
+            1.2 * MIB
+        } else {
+            0.15 * MIB + burst(12, 6, 6.5 * MIB) + burst(41, 4, 2.8 * MIB)
+        };
+        let write = if last {
+            0.33 * MIB
+        } else {
+            0.05 * MIB + burst(20, 9, 1.9 * MIB)
+        };
+        let down = if last {
+            1.2 * MIB
+        } else {
+            0.08 * MIB + burst(5, 14, 3.4 * MIB) + burst(46, 10, 1.6 * MIB)
+        };
+        let up = if last {
+            0.082 * MIB
+        } else {
+            0.02 * MIB + burst(25, 8, 0.6 * MIB)
+        };
+        let sample = Sample {
+            cpu,
+            gpu,
+            mem: 0.6 + 0.004 * (t / 6.0).sin(),
+            read,
+            write,
+            down,
+            up,
+            t,
+        };
+        let desktop = matches!(
+            scene,
+            Scene::SystemMemory | Scene::SystemPower | Scene::SystemPowerEstimate
+        );
         let mut r = sample_reading(!desktop, &sample);
         if matches!(scene, Scene::SystemPower | Scene::SystemPowerEstimate) {
             r.power = sample_power(&r, scene == Scene::SystemPower, t);
@@ -342,7 +474,11 @@ fn sample_power(r: &Reading, psu: bool, t: f32) -> Option<PowerReading> {
         return PowerReading::estimate(cpu_w, gpu_w, true);
     }
     let out_w = cpu_w? + gpu_w? + 46.0 + 2.0 * (t / 2.9).sin();
-    let rail = |nominal: f32, volts: f32, amps: f32| Rail { nominal, volts, amps };
+    let rail = |nominal: f32, volts: f32, amps: f32| Rail {
+        nominal,
+        volts,
+        amps,
+    };
     let reading = PsuReading {
         name: "MSI MEG Ai1600T".into(),
         out_w,
@@ -351,7 +487,11 @@ fn sample_power(r: &Reading, psu: bool, t: f32) -> Option<PowerReading> {
         mains_v: Some(229.6),
         temp_c: Some(38.5),
         fan_rpm: Some(0),
-        rails: vec![rail(12.0, 12.06, (out_w - 14.0) / 12.06), rail(5.0, 5.02, 1.9), rail(3.3, 3.31, 1.4)],
+        rails: vec![
+            rail(12.0, 12.06, (out_w - 14.0) / 12.06),
+            rail(5.0, 5.02, 1.9),
+            rail(3.3, 3.31, 1.4),
+        ],
     };
     Some(PowerReading::from_psu(reading, cpu_w, gpu_w))
 }
@@ -383,15 +523,25 @@ fn fake_game(scene: Scene, system: &mut Monitor) -> GameState {
         for i in 0..HISTORY_LEN {
             let t = i as f32;
             let dip = if (33..36).contains(&i) { 38.0 } else { 0.0 };
-            history.push(Some(141.0 + 3.0 * (t / 3.7).sin() + 1.5 * (t / 1.3 + 0.6).sin() - dip));
+            history.push(Some(
+                141.0 + 3.0 * (t / 3.7).sin() + 1.5 * (t / 1.3 + 0.6).sin() - dip,
+            ));
         }
     }
     GameState {
         active: in_front,
         app: in_front.then(|| "Harbor Racers".to_string()),
-        rate: (allowed && in_front).then_some(FrameRate { fps: 144.2, frame_ms: 6.93, worst_ms: 9.4 }),
+        rate: (allowed && in_front).then_some(FrameRate {
+            fps: 144.2,
+            frame_ms: 6.93,
+            worst_ms: 9.4,
+        }),
         history,
-        access: if allowed { FpsAccess::Ready } else { FpsAccess::NeedsOk },
+        access: if allowed {
+            FpsAccess::Ready
+        } else {
+            FpsAccess::NeedsOk
+        },
     }
 }
 
@@ -416,8 +566,19 @@ fn sample_reading(laptop: bool, s: &Sample) -> Reading {
         .map(|k| {
             let p = k < 12;
             let wave = 0.5 + 0.5 * (s.t / 3.0 + k as f32 * 1.7).sin();
-            let load = if p { s.cpu * (0.6 + 1.1 * wave) } else { s.cpu * (0.3 + 0.5 * wave) };
-            CoreLoad { load: load.clamp(0.02, 1.0), kind: if p { CoreKind::Performance } else { CoreKind::Efficiency } }
+            let load = if p {
+                s.cpu * (0.6 + 1.1 * wave)
+            } else {
+                s.cpu * (0.3 + 0.5 * wave)
+            };
+            CoreLoad {
+                load: load.clamp(0.02, 1.0),
+                kind: if p {
+                    CoreKind::Performance
+                } else {
+                    CoreKind::Efficiency
+                },
+            }
         })
         .collect();
     Reading {
@@ -466,10 +627,26 @@ fn sample_reading(laptop: bool, s: &Sample) -> Reading {
             page_total: GIB * 24 / 10,
         }),
         drives: vec![
-            Drive { root: "C:".into(), label: "Windows".into(), total: GIB * 476, free: GIB * 212, system: true },
-            Drive { root: "D:".into(), label: "Data".into(), total: GIB * 931, free: GIB * 640, system: false },
+            Drive {
+                root: "C:".into(),
+                label: "Windows".into(),
+                total: GIB * 476,
+                free: GIB * 212,
+                system: true,
+            },
+            Drive {
+                root: "D:".into(),
+                label: "Data".into(),
+                total: GIB * 931,
+                free: GIB * 640,
+                system: false,
+            },
         ],
-        disk: Some(DiskActivity { read_bps: s.read, write_bps: s.write, active: Some(0.14) }),
+        disk: Some(DiskActivity {
+            read_bps: s.read,
+            write_bps: s.write,
+            active: Some(0.14),
+        }),
         network: Some(NetReading {
             online: true,
             adapter: "Wi-Fi".into(),
@@ -529,10 +706,28 @@ fn sample_reading(laptop: bool, s: &Sample) -> Reading {
 fn system_readings(p: crate::services::sysmon::Probe) -> (bool, String) {
     use poni_core::sysmon::fmt_bytes;
     let r = &p.reading;
-    let cpu = r.cpu.as_ref().filter(|c| (0.0..=1.0).contains(&c.load) && c.logical > 0);
-    let mem = r.memory.as_ref().filter(|m| m.total > 0 && m.used <= m.total);
+    let cpu = r
+        .cpu
+        .as_ref()
+        .filter(|c| (0.0..=1.0).contains(&c.load) && c.logical > 0);
+    let mem = r
+        .memory
+        .as_ref()
+        .filter(|m| m.total > 0 && m.used <= m.total);
     let ok = cpu.is_some() && mem.is_some() && !r.drives.is_empty() && !r.top_memory.is_empty();
-    let apps: Vec<String> = r.top_memory.iter().take(3).map(|a| format!("{} ({}{})", a.name, fmt_bytes(a.memory), if a.path.is_some() { ", path" } else { "" })).collect();
+    let apps: Vec<String> = r
+        .top_memory
+        .iter()
+        .take(3)
+        .map(|a| {
+            format!(
+                "{} ({}{})",
+                a.name,
+                fmt_bytes(a.memory),
+                if a.path.is_some() { ", path" } else { "" }
+            )
+        })
+        .collect();
     let cores = cpu.map_or("missing".into(), |c| match c.hybrid() {
         Some((p, e)) => format!("{} ({p} P + {e} E)", c.cores.len()),
         None if c.cores.is_empty() => "total only".into(),
@@ -584,30 +779,63 @@ fn fake_oyenza(st: &AppState, scene: Scene, now: f64) -> OyenzaState {
     let iso = |t: i64| {
         let (y, m, d) = poni_core::datetime::civil_from_days(t.div_euclid(86_400));
         let s = t.rem_euclid(86_400);
-        format!("{y:04}-{m:02}-{d:02}T{:02}:{:02}:{:02}Z", s / 3600, s % 3600 / 60, s % 60)
+        format!(
+            "{y:04}-{m:02}-{d:02}T{:02}:{:02}:{:02}Z",
+            s / 3600,
+            s % 3600 / 60,
+            s % 60
+        )
     };
     // Today's rows a few minutes to hours ago, or, early in the day, spread over the time since midnight
     // (`share` of it), so their times stay apart and in order; earlier days at set times.
-    let since_midnight = st.local.hour as i64 * 3600 + st.local.minute as i64 * 60 + st.local.second as i64;
+    let since_midnight =
+        st.local.hour as i64 * 3600 + st.local.minute as i64 * 60 + st.local.second as i64;
     let midnight = st.unix - since_midnight;
-    let ago = |minutes: i64, share: f64| iso(st.unix - (minutes * 60).min((since_midnight as f64 * share) as i64));
+    let ago = |minutes: i64, share: f64| {
+        iso(st.unix - (minutes * 60).min((since_midnight as f64 * share) as i64))
+    };
     let on = |days_ago: i64, h: i64, m: i64| iso(midnight - days_ago * 86_400 + h * 3600 + m * 60);
-    let txn = |id: &str, kind: &str, title: &str, text: &str, wallet: (&str, &str), at: String, auto: bool| Txn {
+    let txn = |id: &str,
+               kind: &str,
+               title: &str,
+               text: &str,
+               wallet: (&str, &str),
+               at: String,
+               auto: bool| Txn {
         id: id.into(),
         kind: kind.into(),
         title: title.into(),
         amount: 1.0,
         text: text.into(),
         category: None,
-        wallet: Some(WalletRef { name: wallet.0.into(), color: wallet.1.into() }),
+        wallet: Some(WalletRef {
+            name: wallet.0.into(),
+            color: wallet.1.into(),
+        }),
         to_wallet: None,
         at,
         auto,
     };
-    let (bca, gopay, ovo, cash) = (("BCA", "#0060AF"), ("GoPay", "#00AED6"), ("OVO", "#4C3494"), ("Cash", "#8E8E93"));
+    let (bca, gopay, ovo, cash) = (
+        ("BCA", "#0060AF"),
+        ("GoPay", "#00AED6"),
+        ("OVO", "#4C3494"),
+        ("Cash", "#8E8E93"),
+    );
     let day = |n: i64| st.local.add_days(n).day_key();
-    let mut transfer = txn("t1", "transfer", "", "Rp 500.000", bca, ago(545, 0.9), false);
-    transfer.to_wallet = Some(WalletRef { name: gopay.0.into(), color: gopay.1.into() });
+    let mut transfer = txn(
+        "t1",
+        "transfer",
+        "",
+        "Rp 500.000",
+        bca,
+        ago(545, 0.9),
+        false,
+    );
+    transfer.to_wallet = Some(WalletRef {
+        name: gopay.0.into(),
+        color: gopay.1.into(),
+    });
     let today = Day {
         date: day(0),
         count: 5,
@@ -616,10 +844,42 @@ fn fake_oyenza(st: &AppState, scene: Scene, now: f64) -> OyenzaState {
         in_text: "Rp 1.250.000".into(),
         out_text: "Rp 152.000".into(),
         rows: vec![
-            txn("t5", "income", "Gaji Oktober", "Rp 1.250.000", bca, ago(2, 0.04), true),
-            txn("t4", "expense", "Kopi susu", "Rp 25.000", gopay, ago(33, 0.25), false),
-            txn("t3", "expense", "Grab ke rumah", "Rp 38.000", ovo, ago(128, 0.5), false),
-            txn("t2", "expense", "Tokopedia · Kabel USB-C", "Rp 89.000", bca, ago(427, 0.75), true),
+            txn(
+                "t5",
+                "income",
+                "Gaji Oktober",
+                "Rp 1.250.000",
+                bca,
+                ago(2, 0.04),
+                true,
+            ),
+            txn(
+                "t4",
+                "expense",
+                "Kopi susu",
+                "Rp 25.000",
+                gopay,
+                ago(33, 0.25),
+                false,
+            ),
+            txn(
+                "t3",
+                "expense",
+                "Grab ke rumah",
+                "Rp 38.000",
+                ovo,
+                ago(128, 0.5),
+                false,
+            ),
+            txn(
+                "t2",
+                "expense",
+                "Tokopedia · Kabel USB-C",
+                "Rp 89.000",
+                bca,
+                ago(427, 0.75),
+                true,
+            ),
             transfer,
         ],
     };
@@ -631,10 +891,42 @@ fn fake_oyenza(st: &AppState, scene: Scene, now: f64) -> OyenzaState {
         in_text: "Rp 200.000".into(),
         out_text: "Rp 395.000".into(),
         rows: vec![
-            txn("y4", "expense", "Makan siang", "Rp 40.000", gopay, on(1, 12, 40), false),
-            txn("y3", "expense", "Listrik PLN", "Rp 350.000", bca, on(1, 10, 2), true),
-            txn("y2", "income", "Uang masuk", "Rp 200.000", gopay, on(1, 9, 15), true),
-            txn("y1", "expense", "Parkir", "Rp 5.000", cash, on(1, 8, 10), false),
+            txn(
+                "y4",
+                "expense",
+                "Makan siang",
+                "Rp 40.000",
+                gopay,
+                on(1, 12, 40),
+                false,
+            ),
+            txn(
+                "y3",
+                "expense",
+                "Listrik PLN",
+                "Rp 350.000",
+                bca,
+                on(1, 10, 2),
+                true,
+            ),
+            txn(
+                "y2",
+                "income",
+                "Uang masuk",
+                "Rp 200.000",
+                gopay,
+                on(1, 9, 15),
+                true,
+            ),
+            txn(
+                "y1",
+                "expense",
+                "Parkir",
+                "Rp 5.000",
+                cash,
+                on(1, 8, 10),
+                false,
+            ),
         ],
     };
     let thursday = Day {
@@ -644,10 +936,45 @@ fn fake_oyenza(st: &AppState, scene: Scene, now: f64) -> OyenzaState {
         out: 172_000.0,
         in_text: "Rp 0".into(),
         out_text: "Rp 172.000".into(),
-        rows: vec![txn("w2", "expense", "Bensin", "Rp 150.000", bca, on(2, 18, 20), false), txn("w1", "expense", "Kopi", "Rp 22.000", gopay, on(2, 8, 45), false)],
+        rows: vec![
+            txn(
+                "w2",
+                "expense",
+                "Bensin",
+                "Rp 150.000",
+                bca,
+                on(2, 18, 20),
+                false,
+            ),
+            txn(
+                "w1",
+                "expense",
+                "Kopi",
+                "Rp 22.000",
+                gopay,
+                on(2, 8, 45),
+                false,
+            ),
+        ],
     };
-    let empty = |n: i64| Day { date: day(-n), count: 0, in_sum: 0.0, out: 0.0, in_text: "Rp 0".into(), out_text: "Rp 0".into(), rows: Vec::new() };
-    let days = vec![today.clone(), yesterday, thursday, empty(3), empty(4), empty(5), empty(6)];
+    let empty = |n: i64| Day {
+        date: day(-n),
+        count: 0,
+        in_sum: 0.0,
+        out: 0.0,
+        in_text: "Rp 0".into(),
+        out_text: "Rp 0".into(),
+        rows: Vec::new(),
+    };
+    let days = vec![
+        today.clone(),
+        yesterday,
+        thursday,
+        empty(3),
+        empty(4),
+        empty(5),
+        empty(6),
+    ];
     // Everything was on the page a while ago except today's newest, which just landed.
     let mut seen = Seen::default();
     let mut before = days.clone();
@@ -661,12 +988,24 @@ fn fake_oyenza(st: &AppState, scene: Scene, now: f64) -> OyenzaState {
             // Pinned on every step, so the countdown reads 9:41 in the screenshot.
             until: now + 581.0,
         },
-        _ => OyenzaLink::Connected { account: "a•••@example.com".into() },
+        _ => OyenzaLink::Connected {
+            account: "a•••@example.com".into(),
+        },
     };
-    let bill = |kind: &str, name: &str, due: String, text: Option<&str>| Bill { kind: kind.into(), name: name.into(), due, amount: text.map(|_| 1.0), text: text.map(Into::into) };
+    let bill = |kind: &str, name: &str, due: String, text: Option<&str>| Bill {
+        kind: kind.into(),
+        name: name.into(),
+        due,
+        amount: text.map(|_| 1.0),
+        text: text.map(Into::into),
+    };
     OyenzaState {
         link,
-        activity: Some(Activity { cursor: "42".into(), today: day(0), days }),
+        activity: Some(Activity {
+            cursor: "42".into(),
+            today: day(0),
+            days,
+        }),
         seen,
         day: match scene {
             Scene::OyenzaYesterday => DayPick::Past(1),
@@ -675,7 +1014,12 @@ fn fake_oyenza(st: &AppState, scene: Scene, now: f64) -> OyenzaState {
         },
         bills: vec![
             // Today's page lists a bill due today; the Oyenza tab's scenes keep it tomorrow.
-            bill("subscription", "Spotify", day(if scene == Scene::TodayDay { 0 } else { 1 }), Some("Rp 54.990")),
+            bill(
+                "subscription",
+                "Spotify",
+                day(if scene == Scene::TodayDay { 0 } else { 1 }),
+                Some("Rp 54.990"),
+            ),
             bill("card", "Kartu Kredit BCA", day(1), None),
             bill("subscription", "Netflix", day(5), Some("Rp 54.000")),
             bill("subscription", "Google One", day(8), Some("Rp 26.900")),
@@ -684,14 +1028,23 @@ fn fake_oyenza(st: &AppState, scene: Scene, now: f64) -> OyenzaState {
         bills_today: st.day_key(),
         updated_unix: Some(st.unix - 8),
         saved: (scene == Scene::OyenzaSaved).then(|| {
-            let kopi = Saved { id: "s1".into(), title: "Kopi".into(), amount: 25_000.0, text: "Rp 25.000".into(), category: Some("Makan & Minum".into()), wallet: "GoPay".into() };
+            let kopi = Saved {
+                id: "s1".into(),
+                title: "Kopi".into(),
+                amount: 25_000.0,
+                text: "Rp 25.000".into(),
+                category: Some("Makan & Minum".into()),
+                wallet: "GoPay".into(),
+            };
             (vec![kopi], now + 9.5)
         }),
         agenda: fake_agenda(st, scene),
         agenda_unix: Some(st.unix - 120),
         agenda_state: match scene {
             Scene::TodayTiles => AgendaState::Unavailable,
-            Scene::TodayDay | Scene::TodayNoApps | Scene::TodayOff | Scene::TodayPicked => AgendaState::Ready,
+            Scene::TodayDay | Scene::TodayNoApps | Scene::TodayOff | Scene::TodayPicked => {
+                AgendaState::Ready
+            }
             _ => AgendaState::Waiting,
         },
         ..OyenzaState::default()
@@ -737,7 +1090,9 @@ fn seed_notifications(st: &mut AppState, scene: Scene) {
     st.notify_access = match scene {
         Scene::NotifyAsk => NotifyAccess::Ask,
         Scene::NotifyNoPackage => NotifyAccess::NoPackage,
-        Scene::Page(PageKind::Notifications) | Scene::MessageNotice | Scene::MessageHidden => NotifyAccess::Allowed,
+        Scene::Page(PageKind::Notifications) | Scene::MessageNotice | Scene::MessageHidden => {
+            NotifyAccess::Allowed
+        }
         _ => NotifyAccess::Unknown,
     };
     let n = &mut st.settings.notifications;
@@ -790,29 +1145,72 @@ fn seed_downloads(st: &mut AppState, scene: Scene) {
     ui.scroll = 0.0;
     ui.offer = None;
     ui.note = None;
-    if !matches!(scene, Scene::Page(PageKind::Downloads) | Scene::DownloadActivity) {
+    if !matches!(
+        scene,
+        Scene::Page(PageKind::Downloads) | Scene::DownloadActivity
+    ) {
         st.downloads = Jobs::default();
         return;
     }
     let unix = st.unix;
-    let info = |title: &str, site: &str| Line::Info { title: title.into(), site: site.into(), thumbnail: None, duration_s: None };
+    let info = |title: &str, site: &str| Line::Info {
+        title: title.into(),
+        site: site.into(),
+        thumbnail: None,
+        duration_s: None,
+    };
     let mut jobs = Jobs::default();
     // Oldest first: each one goes on top of the list.
-    let bunny = jobs.add("https://archive.org/details/BigBuckBunny_124".into(), Mode::Video, unix - 25 * 60);
+    let bunny = jobs.add(
+        "https://archive.org/details/BigBuckBunny_124".into(),
+        Mode::Video,
+        unix - 25 * 60,
+    );
     jobs.starting(bunny);
     jobs.apply(bunny, info("Big Buck Bunny", "Internet Archive"));
-    jobs.apply(bunny, Line::Done { path: "C:\\Users\\Sample\\Downloads\\Big Buck Bunny.mp4".into() });
+    jobs.apply(
+        bunny,
+        Line::Done {
+            path: "C:\\Users\\Sample\\Downloads\\Big Buck Bunny.mp4".into(),
+        },
+    );
     jobs.set_size(bunny, 332_000_000);
-    let private = jobs.add("https://video.blender.org/w/4e0c1f7a-93b2-4d58-a6e1-2f8b9c3d7a51".into(), Mode::Video, unix - 4 * 60);
+    let private = jobs.add(
+        "https://video.blender.org/w/4e0c1f7a-93b2-4d58-a6e1-2f8b9c3d7a51".into(),
+        Mode::Video,
+        unix - 4 * 60,
+    );
     // yt-dlp's private video (`ytdlp::Problem::Private`), in the page's words.
     if let Some(job) = jobs.list.iter_mut().find(|j| j.id == private) {
         job.state = State::Failed("This video is private".into());
     }
-    let film = jobs.add("https://video.blender.org/w/b29290cc-dc51-4a12-bcb2-2aa5fece7605".into(), Mode::Video, unix - 50);
+    let film = jobs.add(
+        "https://video.blender.org/w/b29290cc-dc51-4a12-bcb2-2aa5fece7605".into(),
+        Mode::Video,
+        unix - 50,
+    );
     jobs.starting(film);
-    jobs.apply(film, info("OVERGROWN: a feature film project by Blender Studio", "PeerTube"));
-    jobs.apply(film, Line::Progress { done: 8_600_000, total: Some(23_300_000), speed: Some(2_100_000.0), eta_s: Some(7) });
-    let youtube = jobs.add("https://www.youtube.com/watch?v=aqz-KE-bpKQ".into(), Mode::Video, unix - 20);
+    jobs.apply(
+        film,
+        info(
+            "OVERGROWN: a feature film project by Blender Studio",
+            "PeerTube",
+        ),
+    );
+    jobs.apply(
+        film,
+        Line::Progress {
+            done: 8_600_000,
+            total: Some(23_300_000),
+            speed: Some(2_100_000.0),
+            eta_s: Some(7),
+        },
+    );
+    let youtube = jobs.add(
+        "https://www.youtube.com/watch?v=aqz-KE-bpKQ".into(),
+        Mode::Video,
+        unix - 20,
+    );
     jobs.starting(youtube);
     jobs.apply(youtube, Line::Solving);
     st.downloads = jobs;
@@ -861,12 +1259,19 @@ fn seed_notes(st: &mut AppState, scene: Scene, now: f64) {
     st.ui.notes_note = None;
     // Studio Pro, as the server would say: on for the notes' and IELTS' own scenes.
     if st.oyenza.link != crate::state::OyenzaLink::Off {
-        st.oyenza.pro = Some(matches!(scene.page(), Some(PageKind::Notes | PageKind::Ielts)) && scene != Scene::NotesPro);
+        st.oyenza.pro = Some(
+            matches!(scene.page(), Some(PageKind::Notes | PageKind::Ielts))
+                && scene != Scene::NotesPro,
+        );
     }
     match scene {
         Scene::Page(PageKind::Notes) => st.notes.last = Some(sample_notes()),
         Scene::NotesListening | Scene::NotesActivity => {
-            let secs = if scene == Scene::NotesListening { 42.5 } else { 754.5 };
+            let secs = if scene == Scene::NotesListening {
+                42.5
+            } else {
+                754.5
+            };
             st.notes.started(now - secs, true, true);
             (st.notes.mic, st.notes.pc) = (0.32, 0.55);
         }
@@ -883,6 +1288,28 @@ fn seed_notes(st: &mut AppState, scene: Scene, now: f64) {
     }
 }
 
+/// A few made-up NUMA turns for the history panel's picture (no real data).
+fn sample_numa_turns() -> Vec<crate::state::NumaTurn> {
+    let turn = |user: &str, response: &str, route: &str| crate::state::NumaTurn {
+        user: user.into(),
+        response: response.into(),
+        route: route.into(),
+    };
+    vec![
+        turn("open spotify", "Opening Spotify.", "app.launch"),
+        turn(
+            "what's on my todo list",
+            "Three tasks today, the earliest at 9.",
+            "composio.todoist.filter.tasks",
+        ),
+        turn(
+            "any new email",
+            "Two unread, both from GitHub.",
+            "composio.gmail.fetch.emails",
+        ),
+    ]
+}
+
 /// A made-up meeting's notes (no real names).
 fn sample_notes() -> poni_core::notes::Saved {
     use poni_core::notes::{Action, Line, Notes, Saved, Topic};
@@ -897,16 +1324,46 @@ fn sample_notes() -> poni_core::notes::Saved {
         ]),
         decisions: s(&["Launch on 14 Nov", "No student price at launch"]),
         actions: vec![
-            Action { who: "Dimas".into(), what: "Send the store listing for review".into(), when: "Friday".into() },
-            Action { who: "Rina".into(), what: "Cut the 30 s launch video".into(), when: "next Tuesday".into() },
-            Action { who: "".into(), what: "Ask two campuses about the student price".into(), when: "".into() },
+            Action {
+                who: "Dimas".into(),
+                what: "Send the store listing for review".into(),
+                when: "Friday".into(),
+            },
+            Action {
+                who: "Rina".into(),
+                what: "Cut the 30 s launch video".into(),
+                when: "next Tuesday".into(),
+            },
+            Action {
+                who: "".into(),
+                what: "Ask two campuses about the student price".into(),
+                when: "".into(),
+            },
         ],
-        topics: vec![Topic { title: "Timing".into(), points: s(&["Signing takes a week", "14 Nov is a Friday"]) }],
-        transcript: vec![Line { t: 3.0, who: "Rina".into(), text: "Okay, let's start with the date.".into() }],
+        topics: vec![Topic {
+            title: "Timing".into(),
+            points: s(&["Signing takes a week", "14 Nov is a Friday"]),
+        }],
+        transcript: vec![Line {
+            t: 3.0,
+            who: "Rina".into(),
+            text: "Okay, let's start with the date.".into(),
+        }],
         secs: 1834,
     };
-    let started = poni_core::datetime::LocalDateTime { year: 2026, month: 10, day: 29, hour: 14, minute: 5, second: 0 };
-    Saved { notes, file: "2026-10-29 14.05 Studio launch plan.md".into(), started }
+    let started = poni_core::datetime::LocalDateTime {
+        year: 2026,
+        month: 10,
+        day: 29,
+        hour: 14,
+        minute: 5,
+        second: 0,
+    };
+    Saved {
+        notes,
+        file: "2026-10-29 14.05 Studio launch plan.md".into(),
+        started,
+    }
 }
 
 /// Prayer times for its scenes: on, in Kota Jakarta (Edinburgh, picked by
@@ -916,7 +1373,13 @@ fn sample_notes() -> poni_core::notes::Saved {
 fn seed_prayer(st: &mut AppState, scene: Scene, until: f64) {
     let on = matches!(
         scene,
-        Scene::Page(PageKind::Prayer) | Scene::PrayerPicker | Scene::PrayerCountdown | Scene::PrayerNotice | Scene::PrayerPickerWorld | Scene::PrayerWorld | Scene::PrayerOk
+        Scene::Page(PageKind::Prayer)
+            | Scene::PrayerPicker
+            | Scene::PrayerCountdown
+            | Scene::PrayerNotice
+            | Scene::PrayerPickerWorld
+            | Scene::PrayerWorld
+            | Scene::PrayerOk
     );
     if !on {
         st.prayer = PrayerState::default();
@@ -929,7 +1392,11 @@ fn seed_prayer(st: &mut AppState, scene: Scene, until: f64) {
     }
     let world = World::parse(poni_core::prayer::world::SAMPLE.into()).expect("sample world places");
     let list = st.prayer.places.clone().expect("places");
-    st.prayer.place = if scene == Scene::PrayerWorld { world.place(0) } else { list.find("jakarta").cloned() };
+    st.prayer.place = if scene == Scene::PrayerWorld {
+        world.place(0)
+    } else {
+        list.find("jakarta").cloned()
+    };
     st.settings.prayer.world_place = st.prayer.place.as_ref().and_then(|p| p.world_lines.clone());
     // The website's "ed" file, as if it had come.
     st.prayer.cities = [("ed".to_string(), CityFile::Here(std::sync::Arc::new(world)))].into();
@@ -946,13 +1413,18 @@ fn seed_prayer(st: &mut AppState, scene: Scene, until: f64) {
     };
     let site = st.prayer.site().expect("the place's site");
     let today = site.local_day(st.unix);
-    let ashar = poni_core::prayer::day_times(&site, today).expect("today's times").ashar;
+    let ashar = poni_core::prayer::day_times(&site, today)
+        .expect("today's times")
+        .ashar;
     // PONI_SELFTEST_PRAYER_AT=HH:MM: the Prayer page at that time of
     // Jakarta's day instead (pictures of the night side: the moon on the arc).
-    let at = std::env::var("PONI_SELFTEST_PRAYER_AT").ok().filter(|_| scene == Scene::Page(PageKind::Prayer)).and_then(|v| {
-        let (h, m) = v.trim().split_once(':')?;
-        Some(h.parse::<i64>().ok()? * 3600 + m.parse::<i64>().ok()? * 60)
-    });
+    let at = std::env::var("PONI_SELFTEST_PRAYER_AT")
+        .ok()
+        .filter(|_| scene == Scene::Page(PageKind::Prayer))
+        .and_then(|v| {
+            let (h, m) = v.trim().split_once(':')?;
+            Some(h.parse::<i64>().ok()? * 3600 + m.parse::<i64>().ok()? * 60)
+        });
     st.prayer.clock_shift = match at {
         Some(secs) => site.midnight(today) + secs - st.unix,
         None => ashar - 8 * 60 - st.unix,
@@ -960,7 +1432,11 @@ fn seed_prayer(st: &mut AppState, scene: Scene, until: f64) {
     st.prayer.handled_until = Some(st.prayer_now());
     st.prayer.adzan = scene == Scene::PrayerNotice;
     if scene == Scene::PrayerNotice {
-        let place = st.prayer.place.as_ref().map_or(String::new(), |p| p.label.clone());
+        let place = st
+            .prayer
+            .place
+            .as_ref()
+            .map_or(String::new(), |p| p.label.clone());
         st.notice = Some(Notice {
             icon: Icon::Moon,
             color: st.accent,
@@ -986,7 +1462,13 @@ const SAMPLE_PLACES: &str = r#"{"places":[
 ]}"#;
 
 fn fake_power(plugged: bool) -> PowerState {
-    PowerState { has_battery: true, percent: 76, charging: plugged, on_ac: plugged, saver: false }
+    PowerState {
+        has_battery: true,
+        percent: 76,
+        charging: plugged,
+        on_ac: plugged,
+        saver: false,
+    }
 }
 
 // ---------------------------------------------------------------- scenes
@@ -1003,6 +1485,9 @@ enum Scene {
     BluetoothHud,
     HealthNotice,
     Page(PageKind),
+    /// NUMA's page with the local history open and made-up turns: pins the
+    /// history panel above the pinned bottom row.
+    NumaHistory,
     /// The shelf while files are dragged over the island.
     ShelfDrop,
     /// An empty shelf: the drop zone and the Phone drop tile.
@@ -1227,17 +1712,28 @@ enum Scene {
 
 /// A later release than this build, as the update file describes one.
 fn fake_release() -> poni_core::update::Release {
-    let mut parts: Vec<u64> = crate::version::VERSION.split('.').filter_map(|p| p.parse().ok()).collect();
+    let mut parts: Vec<u64> = crate::version::VERSION
+        .split('.')
+        .filter_map(|p| p.parse().ok())
+        .collect();
     if let Some(last) = parts.last_mut() {
         *last += 1;
     }
-    let version = parts.iter().map(u64::to_string).collect::<Vec<_>>().join(".");
+    let version = parts
+        .iter()
+        .map(u64::to_string)
+        .collect::<Vec<_>>()
+        .join(".");
     let repo = "https://github.com/lucacadalora/oyenza-studio/releases";
     poni_core::update::Release {
         date: "2026-10-26".into(),
         headline: "A smoother island, and fixes".into(),
         notes: format!("{repo}/tag/v{version}"),
-        windows: Some(poni_core::update::Download { url: format!("{repo}/download/v{version}/Oyenza-Studio-Setup-{version}.exe"), size: 2_500_000, sha256: "0".repeat(64) }),
+        windows: Some(poni_core::update::Download {
+            url: format!("{repo}/download/v{version}/Oyenza-Studio-Setup-{version}.exe"),
+            size: 2_500_000,
+            sha256: "0".repeat(64),
+        }),
         mac: None,
         version,
     }
@@ -1249,13 +1745,29 @@ fn fake_release() -> poni_core::update::Release {
 /// Inference connected.
 fn ai_alert(st: &AppState, out: bool) -> Option<studio_usage::alerts::Alert> {
     use studio_usage::{alerts, ProviderId, Snapshot, Source, Window, WindowKind};
-    let id = if out { ProviderId::Codex } else { ProviderId::Claude };
+    let id = if out {
+        ProviderId::Codex
+    } else {
+        ProviderId::Claude
+    };
     let read = |used| Snapshot {
-        windows: vec![Window::new(WindowKind::Session, "5-hour", used).resets(Some(st.unix + 2 * 3600 + 20 * 60)).length(Some(18_000))],
+        windows: vec![Window::new(WindowKind::Session, "5-hour", used)
+            .resets(Some(st.unix + 2 * 3600 + 20 * 60))
+            .length(Some(18_000))],
         ..Snapshot::new(id, st.unix, Source::Online)
     };
-    let cfg = alerts::AlertCfg { inference: out, ..st.usage_alert_cfg() };
-    alerts::changes(Some(&read(0.7)), &read(if out { 1.0 } else { 0.9 }), st.unix, &cfg).into_iter().next()
+    let cfg = alerts::AlertCfg {
+        inference: out,
+        ..st.usage_alert_cfg()
+    };
+    alerts::changes(
+        Some(&read(0.7)),
+        &read(if out { 1.0 } else { 0.9 }),
+        st.unix,
+        &cfg,
+    )
+    .into_iter()
+    .next()
 }
 
 /// How far the self-test drags the island to the right (DIPs).
@@ -1310,7 +1822,10 @@ fn on_screen_check(app: &App, scene: Scene) -> Check {
 fn under_wine() -> bool {
     use windows::core::{s, w};
     use windows::Win32::System::LibraryLoader::{GetModuleHandleW, GetProcAddress};
-    unsafe { GetModuleHandleW(w!("ntdll.dll")).is_ok_and(|h| GetProcAddress(h, s!("wine_get_version")).is_some()) }
+    unsafe {
+        GetModuleHandleW(w!("ntdll.dll"))
+            .is_ok_and(|h| GetProcAddress(h, s!("wine_get_version")).is_some())
+    }
 }
 
 /// What the Script page reads in its self-test scenes.
@@ -1318,7 +1833,7 @@ const SAMPLE_SCRIPT: &str = "Hi everyone, this one takes two minutes. Today I'll
 Drop any file on the island and it waits on the Shelf. Press the phone button, scan the code, and the file is on your phone. \
 No cable, no account, nothing to install on the phone.\n\nThat's it. Thanks for watching.";
 
-const SCENES: [Scene; 135] = [
+const SCENES: [Scene; 137] = [
     Scene::IdleClock,
     Scene::IdleEyes,
     Scene::Media,
@@ -1470,6 +1985,7 @@ const SCENES: [Scene; 135] = [
     Scene::Ai(AiPicture::Key),
     // NUMA's M1 shell: visual surface only; voice and actions arrive later.
     Scene::Page(PageKind::Numa),
+    Scene::NumaHistory,
     // Its heads-up notices on the closed island.
     Scene::AiNotice,
     Scene::AiNoticeOut,
@@ -1514,6 +2030,7 @@ impl Scene {
             Scene::BluetoothHud => "bluetooth-hud".into(),
             Scene::HealthNotice => "health-notice".into(),
             Scene::Page(p) => format!("page-{}", p.key()),
+            Scene::NumaHistory => "page-numa-history".into(),
             Scene::ShelfDrop => "page-shelf-drop".into(),
             Scene::ShelfEmpty => "page-shelf-empty".into(),
             Scene::ShelfPhone => "page-shelf-phone".into(),
@@ -1624,10 +2141,19 @@ impl Scene {
     fn page(self) -> Option<PageKind> {
         match self {
             Scene::Page(p) => Some(p),
-            Scene::ShelfDrop | Scene::ShelfEmpty | Scene::ShelfPhone | Scene::ShelfPhoneAsk | Scene::ShelfPhoneReceive => Some(PageKind::Shelf),
+            Scene::NumaHistory => Some(PageKind::Numa),
+            Scene::ShelfDrop
+            | Scene::ShelfEmpty
+            | Scene::ShelfPhone
+            | Scene::ShelfPhoneAsk
+            | Scene::ShelfPhoneReceive => Some(PageKind::Shelf),
             Scene::TabClick => Some(PageKind::ALL[0]),
             Scene::HealthSignedOut => Some(PageKind::Health),
-            Scene::OyenzaSignedOut | Scene::OyenzaSignIn | Scene::OyenzaSaved | Scene::OyenzaYesterday | Scene::OyenzaTomorrow => Some(PageKind::Oyenza),
+            Scene::OyenzaSignedOut
+            | Scene::OyenzaSignIn
+            | Scene::OyenzaSaved
+            | Scene::OyenzaYesterday
+            | Scene::OyenzaTomorrow => Some(PageKind::Oyenza),
             Scene::HealthSignedIn | Scene::HealthStale => Some(PageKind::Health),
             Scene::GearClick
             | Scene::SettingsSigningIn
@@ -1648,22 +2174,40 @@ impl Scene {
             | Scene::SystemGamesAllow
             | Scene::SystemPower
             | Scene::SystemPowerEstimate => Some(PageKind::System),
-            Scene::ShelfPairing | Scene::ShelfPaired | Scene::ShelfPairedPhones => Some(PageKind::Shelf),
-            Scene::AddonsDownloading | Scene::AddonsOn | Scene::AddonsOffline | Scene::AddonsFailed => Some(PageKind::Addons),
+            Scene::ShelfPairing | Scene::ShelfPaired | Scene::ShelfPairedPhones => {
+                Some(PageKind::Shelf)
+            }
+            Scene::AddonsDownloading
+            | Scene::AddonsOn
+            | Scene::AddonsOffline
+            | Scene::AddonsFailed => Some(PageKind::Addons),
             Scene::JaOffer | Scene::JaGetting => Some(PageKind::Media),
-            Scene::PrayerPicker | Scene::PrayerPickerWorld | Scene::PrayerWorld => Some(PageKind::Prayer),
+            Scene::PrayerPicker | Scene::PrayerPickerWorld | Scene::PrayerWorld => {
+                Some(PageKind::Prayer)
+            }
             Scene::ScriptReading | Scene::ScriptRecorder => Some(PageKind::Script),
-            Scene::TodayDay | Scene::TodayNoApps | Scene::TodayTiles | Scene::TodayOff | Scene::TodayPicked => Some(PageKind::Today),
+            Scene::TodayDay
+            | Scene::TodayNoApps
+            | Scene::TodayTiles
+            | Scene::TodayOff
+            | Scene::TodayPicked => Some(PageKind::Today),
             Scene::StocksPicked | Scene::StocksSearch | Scene::StocksEdit => Some(PageKind::Stocks),
             Scene::RecordLive => Some(PageKind::Record),
-            Scene::AddonsRecorder | Scene::AddonsDownloader | Scene::AddonsPro => Some(PageKind::Addons),
+            Scene::AddonsRecorder | Scene::AddonsDownloader | Scene::AddonsPro => {
+                Some(PageKind::Addons)
+            }
             Scene::DownloadsEmpty => Some(PageKind::Downloads),
             Scene::NotifyAsk | Scene::NotifyNoPackage => Some(PageKind::Notifications),
             Scene::Ai(_) => Some(PageKind::Ai),
-            Scene::IeltsSignedOut | Scene::IeltsTalking | Scene::IeltsRecording | Scene::IeltsCueCard | Scene::IeltsResult | Scene::IeltsMicDenied => {
-                Some(PageKind::Ielts)
+            Scene::IeltsSignedOut
+            | Scene::IeltsTalking
+            | Scene::IeltsRecording
+            | Scene::IeltsCueCard
+            | Scene::IeltsResult
+            | Scene::IeltsMicDenied => Some(PageKind::Ielts),
+            Scene::NotesListening | Scene::NotesWriting | Scene::NotesReady | Scene::NotesPro => {
+                Some(PageKind::Notes)
             }
-            Scene::NotesListening | Scene::NotesWriting | Scene::NotesReady | Scene::NotesPro => Some(PageKind::Notes),
             Scene::IslandOpenAtEdge => Some(PageKind::Media),
             _ => None,
         }
@@ -1672,7 +2216,14 @@ impl Scene {
     /// The Downloader is offered (Windows outside the Store build), in its
     /// own scenes only: the other Add-ons pictures keep their rows.
     fn downloader(self) -> bool {
-        matches!(self, Scene::Page(PageKind::Downloads) | Scene::DownloadsEmpty | Scene::AddonsDownloader | Scene::DownloadActivity | Scene::AddonsPro)
+        matches!(
+            self,
+            Scene::Page(PageKind::Downloads)
+                | Scene::DownloadsEmpty
+                | Scene::AddonsDownloader
+                | Scene::DownloadActivity
+                | Scene::AddonsPro
+        )
     }
 
     /// Signed in to an account with Studio Pro: the Downloader's own
@@ -1692,7 +2243,12 @@ impl Scene {
     fn recorder(self) -> bool {
         matches!(
             self,
-            Scene::ScriptRecorder | Scene::Page(PageKind::Record) | Scene::RecordLive | Scene::RecordActivity | Scene::RecordPaused | Scene::AddonsRecorder
+            Scene::ScriptRecorder
+                | Scene::Page(PageKind::Record)
+                | Scene::RecordLive
+                | Scene::RecordActivity
+                | Scene::RecordPaused
+                | Scene::AddonsRecorder
         )
     }
 
@@ -1707,7 +2263,12 @@ impl Scene {
             _ => return crate::state::RecView::default(),
         };
         // Sent "later" than now, so the time doesn't count on while the scene settles.
-        crate::state::RecView { phase: Some(phase), elapsed_ms, at: now + 3600.0, ..Default::default() }
+        crate::state::RecView {
+            phase: Some(phase),
+            elapsed_ms,
+            at: now + 3600.0,
+            ..Default::default()
+        }
     }
 
     /// Scenes that show something from Oyenza (every other one is signed out,
@@ -1753,11 +2314,23 @@ impl Scene {
 
     /// Show over games is on (and a game is in front, or was).
     fn game(self) -> bool {
-        matches!(self, Scene::GameStats | Scene::GameStatsAllow | Scene::SystemGames | Scene::SystemGamesAllow)
+        matches!(
+            self,
+            Scene::GameStats | Scene::GameStatsAllow | Scene::SystemGames | Scene::SystemGamesAllow
+        )
     }
 
     fn media_playing(self) -> bool {
-        matches!(self, Scene::Media | Scene::MediaTimer | Scene::MediaLyric | Scene::AsideLyric | Scene::AsidePeek | Scene::PrayerOk | Scene::IslandDrag) || self.expanded()
+        matches!(
+            self,
+            Scene::Media
+                | Scene::MediaTimer
+                | Scene::MediaLyric
+                | Scene::AsideLyric
+                | Scene::AsidePeek
+                | Scene::PrayerOk
+                | Scene::IslandDrag
+        ) || self.expanded()
     }
 
     /// The island is off the middle of the screen.
@@ -1767,7 +2340,10 @@ impl Scene {
 
     /// A maximized window is under the island.
     fn window_under(self) -> bool {
-        matches!(self, Scene::AsideIdle | Scene::AsideLyric | Scene::AsidePeek | Scene::AsideHud)
+        matches!(
+            self,
+            Scene::AsideIdle | Scene::AsideLyric | Scene::AsidePeek | Scene::AsideHud
+        )
     }
 
     /// The island rests stepped aside: nothing to see, a strip to point at.
@@ -1795,16 +2371,32 @@ pub fn fetch_phone_page(url: &str) -> (bool, String) {
     let fetch = || -> std::io::Result<String> {
         let mut s = TcpStream::connect_timeout(&addr, Duration::from_secs(3))?;
         s.set_read_timeout(Some(Duration::from_secs(5)))?;
-        write!(s, "GET /{path} HTTP/1.1\r\nHost: {host}\r\nUser-Agent: poni-selftest\r\n\r\n")?;
+        write!(
+            s,
+            "GET /{path} HTTP/1.1\r\nHost: {host}\r\nUser-Agent: poni-selftest\r\n\r\n"
+        )?;
         let mut out = String::new();
         s.read_to_string(&mut out)?;
         Ok(out)
     };
     match fetch() {
-        Ok(resp) if resp.starts_with("HTTP/1.1 200") && resp.contains("<title>Oyenza Studio") && resp.trim_end().ends_with("</html>") => {
-            (true, format!("served the page at {addr} ({} bytes)", resp.len()))
+        Ok(resp)
+            if resp.starts_with("HTTP/1.1 200")
+                && resp.contains("<title>Oyenza Studio")
+                && resp.trim_end().ends_with("</html>") =>
+        {
+            (
+                true,
+                format!("served the page at {addr} ({} bytes)", resp.len()),
+            )
         }
-        Ok(resp) => (false, format!("unexpected answer from {addr}: {}", resp.lines().next().unwrap_or(""))),
+        Ok(resp) => (
+            false,
+            format!(
+                "unexpected answer from {addr}: {}",
+                resp.lines().next().unwrap_or("")
+            ),
+        ),
         Err(e) => (false, format!("couldn't fetch the page at {addr}: {e}")),
     }
 }
@@ -1860,7 +2452,16 @@ impl IeltsRun {
     fn begin(app: &mut App) -> IeltsRun {
         let seen = Arc::new(Mutex::new(Vec::new()));
         let stop = Arc::new(AtomicBool::new(false));
-        let mut run = IeltsRun { seen: seen.clone(), stop: stop.clone(), server: None, step: IeltsStep::Ladder, since: 0.0, band: None, deleted: 0, started: Instant::now() };
+        let mut run = IeltsRun {
+            seen: seen.clone(),
+            stop: stop.clone(),
+            server: None,
+            step: IeltsStep::Ladder,
+            since: 0.0,
+            band: None,
+            deleted: 0,
+            started: Instant::now(),
+        };
         let listener = match std::net::TcpListener::bind("127.0.0.1:0") {
             Ok(l) => l,
             Err(e) => {
@@ -1870,14 +2471,23 @@ impl IeltsRun {
         };
         let port = listener.local_addr().map(|a| a.port()).unwrap_or(0);
         let _ = listener.set_nonblocking(true);
-        run.server = Some(std::thread::spawn(move || ielts_server(listener, &seen, &stop)));
+        run.server = Some(std::thread::spawn(move || {
+            ielts_server(listener, &seen, &stop)
+        }));
         let stand_in = paths::cache_dir().join("ielts-stand-in.wav");
         let _ = fs::create_dir_all(paths::cache_dir());
-        if let Err(e) = fs::write(&stand_in, poni_core::ielts::tone_wav(2.0, 220.0, poni_core::ielts::RATE)) {
+        if let Err(e) = fs::write(
+            &stand_in,
+            poni_core::ielts::tone_wav(2.0, 220.0, poni_core::ielts::RATE),
+        ) {
             run.note(format!("can't write the stand-in answer ({e})"));
         }
         crate::pinfo!("selftest: IELTS turn against 127.0.0.1:{port}");
-        app.selftest_ielts_begin(format!("http://127.0.0.1:{port}"), IELTS_KEY.into(), stand_in);
+        app.selftest_ielts_begin(
+            format!("http://127.0.0.1:{port}"),
+            IELTS_KEY.into(),
+            stand_in,
+        );
         run
     }
 
@@ -1917,7 +2527,9 @@ impl IeltsRun {
                 app.selftest_ielts(IeltsCmd::Quit);
                 Some(IeltsStep::Ended)
             }
-            IeltsStep::Ended if self.count("DELETE ") > self.deleted || t - self.since > 3.0 => return Some(self.finish(app, None)),
+            IeltsStep::Ended if self.count("DELETE ") > self.deleted || t - self.since > 3.0 => {
+                return Some(self.finish(app, None))
+            }
             _ => None,
         };
         if let Some(n) = next {
@@ -1927,16 +2539,23 @@ impl IeltsRun {
         }
         let c = &app.st.ielts;
         let starting = matches!(self.step, IeltsStep::Intro | IeltsStep::Leave);
-        let stuck = c.phase == P::Stuck || c.me_problem.is_some() || (starting && c.phase == P::Home && c.problem.is_some());
+        let stuck = c.phase == P::Stuck
+            || c.me_problem.is_some()
+            || (starting && c.phase == P::Home && c.problem.is_some());
         if stuck || t - self.since > IELTS_STEP_S {
-            let why = c.problem.or(c.me_problem).map_or_else(|| format!("{:?}", c.phase), |p| format!("{p:?}"));
+            let why = c
+                .problem
+                .or(c.me_problem)
+                .map_or_else(|| format!("{:?}", c.phase), |p| format!("{p:?}"));
             return Some(self.finish(app, Some(format!("stopped at {:?} ({why})", self.step))));
         }
         None
     }
 
     fn count(&self, prefix: &str) -> usize {
-        self.seen.lock().map_or(0, |s| s.iter().filter(|l| l.starts_with(prefix)).count())
+        self.seen
+            .lock()
+            .map_or(0, |s| s.iter().filter(|l| l.starts_with(prefix)).count())
     }
 
     fn finish(&mut self, app: &mut App, stopped: Option<String>) -> Check {
@@ -1965,9 +2584,20 @@ impl IeltsRun {
             && left == 0;
         let ok = turned || wine;
         let band = self.band.map_or("none".into(), poni_core::ielts::fmt_band);
-        let note = if wine { "Wine has no WinRT HttpClient, so this runs on Windows only; " } else { "" };
-        let detail = format!("{note}{}server saw [{}]; band shown {band}; files left in ielts/: {left}; {ms} ms", stopped.map_or(String::new(), |s| format!("{s}; ")), seen.join(" | "));
-        crate::pinfo!("selftest: ielts-turn {}: {detail}", if ok { "ok" } else { "FAILED" });
+        let note = if wine {
+            "Wine has no WinRT HttpClient, so this runs on Windows only; "
+        } else {
+            ""
+        };
+        let detail = format!(
+            "{note}{}server saw [{}]; band shown {band}; files left in ielts/: {left}; {ms} ms",
+            stopped.map_or(String::new(), |s| format!("{s}; ")),
+            seen.join(" | ")
+        );
+        crate::pinfo!(
+            "selftest: ielts-turn {}: {detail}",
+            if ok { "ok" } else { "FAILED" }
+        );
         check("ielts-turn", ok, detail)
     }
 }
@@ -1981,8 +2611,14 @@ const IELTS_ME: &str = r#"{"levels":[{"n":1,"name":"Pemanasan","blurb":"Part 1."
 /// answers are written as text (this ships in poni.exe: no `json!` code).
 fn ielts_server(listener: std::net::TcpListener, seen: &Mutex<Vec<String>>, stop: &AtomicBool) {
     use std::io::{Read, Write};
-    let voice = poni_core::ielts::b64_encode(&poni_core::ielts::tone_wav(0.4, 440.0, poni_core::ielts::RATE));
-    let clip = |text: &str| format!(r#"{{"text":"{text}","lang":"en","audio":{{"mime":"audio/wav","b64":"{voice}"}}}}"#);
+    let voice = poni_core::ielts::b64_encode(&poni_core::ielts::tone_wav(
+        0.4,
+        440.0,
+        poni_core::ielts::RATE,
+    ));
+    let clip = |text: &str| {
+        format!(r#"{{"text":"{text}","lang":"en","audio":{{"mime":"audio/wav","b64":"{voice}"}}}}"#)
+    };
     let session = format!("/island/ielts/session/{IELTS_SESSION}");
     while !stop.load(std::sync::atomic::Ordering::SeqCst) {
         let Ok((mut c, _)) = listener.accept() else {
@@ -1998,21 +2634,43 @@ fn ielts_server(listener: std::net::TcpListener, seen: &Mutex<Vec<String>>, stop
                 Ok(0) | Err(_) => break (String::new(), Vec::new()),
                 Ok(n) => buf.extend_from_slice(&chunk[..n]),
             }
-            let Some(end) = buf.windows(4).position(|w| w == b"\r\n\r\n") else { continue };
+            let Some(end) = buf.windows(4).position(|w| w == b"\r\n\r\n") else {
+                continue;
+            };
             let head = String::from_utf8_lossy(&buf[..end]).to_ascii_lowercase();
-            let len = head.lines().find_map(|l| l.strip_prefix("content-length:").map(|v| v.trim().parse::<usize>().unwrap_or(0))).unwrap_or(0);
+            let len = head
+                .lines()
+                .find_map(|l| {
+                    l.strip_prefix("content-length:")
+                        .map(|v| v.trim().parse::<usize>().unwrap_or(0))
+                })
+                .unwrap_or(0);
             if head.contains("expect: 100-continue") && !continued {
                 continued = true;
                 let _ = c.write_all(b"HTTP/1.1 100 Continue\r\n\r\n");
             }
             if buf.len() >= end + 4 + len {
-                break (String::from_utf8_lossy(&buf[..end]).into_owned(), buf[end + 4..end + 4 + len].to_vec());
+                break (
+                    String::from_utf8_lossy(&buf[..end]).into_owned(),
+                    buf[end + 4..end + 4 + len].to_vec(),
+                );
             }
         };
         let mut first = head.lines().next().unwrap_or("").split_whitespace();
-        let (method, full) = (first.next().unwrap_or("").to_string(), first.next().unwrap_or("").to_string());
-        let (path, query) = full.split_once('?').map_or((full.clone(), String::new()), |(p, q)| (p.to_string(), q.to_string()));
-        let key = head.lines().any(|l| l.split_once(':').is_some_and(|(k, v)| k.eq_ignore_ascii_case("authorization") && v.trim() == format!("Bearer {IELTS_KEY}")));
+        let (method, full) = (
+            first.next().unwrap_or("").to_string(),
+            first.next().unwrap_or("").to_string(),
+        );
+        let (path, query) = full
+            .split_once('?')
+            .map_or((full.clone(), String::new()), |(p, q)| {
+                (p.to_string(), q.to_string())
+            });
+        let key = head.lines().any(|l| {
+            l.split_once(':').is_some_and(|(k, v)| {
+                k.eq_ignore_ascii_case("authorization") && v.trim() == format!("Bearer {IELTS_KEY}")
+            })
+        });
         let json: serde_json::Value = serde_json::from_slice(&body).unwrap_or_default();
         let mut line = format!("{method} {path} {}", if key { "key" } else { "no key" });
         let (status, answer) = match (method.as_str(), path.as_str()) {
@@ -2024,18 +2682,35 @@ fn ielts_server(listener: std::net::TcpListener, seen: &Mutex<Vec<String>>, stop
             }
             ("POST", "/island/ielts/session") => {
                 let tz = json["tz"].as_str().is_some_and(|t| !t.is_empty());
-                line.push_str(&format!(" level={} spice={}{}", json["level"], json["spice"], if tz { " tz" } else { "" }));
+                line.push_str(&format!(
+                    " level={} spice={}{}",
+                    json["level"],
+                    json["spice"],
+                    if tz { " tz" } else { "" }
+                ));
                 let turn = format!(
                     r#"{{"part":1,"kind":"intro","expect":"answer","max_secs":30,"prep_secs":0,"cue_card":null,"say":[{},{{"text":"Where are you from?","lang":"en","audio":null}}]}}"#,
                     clip("Hi, I'm Oyen. Let's begin.")
                 );
-                (200, format!(r#"{{"id":"{IELTS_SESSION}","turn":{turn},"fillers":[{}]}}"#, clip("Hmm, bentar ya.")))
+                (
+                    200,
+                    format!(
+                        r#"{{"id":"{IELTS_SESSION}","turn":{turn},"fillers":[{}]}}"#,
+                        clip("Hmm, bentar ya.")
+                    ),
+                )
             }
             ("POST", p) if p == format!("{session}/answer") => {
-                let wav = json["audio"]["b64"].as_str().and_then(poni_core::ielts::b64_decode).and_then(|b| poni_core::ielts::wav_info(&b));
+                let wav = json["audio"]["b64"]
+                    .as_str()
+                    .and_then(poni_core::ielts::b64_decode)
+                    .and_then(|b| poni_core::ielts::wav_info(&b));
                 let mime = json["audio"]["mime"].as_str() == Some("audio/wav");
                 match wav.filter(|_| mime) {
-                    Some(w) => line.push_str(&format!(" wav={}/{}/{} {:.1}s", w.rate, w.channels, w.bits, w.secs)),
+                    Some(w) => line.push_str(&format!(
+                        " wav={}/{}/{} {:.1}s",
+                        w.rate, w.channels, w.bits, w.secs
+                    )),
                     None => line.push_str(" no wav"),
                 }
                 // The verdict turn says closing, roast and the level; the result repeats the roast.
@@ -2050,7 +2725,12 @@ fn ielts_server(listener: std::net::TcpListener, seen: &Mutex<Vec<String>>, stop
                     r#"{{"band":6.5,"criteria":{criteria},"roast":{},"tips":["Satu.","Dua.","Tiga."],"level":{{"before":1,"after":2,"unlocked":true}},"best":6.5}}"#,
                     clip("Not bad at all.")
                 );
-                (200, format!(r#"{{"heard":"I'm from Bandung.","done":true,"turn":{turn},"result":{result}}}"#))
+                (
+                    200,
+                    format!(
+                        r#"{{"heard":"I'm from Bandung.","done":true,"turn":{turn},"result":{result}}}"#
+                    ),
+                )
             }
             ("DELETE", p) if p == session => (200, r#"{"ok":true}"#.to_string()),
             _ => (404, r#"{"error":"not_found"}"#.to_string()),
@@ -2089,7 +2769,13 @@ impl NotesRun {
         let seen = Arc::new(Mutex::new(Vec::new()));
         let stop = Arc::new(AtomicBool::new(false));
         let dir = paths::notes_audio_dir().join("meeting-selftest");
-        let mut run = NotesRun { seen: seen.clone(), stop: stop.clone(), server: None, dir: dir.clone(), started: Instant::now() };
+        let mut run = NotesRun {
+            seen: seen.clone(),
+            stop: stop.clone(),
+            server: None,
+            dir: dir.clone(),
+            started: Instant::now(),
+        };
         let listener = match std::net::TcpListener::bind("127.0.0.1:0") {
             Ok(l) => l,
             Err(e) => {
@@ -2099,7 +2785,9 @@ impl NotesRun {
         };
         let port = listener.local_addr().map(|a| a.port()).unwrap_or(0);
         let _ = listener.set_nonblocking(true);
-        run.server = Some(std::thread::spawn(move || notes_server(listener, &seen, &stop)));
+        run.server = Some(std::thread::spawn(move || {
+            notes_server(listener, &seen, &stop)
+        }));
         let _ = fs::create_dir_all(&dir);
         let rate = poni_core::notes::RATE;
         let parts = vec![dir.join("part-000.wav"), dir.join("part-001.wav")];
@@ -2109,7 +2797,15 @@ impl NotesRun {
             }
         }
         crate::pinfo!("selftest: notes turn against 127.0.0.1:{port}");
-        app.selftest_notes_begin(format!("http://127.0.0.1:{port}"), NOTES_KEY.into(), crate::services::notes::Take { dir, parts, secs: 3.0 });
+        app.selftest_notes_begin(
+            format!("http://127.0.0.1:{port}"),
+            NOTES_KEY.into(),
+            crate::services::notes::Take {
+                dir,
+                parts,
+                secs: 3.0,
+            },
+        );
         run
     }
 
@@ -2128,7 +2824,13 @@ impl NotesRun {
                 let why = format!("{p:?}");
                 Some(self.finish(app, Some(why)))
             }
-            _ if t > NOTES_TURN_S => Some(self.finish(app, Some(format!("still {:?} after {NOTES_TURN_S} s", app.st.notes.phase)))),
+            _ if t > NOTES_TURN_S => Some(self.finish(
+                app,
+                Some(format!(
+                    "still {:?} after {NOTES_TURN_S} s",
+                    app.st.notes.phase
+                )),
+            )),
             _ => None,
         }
     }
@@ -2136,7 +2838,10 @@ impl NotesRun {
     fn finish(&mut self, app: &mut App, failed: Option<String>) -> Check {
         let ms = self.started.elapsed().as_millis();
         let saved = app.st.notes.last.as_ref().map(|s| s.file.clone());
-        let md = saved.as_ref().and_then(|f| fs::read_to_string(f).ok()).unwrap_or_default();
+        let md = saved
+            .as_ref()
+            .and_then(|f| fs::read_to_string(f).ok())
+            .unwrap_or_default();
         let audio_left = self.dir.exists();
         app.selftest_notes_end();
         self.stop.store(true, std::sync::atomic::Ordering::SeqCst);
@@ -2152,25 +2857,44 @@ impl NotesRun {
         let wrote = md.contains("# Self-test sync")
             && md.contains("- [ ] Send the deck (Rina, Friday)")
             && md.contains("**[0:01] Speaker 1:** Let's start.")
-            && saved.as_deref().is_some_and(|f| f.ends_with("2026-10-29 14.05 Self-test sync.md"));
+            && saved
+                .as_deref()
+                .is_some_and(|f| f.ends_with("2026-10-29 14.05 Self-test sync.md"));
         let handed = failed.is_none()
             && has("POST /island/notes key lang=auto")
-            && has(&format!("POST /island/notes/{NOTES_ID}/part/0 key wav=16000/1/16 2.0s"))
-            && has(&format!("POST /island/notes/{NOTES_ID}/part/1 key wav=16000/1/16 1.0s"))
+            && has(&format!(
+                "POST /island/notes/{NOTES_ID}/part/0 key wav=16000/1/16 2.0s"
+            ))
+            && has(&format!(
+                "POST /island/notes/{NOTES_ID}/part/1 key wav=16000/1/16 1.0s"
+            ))
             && has(&format!("POST /island/notes/{NOTES_ID}/finish key"))
             && has(&format!("GET /island/notes/{NOTES_ID} key"))
             && has(&format!("DELETE /island/notes/{NOTES_ID} key"))
             && wrote
             && !audio_left;
         let ok = handed || wine;
-        let note = if wine { "Wine has no WinRT HttpClient, so this runs on Windows only; " } else { "" };
+        let note = if wine {
+            "Wine has no WinRT HttpClient, so this runs on Windows only; "
+        } else {
+            ""
+        };
         let detail = format!(
             "{note}{}server saw [{}]; notes {}; audio left: {audio_left}; {ms} ms",
             failed.map_or(String::new(), |s| format!("stopped at {s}; ")),
             seen.join(" | "),
-            if wrote { "saved" } else if saved.is_some() { "saved but not as expected" } else { "not saved" }
+            if wrote {
+                "saved"
+            } else if saved.is_some() {
+                "saved but not as expected"
+            } else {
+                "not saved"
+            }
         );
-        crate::pinfo!("selftest: notes-turn {}: {detail}", if ok { "ok" } else { "FAILED" });
+        crate::pinfo!(
+            "selftest: notes-turn {}: {detail}",
+            if ok { "ok" } else { "FAILED" }
+        );
         check("notes-turn", ok, detail)
     }
 }
@@ -2199,36 +2923,68 @@ fn notes_server(listener: std::net::TcpListener, seen: &Mutex<Vec<String>>, stop
                 Ok(0) | Err(_) => break (String::new(), Vec::new()),
                 Ok(n) => buf.extend_from_slice(&chunk[..n]),
             }
-            let Some(end) = buf.windows(4).position(|w| w == b"\r\n\r\n") else { continue };
+            let Some(end) = buf.windows(4).position(|w| w == b"\r\n\r\n") else {
+                continue;
+            };
             let head = String::from_utf8_lossy(&buf[..end]).to_ascii_lowercase();
-            let len = head.lines().find_map(|l| l.strip_prefix("content-length:").map(|v| v.trim().parse::<usize>().unwrap_or(0))).unwrap_or(0);
+            let len = head
+                .lines()
+                .find_map(|l| {
+                    l.strip_prefix("content-length:")
+                        .map(|v| v.trim().parse::<usize>().unwrap_or(0))
+                })
+                .unwrap_or(0);
             if head.contains("expect: 100-continue") && !continued {
                 continued = true;
                 let _ = c.write_all(b"HTTP/1.1 100 Continue\r\n\r\n");
             }
             if buf.len() >= end + 4 + len {
-                break (String::from_utf8_lossy(&buf[..end]).into_owned(), buf[end + 4..end + 4 + len].to_vec());
+                break (
+                    String::from_utf8_lossy(&buf[..end]).into_owned(),
+                    buf[end + 4..end + 4 + len].to_vec(),
+                );
             }
         };
         let mut first = head.lines().next().unwrap_or("").split_whitespace();
-        let (method, path) = (first.next().unwrap_or("").to_string(), first.next().unwrap_or("").to_string());
-        let key = head.lines().any(|l| l.split_once(':').is_some_and(|(k, v)| k.eq_ignore_ascii_case("authorization") && v.trim() == format!("Bearer {NOTES_KEY}")));
+        let (method, path) = (
+            first.next().unwrap_or("").to_string(),
+            first.next().unwrap_or("").to_string(),
+        );
+        let key = head.lines().any(|l| {
+            l.split_once(':').is_some_and(|(k, v)| {
+                k.eq_ignore_ascii_case("authorization") && v.trim() == format!("Bearer {NOTES_KEY}")
+            })
+        });
         let mut line = format!("{method} {path} {}", if key { "key" } else { "no key" });
         let (status, answer) = match (method.as_str(), path.as_str()) {
             ("POST", "/island/notes") => {
                 let json: serde_json::Value = serde_json::from_slice(&body).unwrap_or_default();
                 line.push_str(&format!(" lang={}", json["lang"].as_str().unwrap_or("?")));
-                (200, format!(r#"{{"id":"{NOTES_ID}","part_max":12582912,"max_secs":10800,"today":{{"used_min":0,"cap_min":240}}}}"#))
+                (
+                    200,
+                    format!(
+                        r#"{{"id":"{NOTES_ID}","part_max":12582912,"max_secs":10800,"today":{{"used_min":0,"cap_min":240}}}}"#
+                    ),
+                )
             }
             ("POST", p) if p.starts_with(&format!("{meeting}/part/")) => {
-                let n: u32 = p.rsplit('/').next().and_then(|n| n.parse().ok()).unwrap_or(0);
+                let n: u32 = p
+                    .rsplit('/')
+                    .next()
+                    .and_then(|n| n.parse().ok())
+                    .unwrap_or(0);
                 match poni_core::ielts::wav_info(&body) {
-                    Some(w) => line.push_str(&format!(" wav={}/{}/{} {:.1}s", w.rate, w.channels, w.bits, w.secs)),
+                    Some(w) => line.push_str(&format!(
+                        " wav={}/{}/{} {:.1}s",
+                        w.rate, w.channels, w.bits, w.secs
+                    )),
                     None => line.push_str(" no wav"),
                 }
                 (200, format!(r#"{{"next":{},"secs":{}}}"#, n + 1, 3))
             }
-            ("POST", p) if p == format!("{meeting}/finish") => (202, r#"{"status":"working"}"#.to_string()),
+            ("POST", p) if p == format!("{meeting}/finish") => {
+                (202, r#"{"status":"working"}"#.to_string())
+            }
             ("GET", p) if p == meeting => (200, NOTES_DONE.to_string()),
             ("DELETE", p) if p == meeting => (200, r#"{"ok":true}"#.to_string()),
             _ => (404, r#"{"error":"no_notes"}"#.to_string()),
@@ -2250,7 +3006,11 @@ struct Check {
 }
 
 fn check(name: &str, ok: bool, detail: impl Into<String>) -> Check {
-    Check { name: name.into(), ok, detail: detail.into() }
+    Check {
+        name: name.into(),
+        ok,
+        detail: detail.into(),
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -2301,32 +3061,63 @@ struct Report {
 
 enum Phase {
     /// Record one transition frame by frame (PONI_SELFTEST_ANIM=1).
-    Anim { seq: usize },
+    Anim {
+        seq: usize,
+    },
     /// Record the media pill playing, then paused (PONI_SELFTEST_LOOP=1).
     Loop,
     /// Film the lyrics moving to the next line (PONI_SELFTEST_SCROLL=<Hz>).
     Scroll,
-    Settle { i: usize, since: f64, steps: u32, stable: u32 },
-    Click { i: usize },
-    ClickWait { i: usize, since: f64, from: PageKind, want: PageKind },
+    Settle {
+        i: usize,
+        since: f64,
+        steps: u32,
+        stable: u32,
+    },
+    Click {
+        i: usize,
+    },
+    ClickWait {
+        i: usize,
+        since: f64,
+        from: PageKind,
+        want: PageKind,
+    },
     /// After the scenes: a real click on the Settings page's last row,
     /// Advanced settings (`clicked` once pressed): the window opens and the
     /// island closes.
-    Advanced { since: f64, clicked: bool },
+    Advanced {
+        since: f64,
+        clicked: bool,
+    },
     /// Then the Settings window's `k`-th section as a picture.
-    Window { k: usize },
+    Window {
+        k: usize,
+    },
     /// Scene `i` shows the prayer countdown; once it rests with its OK
     /// drawn, press OK (`Scene::PrayerOk`).
-    PressOk { i: usize, since: f64 },
+    PressOk {
+        i: usize,
+        since: f64,
+    },
     /// Scene `i` has a song on the closed island; once it rests, drag it
     /// to the right (`Scene::IslandDrag`).
-    Drag { i: usize, since: f64 },
+    Drag {
+        i: usize,
+        since: f64,
+    },
     /// The IELTS coach's one turn against a server of the self-test's own
     /// (Classic runs only; see [`IeltsRun`]).
-    Ielts { since: f64 },
+    Ielts {
+        since: f64,
+    },
     /// After the IELTS turn: one meeting handed over end to end (`NotesRun`).
-    Notes { since: f64 },
-    Finish { since: f64 },
+    Notes {
+        since: f64,
+    },
+    Finish {
+        since: f64,
+    },
     Done(i32),
 }
 
@@ -2391,7 +3182,11 @@ pub struct SelfTest {
 /// Transitions recorded in animation mode: (name, from, to).
 const ANIMS: [(&str, Scene, Scene); 5] = [
     ("expand", Scene::Media, Scene::Page(PageKind::Media)),
-    ("page", Scene::Page(PageKind::Media), Scene::Page(PageKind::Focus)),
+    (
+        "page",
+        Scene::Page(PageKind::Media),
+        Scene::Page(PageKind::Focus),
+    ),
     ("collapse", Scene::Page(PageKind::Media), Scene::Media),
     ("hud", Scene::Media, Scene::VolumeHud),
     ("notice", Scene::IdleClock, Scene::HealthNotice),
@@ -2417,10 +3212,18 @@ impl SelfTest {
         Self {
             dir: PathBuf::from(dir),
             t0: Instant::now(),
-            phase: Phase::Settle { i: 0, since: 0.0, steps: 0, stable: 0 },
+            phase: Phase::Settle {
+                i: 0,
+                since: 0.0,
+                steps: 0,
+                stable: 0,
+            },
             art: None,
             art_color: None,
-            lyrics: LyricsState { track_key: track_key.clone(), ..Default::default() },
+            lyrics: LyricsState {
+                track_key: track_key.clone(),
+                ..Default::default()
+            },
             track_key,
             lyric_pos: TRACK_POS_S,
             health: None,
@@ -2429,12 +3232,20 @@ impl SelfTest {
             writes: Vec::new(),
             scale: 1.0,
             expanded_width: 0.0,
-            dpi: std::env::var("PONI_SELFTEST_DPI").ok().and_then(|v| v.trim().parse().ok()),
+            dpi: std::env::var("PONI_SELFTEST_DPI")
+                .ok()
+                .and_then(|v| v.trim().parse().ok()),
             anim: std::env::var("PONI_SELFTEST_ANIM").is_ok_and(|v| v.trim() == "1"),
             media_loop: std::env::var("PONI_SELFTEST_LOOP").is_ok_and(|v| v.trim() == "1"),
-            scroll_hz: std::env::var("PONI_SELFTEST_SCROLL").ok().and_then(|v| v.trim().parse().ok()).filter(|hz: &f64| (20.0..=500.0).contains(hz)),
+            scroll_hz: std::env::var("PONI_SELFTEST_SCROLL")
+                .ok()
+                .and_then(|v| v.trim().parse().ok())
+                .filter(|hz: &f64| (20.0..=500.0).contains(hz)),
             dpi_applied: false,
-            theme: match std::env::var("PONI_SELFTEST_THEME").map(|v| v.trim().to_ascii_lowercase()).as_deref() {
+            theme: match std::env::var("PONI_SELFTEST_THEME")
+                .map(|v| v.trim().to_ascii_lowercase())
+                .as_deref()
+            {
                 Ok("oyen") => Theme::Oyen,
                 Ok("glass") => Theme::Glass,
                 Ok("pill") => Theme::Pill,
@@ -2445,7 +3256,10 @@ impl SelfTest {
             slow_frames: Vec::new(),
             glass_size: Cell::new((0, 0)),
             glass_scene: Cell::new(None),
-            lyrics_lang: std::env::var("PONI_SELFTEST_LYRICS").ok().map(|v| v.trim().to_ascii_lowercase()).filter(|v| !v.is_empty()),
+            lyrics_lang: std::env::var("PONI_SELFTEST_LYRICS")
+                .ok()
+                .map(|v| v.trim().to_ascii_lowercase())
+                .filter(|v| !v.is_empty()),
             renderer: "software",
             shelf_items: Vec::new(),
             shelf_thumbs: Vec::new(),
@@ -2464,26 +3278,48 @@ impl SelfTest {
         self.checks.push(check("system-readings", ok, detail));
         // Every picture the AI page has is a scene (the Mac renders take
         // them all from the same list), so a new one can't go unseen here.
-        let missing: Vec<&str> = AiPicture::ALL.into_iter().filter(|p| !SCENES.contains(&Scene::Ai(*p))).map(AiPicture::name).collect();
-        let detail = if missing.is_empty() { format!("all {} of the AI page's pictures", AiPicture::ALL.len()) } else { format!("no scene for {}", missing.join(", ")) };
-        self.checks.push(check("ai-pictures", missing.is_empty(), detail));
+        let missing: Vec<&str> = AiPicture::ALL
+            .into_iter()
+            .filter(|p| !SCENES.contains(&Scene::Ai(*p)))
+            .map(AiPicture::name)
+            .collect();
+        let detail = if missing.is_empty() {
+            format!("all {} of the AI page's pictures", AiPicture::ALL.len())
+        } else {
+            format!("no scene for {}", missing.join(", "))
+        };
+        self.checks
+            .push(check("ai-pictures", missing.is_empty(), detail));
         // Show over games: count Poni's own frames through the whole run.
-        let required = std::env::var("PONI_SELFTEST_FRAMES").is_ok_and(|v| v.trim().eq_ignore_ascii_case("required"));
+        let required = std::env::var("PONI_SELFTEST_FRAMES")
+            .is_ok_and(|v| v.trim().eq_ignore_ascii_case("required"));
         match crate::services::frames::Frames::start_selftest(std::process::id()) {
             Ok(f) => self.frames = Some(f),
-            Err(e) if required => self.checks.push(check("frame-count", false, format!("the frame count didn't start: {e:?}"))),
+            Err(e) if required => self.checks.push(check(
+                "frame-count",
+                false,
+                format!("the frame count didn't start: {e:?}"),
+            )),
             Err(e) => crate::pinfo!("selftest: frame count not started ({e:?})"),
         }
         self.t0 = Instant::now();
         if self.theme == Theme::Glass {
             let run = GlassRun::from_env();
-            crate::pinfo!("selftest: Glass theme over the {} page, Windows in {} mode", if run.dark_page() { "dark" } else { "light" }, if run.app_light() { "light" } else { "dark" });
+            crate::pinfo!(
+                "selftest: Glass theme over the {} page, Windows in {} mode",
+                if run.dark_page() { "dark" } else { "light" },
+                if run.app_light() { "light" } else { "dark" }
+            );
             self.glass = Some(run);
         }
         crate::pinfo!("selftest: output folder {}", self.dir.display());
         match fs::create_dir_all(&self.dir) {
             Ok(()) => self.clear_old_outputs(),
-            Err(e) => self.checks.push(check("output-folder", false, format!("{}: {e}", self.dir.display()))),
+            Err(e) => self.checks.push(check(
+                "output-folder",
+                false,
+                format!("{}: {e}", self.dir.display()),
+            )),
         }
 
         // Quiet, deterministic settings (defaults otherwise: the home folder is fresh).
@@ -2495,7 +3331,11 @@ impl SelfTest {
         st.settings.hud_bluetooth = true;
         st.accent = palette::BLUE;
         st.pinned = false;
-        st.volume = VolumeState { level: 0.64, muted: false, known: true };
+        st.volume = VolumeState {
+            level: 0.64,
+            muted: false,
+            known: true,
+        };
         st.power = fake_power(false);
         st.stats = fake_stats();
 
@@ -2505,7 +3345,9 @@ impl SelfTest {
         self.art = Some(art);
         // PONI_SELFTEST_LRC=<file>: a real song for a one-off check on CI
         // (fetched there at run time; song lyrics never go in the repo).
-        let file = std::env::var("PONI_SELFTEST_LRC").ok().and_then(|p| fs::read_to_string(p.trim()).ok());
+        let file = std::env::var("PONI_SELFTEST_LRC")
+            .ok()
+            .and_then(|p| fs::read_to_string(p.trim()).ok());
         let lrc = match (file.as_deref(), self.lyrics_lang.as_deref()) {
             (Some(f), _) => f,
             (None, Some("ja")) => LYRICS_JA,
@@ -2515,11 +3357,18 @@ impl SelfTest {
         };
         let parsed = parse_lrc(lrc);
         if file.is_none() {
-            let lyric_ok = parsed.synced && parsed.lines.len() == 12 && parsed.line_index_at(TRACK_POS_S) == Some(4);
+            let lyric_ok = parsed.synced
+                && parsed.lines.len() == 12
+                && parsed.line_index_at(TRACK_POS_S) == Some(4);
             self.checks.push(check(
                 "lyrics-fixture",
                 lyric_ok,
-                format!("{} lines, synced {}, line at {TRACK_POS_S}s = {:?}", parsed.lines.len(), parsed.synced, parsed.line_index_at(TRACK_POS_S)),
+                format!(
+                    "{} lines, synced {}, line at {TRACK_POS_S}s = {:?}",
+                    parsed.lines.len(),
+                    parsed.synced,
+                    parsed.line_index_at(TRACK_POS_S)
+                ),
             ));
         }
         if let Some(pos) = lyric_scene_pos(&parsed) {
@@ -2532,12 +3381,21 @@ impl SelfTest {
         // way 0.1.11 and older read it there (kana lines only), for
         // before/after pictures. Without it, Wine has no analyzer, so its
         // lines come from Oyenza Studio's own dictionary.
-        let analyzer = std::env::var("PONI_SELFTEST_ANALYZER").map(|v| v.trim().to_ascii_lowercase()).unwrap_or_default();
+        let analyzer = std::env::var("PONI_SELFTEST_ANALYZER")
+            .map(|v| v.trim().to_ascii_lowercase())
+            .unwrap_or_default();
         let texts: Vec<&str> = parsed.lines.iter().map(|l| l.text.trim()).collect();
-        let japanese = poni_core::romanize::song_script(&texts) == Some(poni_core::romanize::Script::Japanese);
+        let japanese =
+            poni_core::romanize::song_script(&texts) == Some(poni_core::romanize::Script::Japanese);
         if analyzer == "required" {
             let works = crate::services::romanize::analyzer_works();
-            self.checks.push(check("japanese-analyzer", works.is_ok(), works.err().unwrap_or_else(|| "Windows' analyzer reads Japanese".into())));
+            self.checks.push(check(
+                "japanese-analyzer",
+                works.is_ok(),
+                works
+                    .err()
+                    .unwrap_or_else(|| "Windows' analyzer reads Japanese".into()),
+            ));
         }
         // PONI_SELFTEST_JA_DICT=<file> (CI passes the repo's copy): Oyen
         // Poni's own dictionary, put where the Japanese readings add-on keeps
@@ -2545,14 +3403,26 @@ impl SelfTest {
         if let Ok(src) = std::env::var("PONI_SELFTEST_JA_DICT") {
             let file = &JAPANESE_READINGS.files[0];
             let to = crate::services::addons::file_path(&JAPANESE_READINGS, file.name);
-            let placed = fs::read(src.trim()).map_err(|e| format!("{}: {e}", src.trim())).and_then(|b| {
-                if !file.matches(&b) {
-                    return Err(format!("{} bytes, not the dictionary the add-on pins", b.len()));
-                }
-                to.parent().map(fs::create_dir_all).transpose().map_err(|e| e.to_string())?;
-                fs::write(&to, &b).map_err(|e| e.to_string())
-            });
-            self.checks.push(check("ja-readings-file", placed.is_ok(), placed.map_or_else(|e| e, |_| format!("{} in the add-on's folder", file.name))));
+            let placed = fs::read(src.trim())
+                .map_err(|e| format!("{}: {e}", src.trim()))
+                .and_then(|b| {
+                    if !file.matches(&b) {
+                        return Err(format!(
+                            "{} bytes, not the dictionary the add-on pins",
+                            b.len()
+                        ));
+                    }
+                    to.parent()
+                        .map(fs::create_dir_all)
+                        .transpose()
+                        .map_err(|e| e.to_string())?;
+                    fs::write(&to, &b).map_err(|e| e.to_string())
+                });
+            self.checks.push(check(
+                "ja-readings-file",
+                placed.is_ok(),
+                placed.map_or_else(|e| e, |_| format!("{} in the add-on's folder", file.name)),
+            ));
         }
         let (ruby, wants_ja_readings) = if japanese && analyzer == "off" {
             let read = crate::services::romanize::own_song(&texts);
@@ -2560,7 +3430,13 @@ impl SelfTest {
         } else if japanese && analyzer == "kana" {
             // A PC without Windows' Japanese data or the add-on: kana lines
             // read, and the Music page offers the add-on.
-            let kana = |t: &str| if poni_core::romanize::needs_roman(t) { poni_core::romanize::japanese_kana_ruby(t).unwrap_or_default() } else { Vec::new() };
+            let kana = |t: &str| {
+                if poni_core::romanize::needs_roman(t) {
+                    poni_core::romanize::japanese_kana_ruby(t).unwrap_or_default()
+                } else {
+                    Vec::new()
+                }
+            };
             (texts.iter().map(|t| kana(t)).collect(), true)
         } else {
             // Read on a thread in the multithreaded apartment, the way the
@@ -2576,20 +3452,50 @@ impl SelfTest {
             });
             (read.ruby, read.wants_ja_readings)
         };
-        let lang = self.lyrics_lang.clone().or_else(|| file.as_ref().map(|_| "lrc".to_string()));
+        let lang = self
+            .lyrics_lang
+            .clone()
+            .or_else(|| file.as_ref().map(|_| "lrc".to_string()));
         if let Some(lang) = &lang {
             // The CI log shows how each line reads (on Windows the Japanese
             // readings come from the system's analyzer).
-            let read = |p: &[poni_core::romanize::Ruby]| p.iter().filter(|r| !r.roman.is_empty()).map(|r| r.roman.as_str()).collect::<Vec<_>>().join(" ");
-            let needing = texts.iter().filter(|t| poni_core::romanize::needs_roman(t)).count();
-            let lines_read = ruby.iter().filter(|p| p.iter().any(|r| !r.roman.is_empty())).count();
+            let read = |p: &[poni_core::romanize::Ruby]| {
+                p.iter()
+                    .filter(|r| !r.roman.is_empty())
+                    .map(|r| r.roman.as_str())
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            };
+            let needing = texts
+                .iter()
+                .filter(|t| poni_core::romanize::needs_roman(t))
+                .count();
+            let lines_read = ruby
+                .iter()
+                .filter(|p| p.iter().any(|r| !r.roman.is_empty()))
+                .count();
             for (line, p) in parsed.lines.iter().zip(&ruby) {
                 crate::pinfo!("selftest: [{lang}] {} -> {}", line.text, read(p));
             }
-            let ok = if matches!(analyzer.as_str(), "required" | "off") { lines_read == needing } else { lines_read > 0 };
-            self.checks.push(check("lyrics-pronunciation", ok, format!("{lines_read} of {needing} {lang} lines read in Latin letters")));
+            let ok = if matches!(analyzer.as_str(), "required" | "off") {
+                lines_read == needing
+            } else {
+                lines_read > 0
+            };
+            self.checks.push(check(
+                "lyrics-pronunciation",
+                ok,
+                format!("{lines_read} of {needing} {lang} lines read in Latin letters"),
+            ));
         }
-        self.lyrics = LyricsState { track_key: self.track_key.clone(), status: LyricsStatus::Found, lyrics: Some(parsed), source: "Sample".into(), ruby, wants_ja_readings };
+        self.lyrics = LyricsState {
+            track_key: self.track_key.clone(),
+            status: LyricsStatus::Found,
+            lyrics: Some(parsed),
+            source: "Sample".into(),
+            ruby,
+            wants_ja_readings,
+        };
 
         seed_tasks(st);
         self.health = Some(sample_health(st));
@@ -2616,22 +3522,24 @@ impl SelfTest {
         if std::env::var("PONI_SELFTEST_ADDONS").is_ok_and(|v| v.trim() == "download") {
             let (tx, rx) = std::sync::mpsc::channel();
             let dir = paths::addons_dir().join("selftest-download");
-            let _ = std::thread::Builder::new().name("selftest-addon".into()).spawn(move || {
-                let (mut ok, mut said) = (true, Vec::new());
-                for a in poni_core::addons::ALL {
-                    // An add-on whose files aren't on their release yet (the
-                    // Downloader until addon-downloader-1 is published) has
-                    // nothing to check; its switch says so (`Status::Unpinned`).
-                    if !a.pinned() {
-                        said.push(format!("{}: not pinned yet", a.id));
-                        continue;
+            let _ = std::thread::Builder::new()
+                .name("selftest-addon".into())
+                .spawn(move || {
+                    let (mut ok, mut said) = (true, Vec::new());
+                    for a in poni_core::addons::ALL {
+                        // An add-on whose files aren't on their release yet (the
+                        // Downloader until addon-downloader-1 is published) has
+                        // nothing to check; its switch says so (`Status::Unpinned`).
+                        if !a.pinned() {
+                            said.push(format!("{}: not pinned yet", a.id));
+                            continue;
+                        }
+                        let (fine, detail) = crate::services::addons::fetch_for_selftest(a, &dir);
+                        ok &= fine;
+                        said.push(format!("{}: {detail}", a.id));
                     }
-                    let (fine, detail) = crate::services::addons::fetch_for_selftest(a, &dir);
-                    ok &= fine;
-                    said.push(format!("{}: {detail}", a.id));
-                }
-                let _ = tx.send((ok, said.join("; ")));
-            });
+                    let _ = tx.send((ok, said.join("; ")));
+                });
             self.addon_fetch = Some(rx);
         }
     }
@@ -2643,7 +3551,10 @@ impl SelfTest {
             self.checks.push(check("phone-drop-server", ok, detail));
             self.dpi_applied = true;
             if let Some(dpi) = self.dpi {
-                crate::pinfo!("selftest: rendering at {dpi} DPI ({:.0} %)", dpi as f32 / 96.0 * 100.0);
+                crate::pinfo!(
+                    "selftest: rendering at {dpi} DPI ({:.0} %)",
+                    dpi as f32 / 96.0 * 100.0
+                );
                 app.selftest_set_dpi(dpi);
             }
         }
@@ -2654,14 +3565,29 @@ impl SelfTest {
         let elapsed = self.t0.elapsed().as_secs_f64();
         // The IELTS run keeps its own time (each of its steps has a budget).
         if elapsed > SCENE_DEADLINE
-            && !matches!(self.phase, Phase::Finish { .. } | Phase::Done(_) | Phase::Anim { .. } | Phase::Loop | Phase::Scroll | Phase::Ielts { .. } | Phase::Notes { .. })
+            && !matches!(
+                self.phase,
+                Phase::Finish { .. }
+                    | Phase::Done(_)
+                    | Phase::Anim { .. }
+                    | Phase::Loop
+                    | Phase::Scroll
+                    | Phase::Ielts { .. }
+                    | Phase::Notes { .. }
+            )
         {
             let at = match &self.phase {
-                Phase::Settle { i, .. } | Phase::Click { i } | Phase::ClickWait { i, .. } => SCENES[*i].name(),
+                Phase::Settle { i, .. } | Phase::Click { i } | Phase::ClickWait { i, .. } => {
+                    SCENES[*i].name()
+                }
                 _ => String::new(),
             };
             crate::pwarn!("selftest: deadline reached while at '{at}'");
-            self.checks.push(check("deadline", false, format!("stopped after {elapsed:.1} s at '{at}'")));
+            self.checks.push(check(
+                "deadline",
+                false,
+                format!("stopped after {elapsed:.1} s at '{at}'"),
+            ));
             self.phase = Phase::Finish { since: now };
         }
 
@@ -2680,15 +3606,28 @@ impl SelfTest {
             }
             Phase::Loop => {
                 self.record_loop(app);
-                self.phase = if self.scroll_hz.is_some() { Phase::Scroll } else { Phase::Finish { since: clock::mono() } };
+                self.phase = if self.scroll_hz.is_some() {
+                    Phase::Scroll
+                } else {
+                    Phase::Finish {
+                        since: clock::mono(),
+                    }
+                };
             }
             Phase::Scroll => {
                 if let Some(hz) = self.scroll_hz {
                     self.record_scroll(app, hz);
                 }
-                self.phase = Phase::Finish { since: clock::mono() };
+                self.phase = Phase::Finish {
+                    since: clock::mono(),
+                };
             }
-            Phase::Settle { i, since, steps, stable } => {
+            Phase::Settle {
+                i,
+                since,
+                steps,
+                stable,
+            } => {
                 let scene = SCENES[i];
                 let since = if steps == 0 { now } else { since };
                 self.apply(app, scene);
@@ -2698,13 +3637,19 @@ impl SelfTest {
                 let waited = now - since;
                 let timed_out = waited > self.settle_limit(app);
                 // No picture mid-blink: the eyes, and Oyen in the Oyenza tab.
-                let blinking = (scene == Scene::IdleEyes && mid_blink()) || (scene.expanded() && crate::oyen::mid_rest_move(clock::mono(), 0.3));
+                let blinking = (scene == Scene::IdleEyes && mid_blink())
+                    || (scene.expanded() && crate::oyen::mid_rest_move(clock::mono(), 0.3));
                 let ready = steps >= MIN_STEPS && stable >= STABLE_STEPS && !blinking;
                 if ready || timed_out {
                     self.capture(app, i, !timed_out || settled, waited);
                     self.phase = self.next_phase(i + 1, now);
                 } else {
-                    self.phase = Phase::Settle { i, since, steps, stable };
+                    self.phase = Phase::Settle {
+                        i,
+                        since,
+                        steps,
+                        stable,
+                    };
                 }
             }
             Phase::Click { i } => {
@@ -2712,53 +3657,114 @@ impl SelfTest {
                 // The first tab, or the gear (found by its widget id: its place
                 // depends on how wide the clock and date are).
                 let (what, at, want) = match SCENES[i] {
-                    Scene::GearClick => ("the gear", app.selftest_hit_center(wid(pages::GEAR_ID)), PageKind::Settings),
-                    _ => ("the first header tab", Some(first_tab_point(app.island_body())), PageKind::ALL[0]),
+                    Scene::GearClick => (
+                        "the gear",
+                        app.selftest_hit_center(wid(pages::GEAR_ID)),
+                        PageKind::Settings,
+                    ),
+                    _ => (
+                        "the first header tab",
+                        Some(first_tab_point(app.island_body())),
+                        PageKind::ALL[0],
+                    ),
                 };
                 match at {
                     Some(p) => {
-                        crate::pinfo!("selftest: clicking {what} at ({:.0}, {:.0}) DIP on page '{}'", p.x, p.y, from.key());
+                        crate::pinfo!(
+                            "selftest: clicking {what} at ({:.0}, {:.0}) DIP on page '{}'",
+                            p.x,
+                            p.y,
+                            from.key()
+                        );
                         app.selftest_click(p);
                     }
                     None => crate::pwarn!("selftest: {what} isn't on page '{}'", from.key()),
                 }
-                self.phase = Phase::ClickWait { i, since: now, from, want };
+                self.phase = Phase::ClickWait {
+                    i,
+                    since: now,
+                    from,
+                    want,
+                };
             }
-            Phase::ClickWait { i, since, from, want } => {
+            Phase::ClickWait {
+                i,
+                since,
+                from,
+                want,
+            } => {
                 let page = app.st.page;
                 if page != from || now - since > CLICK_TIMEOUT {
                     let ok = from != want && page == want;
-                    let name = if SCENES[i] == Scene::GearClick { "gear-click" } else { "tab-click" };
+                    let name = if SCENES[i] == Scene::GearClick {
+                        "gear-click"
+                    } else {
+                        "tab-click"
+                    };
                     self.checks.push(check(
                         name,
                         ok,
-                        format!("page '{}' -> '{}' after {:.0} ms (expected '{}')", from.key(), page.key(), (now - since) * 1000.0, want.key()),
+                        format!(
+                            "page '{}' -> '{}' after {:.0} ms (expected '{}')",
+                            from.key(),
+                            page.key(),
+                            (now - since) * 1000.0,
+                            want.key()
+                        ),
                     ));
                     if !ok {
-                        crate::pwarn!("selftest: {name} did not switch to '{}' (page is '{}')", want.key(), page.key());
+                        crate::pwarn!(
+                            "selftest: {name} did not switch to '{}' (page is '{}')",
+                            want.key(),
+                            page.key()
+                        );
                     }
-                    self.phase = Phase::Settle { i, since: now, steps: 0, stable: 0 };
+                    self.phase = Phase::Settle {
+                        i,
+                        since: now,
+                        steps: 0,
+                        stable: 0,
+                    };
                 }
             }
-            Phase::Advanced { since, clicked: false } => {
+            Phase::Advanced {
+                since,
+                clicked: false,
+            } => {
                 // The Settings page on the open island, then a real click on
                 // its last row once the island has settled.
                 self.apply(app, Scene::Page(PageKind::Settings));
-                let at = app.selftest_hit_center(wid(pages::settings::ADVANCED_ID)).filter(|_| app.selftest_settled());
+                let at = app
+                    .selftest_hit_center(wid(pages::settings::ADVANCED_ID))
+                    .filter(|_| app.selftest_settled());
                 match at {
                     Some(p) => {
-                        crate::pinfo!("selftest: clicking Advanced settings at ({:.0}, {:.0}) DIP", p.x, p.y);
+                        crate::pinfo!(
+                            "selftest: clicking Advanced settings at ({:.0}, {:.0}) DIP",
+                            p.x,
+                            p.y
+                        );
                         app.selftest_click(p);
-                        self.phase = Phase::Advanced { since: now, clicked: true };
+                        self.phase = Phase::Advanced {
+                            since: now,
+                            clicked: true,
+                        };
                     }
                     None if now - since > self.settle_limit(app) => {
-                        self.checks.push(check("advanced-settings", false, "no Advanced settings row on the Settings page"));
+                        self.checks.push(check(
+                            "advanced-settings",
+                            false,
+                            "no Advanced settings row on the Settings page",
+                        ));
                         self.phase = Phase::Window { k: 0 };
                     }
                     None => {}
                 }
             }
-            Phase::Advanced { since, clicked: true } => {
+            Phase::Advanced {
+                since,
+                clicked: true,
+            } => {
                 // The window opens and the island closes, so it never sits over the window.
                 let opened = app.settings_window_open();
                 if opened || now - since > CLICK_TIMEOUT {
@@ -2780,32 +3786,52 @@ impl SelfTest {
             Phase::Window { k } => {
                 // Each of the Settings window's sections, as a picture: dark,
                 // then General and Appearance light.
-                let mut list: Vec<_> = crate::settings_window::sections(&app.st).into_iter().map(|s| (s, false)).collect();
-                list.extend([(crate::settings_window::Section::General, true), (crate::settings_window::Section::Appearance, true)]);
+                let mut list: Vec<_> = crate::settings_window::sections(&app.st)
+                    .into_iter()
+                    .map(|s| (s, false))
+                    .collect();
+                list.extend([
+                    (crate::settings_window::Section::General, true),
+                    (crate::settings_window::Section::Appearance, true),
+                ]);
                 match list.get(k) {
                     Some(&(section, light)) => {
                         let (w, h, px) = app.selftest_settings_shot(section, light);
-                        let name = format!("settings-window-{}{}", section.key(), if light { "-light" } else { "" });
+                        let name = format!(
+                            "settings-window-{}{}",
+                            section.key(),
+                            if light { "-light" } else { "" }
+                        );
                         let sized = w > 0 && h > 0 && px.len() == (w as usize) * (h as usize) * 4;
                         // The card is opaque where the sidebar meets the content.
                         let solid = sized && {
                             let s = app.selftest_settings_scale();
-                            let at = |x: f32, y: f32| px[(((y * s) as usize) * w as usize + (x * s) as usize) * 4 + 3];
+                            let at = |x: f32, y: f32| {
+                                px[(((y * s) as usize) * w as usize + (x * s) as usize) * 4 + 3]
+                            };
                             let card = app.selftest_settings_card();
                             at(card.center().x, card.center().y) == 255 && at(1.0, 1.0) == 0
                         };
-                        self.checks.push(check(&name, solid, format!("{w}x{h} px{}", if solid { "" } else { ", card not drawn" })));
+                        self.checks.push(check(
+                            &name,
+                            solid,
+                            format!("{w}x{h} px{}", if solid { "" } else { ", card not drawn" }),
+                        ));
                         if sized {
                             let scale = app.selftest_settings_scale();
                             self.queue_write(&name, w, h, px, scale, None);
                         }
                         // Frames of a glide redraw the whole window: what one costs.
                         if k == 0 {
-                            let median = |ms: &[f64]| ms.get(ms.len() / 2).copied().unwrap_or(f64::INFINITY);
+                            let median =
+                                |ms: &[f64]| ms.get(ms.len() / 2).copied().unwrap_or(f64::INFINITY);
                             let full = app.selftest_settings_frames(30, None);
                             // A glide's frame: the sidebar's highlight going a few rows down.
                             let card = app.selftest_settings_card();
-                            let part = app.selftest_settings_frames(30, Some(Rect::new(card.x + 10.0, card.y + 80.0, 200.0, 140.0)));
+                            let part = app.selftest_settings_frames(
+                                30,
+                                Some(Rect::new(card.x + 10.0, card.y + 80.0, 200.0, 140.0)),
+                            );
                             let detail = format!(
                                 "whole window {:.2} ms (best {:.2}, worst {:.2}), a glide's frame {:.2} ms (worst {:.2}), {} frames each at {:.0} %; 144 Hz leaves 6.94 ms a frame",
                                 median(&full),
@@ -2816,37 +3842,62 @@ impl SelfTest {
                                 full.len(),
                                 app.selftest_settings_scale() * 100.0
                             );
-                            self.checks.push(check("settings-window-frame", median(&full) < SETTINGS_FRAME_BUDGET_MS, detail));
+                            self.checks.push(check(
+                                "settings-window-frame",
+                                median(&full) < SETTINGS_FRAME_BUDGET_MS,
+                                detail,
+                            ));
                             // A person using it, filmed: what the glides' frames
                             // drawn in part show must be what drawing it all shows.
                             // PONI_SELFTEST_FILM keeps every frame as the screen shows
                             // it (film-settings.bgra: premultiplied BGRA, one frame after
                             // another) and the part each drew (film-settings.json).
-                            let mut keep = std::env::var_os("PONI_SELFTEST_FILM").and_then(|_| fs::File::create(self.dir.join("film-settings.bgra")).ok()).map(std::io::BufWriter::new);
+                            let mut keep = std::env::var_os("PONI_SELFTEST_FILM")
+                                .and_then(|_| {
+                                    fs::File::create(self.dir.join("film-settings.bgra")).ok()
+                                })
+                                .map(std::io::BufWriter::new);
                             let mut parts = Vec::new();
                             let film = app.selftest_settings_film(144.0, |k, _, _, px, part| {
                                 if let Some(out) = keep.as_mut() {
                                     let _ = std::io::Write::write_all(out, px);
-                                    let part = part.map_or("null".to_string(), |r| format!("[{}, {}, {}, {}]", r.left, r.top, r.right, r.bottom));
+                                    let part = part.map_or("null".to_string(), |r| {
+                                        format!(
+                                            "[{}, {}, {}, {}]",
+                                            r.left, r.top, r.right, r.bottom
+                                        )
+                                    });
                                     parts.push(format!("{{\"frame\": {k}, \"part\": {part}}}"));
                                 }
                             });
                             if let (Some(mut out), Some(f)) = (keep.take(), film.as_ref()) {
                                 let _ = std::io::Write::flush(&mut out);
                                 let json = format!("{{\"fps\": 144, \"width\": {}, \"height\": {}, \"frames\": [\n  {}\n]}}\n", f.size.0, f.size.1, parts.join(",\n  "));
-                                if let Err(e) = fs::write(self.dir.join("film-settings.json"), json) {
-                                    crate::pwarn!("selftest: writing film-settings.json failed: {e}");
+                                if let Err(e) = fs::write(self.dir.join("film-settings.json"), json)
+                                {
+                                    crate::pwarn!(
+                                        "selftest: writing film-settings.json failed: {e}"
+                                    );
                                 }
                             }
                             let (ok, detail) = match film {
                                 Some(f) => {
                                     let ms = &f.partial_ms;
                                     let worst = match f.worst {
-                                        Some((k, n, r)) => format!("; worst frame {k}: {n} pixels in ({}, {})-({}, {})", r.left, r.top, r.right, r.bottom),
+                                        Some((k, n, r)) => format!(
+                                            "; worst frame {k}: {n} pixels in ({}, {})-({}, {})",
+                                            r.left, r.top, r.right, r.bottom
+                                        ),
                                         None => String::new(),
                                     };
-                                    let missing = if f.missing.is_empty() { String::new() } else { format!("; not found: {}", f.missing.join(", ")) };
-                                    let ok = f.missing.is_empty() && f.differing.is_empty() && ms.len() >= 60;
+                                    let missing = if f.missing.is_empty() {
+                                        String::new()
+                                    } else {
+                                        format!("; not found: {}", f.missing.join(", "))
+                                    };
+                                    let ok = f.missing.is_empty()
+                                        && f.differing.is_empty()
+                                        && ms.len() >= 60;
                                     // The frames that differ, as runs ("24-30, 151").
                                     let mut runs: Vec<(usize, usize)> = Vec::new();
                                     for &k in &f.differing {
@@ -2855,7 +3906,17 @@ impl SelfTest {
                                             _ => runs.push((k, k)),
                                         }
                                     }
-                                    let at = runs.iter().map(|&(a, b)| if a == b { a.to_string() } else { format!("{a}-{b}") }).collect::<Vec<_>>().join(", ");
+                                    let at = runs
+                                        .iter()
+                                        .map(|&(a, b)| {
+                                            if a == b {
+                                                a.to_string()
+                                            } else {
+                                                format!("{a}-{b}")
+                                            }
+                                        })
+                                        .collect::<Vec<_>>()
+                                        .join(", ");
                                     let detail = format!(
                                         "{} frames at 144 Hz ({}x{} px), {} of them a glide's drawn in part: {:.2} ms (worst {:.2}); {} frames differ from the window drawn whole{}{worst}{missing}",
                                         f.frames,
@@ -2885,20 +3946,42 @@ impl SelfTest {
                 // The countdown first, as a person sees it, then a real press
                 // on its OK: the island stays closed and the countdown goes.
                 self.apply(app, SCENES[i]);
-                let at = app.selftest_hit_center(wid(crate::activities::PRAYER_OK_ID)).filter(|_| app.selftest_settled());
+                let at = app
+                    .selftest_hit_center(wid(crate::activities::PRAYER_OK_ID))
+                    .filter(|_| app.selftest_settled());
                 if at.is_some() || now - since > self.settle_limit(app) {
                     let (opened, said) = match at {
                         Some(p) => {
                             crate::pinfo!("selftest: pressing the prayer countdown's OK at ({:.0}, {:.0}) DIP", p.x, p.y);
                             let opened = app.selftest_press(p);
-                            (opened, format!("pressed at ({:.0}, {:.0}) DIP, the island {}", p.x, p.y, if opened { "opened" } else { "stayed closed" }))
+                            (
+                                opened,
+                                format!(
+                                    "pressed at ({:.0}, {:.0}) DIP, the island {}",
+                                    p.x,
+                                    p.y,
+                                    if opened { "opened" } else { "stayed closed" }
+                                ),
+                            )
                         }
                         None => (false, "no OK on the closed island".to_string()),
                     };
                     let away = crate::activities::prayer_countdown(&app.st).is_none();
                     let ok = at.is_some() && !opened && away;
-                    self.checks.push(check("prayer-ok", ok, format!("{said}; the countdown {}", if away { "put away" } else { "still there" })));
-                    self.phase = Phase::Settle { i, since: now, steps: 0, stable: 0 };
+                    self.checks.push(check(
+                        "prayer-ok",
+                        ok,
+                        format!(
+                            "{said}; the countdown {}",
+                            if away { "put away" } else { "still there" }
+                        ),
+                    ));
+                    self.phase = Phase::Settle {
+                        i,
+                        since: now,
+                        steps: 0,
+                        stable: 0,
+                    };
                 }
             }
             Phase::Drag { i, since } => {
@@ -2906,11 +3989,25 @@ impl SelfTest {
                 // move sideways and the release: it moves and stays closed.
                 // Then a click on it where it went: that still opens it.
                 self.apply(app, SCENES[i]);
-                let still = app.selftest_settled() && !app.selftest_expanded() && app.st.settings.island_x.is_none();
+                let still = app.selftest_settled()
+                    && !app.selftest_expanded()
+                    && app.st.settings.island_x.is_none();
                 if still || now - since > self.settle_limit(app) {
-                    let (ok, detail) = if still { drag_check(app) } else { (false, "the island never rested closed in the middle".to_string()) };
+                    let (ok, detail) = if still {
+                        drag_check(app)
+                    } else {
+                        (
+                            false,
+                            "the island never rested closed in the middle".to_string(),
+                        )
+                    };
                     self.checks.push(check("island-drag", ok, detail));
-                    self.phase = Phase::Settle { i, since: now, steps: 0, stable: 0 };
+                    self.phase = Phase::Settle {
+                        i,
+                        since: now,
+                        steps: 0,
+                        stable: 0,
+                    };
                 }
             }
             Phase::Ielts { since } => {
@@ -2918,7 +4015,9 @@ impl SelfTest {
                 if let Some(c) = run.step(app, now - since) {
                     self.ielts = None;
                     self.checks.push(c);
-                    self.phase = Phase::Notes { since: clock::mono() };
+                    self.phase = Phase::Notes {
+                        since: clock::mono(),
+                    };
                 }
             }
             Phase::Notes { since } => {
@@ -2931,7 +4030,11 @@ impl SelfTest {
             }
             Phase::Finish { since } => {
                 let all_done = self.writes.iter().all(|(_, h)| h.is_finished());
-                let deadline = if self.anim || self.media_loop || self.scroll_hz.is_some() { WRITE_DEADLINE + 40.0 } else { WRITE_DEADLINE };
+                let deadline = if self.anim || self.media_loop || self.scroll_hz.is_some() {
+                    WRITE_DEADLINE + 40.0
+                } else {
+                    WRITE_DEADLINE
+                };
                 if all_done || elapsed > deadline {
                     let code = self.finish(all_done, now - since);
                     self.phase = Phase::Done(code);
@@ -2948,10 +4051,18 @@ impl SelfTest {
             Some(Scene::TabClick | Scene::GearClick) => Phase::Click { i },
             Some(Scene::PrayerOk) => Phase::PressOk { i, since: now },
             Some(Scene::IslandDrag) => Phase::Drag { i, since: now },
-            Some(_) => Phase::Settle { i, since: now, steps: 0, stable: 0 },
+            Some(_) => Phase::Settle {
+                i,
+                since: now,
+                steps: 0,
+                stable: 0,
+            },
             // Advanced settings opening the Settings window, then its
             // sections (not over the Glass backdrops).
-            None if self.glass.is_none() => Phase::Advanced { since: now, clicked: false },
+            None if self.glass.is_none() => Phase::Advanced {
+                since: now,
+                clicked: false,
+            },
             None => self.after_window(now),
         }
     }
@@ -2987,7 +4098,9 @@ impl SelfTest {
         loop {
             self.apply(app, from);
             let _ = app.selftest_capture();
-            if (app.selftest_settled() && t.elapsed().as_millis() > 200) || t.elapsed().as_secs_f64() > 2.5 {
+            if (app.selftest_settled() && t.elapsed().as_millis() > 200)
+                || t.elapsed().as_secs_f64() > 2.5
+            {
                 break;
             }
             std::thread::sleep(std::time::Duration::from_millis(16));
@@ -3001,12 +4114,19 @@ impl SelfTest {
             if settle_frame.is_none() && app.selftest_settled() {
                 settle_frame = Some(k);
             }
-            placed.push(format!("{{\"frame\": {k}, \"x\": {}, \"y\": {}, \"w\": {w}, \"h\": {h}}}", at.0, at.1));
+            placed.push(format!(
+                "{{\"frame\": {k}, \"x\": {}, \"y\": {}, \"w\": {w}, \"h\": {h}}}",
+                at.0, at.1
+            ));
             let scale = self.scale;
             self.queue_write(&format!("anim-{name}-{k:02}"), w, h, px, scale, None);
             std::thread::sleep(std::time::Duration::from_millis(16));
         }
-        let json = format!("{{\"name\": \"{name}\", \"scale\": {}, \"frames\": [\n  {}\n]}}\n", self.scale, placed.join(",\n  "));
+        let json = format!(
+            "{{\"name\": \"{name}\", \"scale\": {}, \"frames\": [\n  {}\n]}}\n",
+            self.scale,
+            placed.join(",\n  ")
+        );
         if let Err(e) = fs::write(self.dir.join(format!("anim-{name}.json")), json) {
             crate::pwarn!("selftest: writing anim-{name}.json failed: {e}");
         }
@@ -3023,7 +4143,9 @@ impl SelfTest {
         loop {
             self.apply(app, Scene::Media);
             let _ = app.selftest_capture();
-            if (app.selftest_settled() && t.elapsed().as_millis() > 200) || t.elapsed().as_secs_f64() > 2.5 {
+            if (app.selftest_settled() && t.elapsed().as_millis() > 200)
+                || t.elapsed().as_secs_f64() > 2.5
+            {
                 break;
             }
             std::thread::sleep(std::time::Duration::from_millis(16));
@@ -3047,13 +4169,19 @@ impl SelfTest {
                 app.st.media_paused_at = Some(paused_at);
             }
             let (w, h, px, at) = app.selftest_capture();
-            let Some(k) = i.checked_sub(preroll) else { continue };
+            let Some(k) = i.checked_sub(preroll) else {
+                continue;
+            };
             placed.push(format!("{{\"frame\": {k}, \"t\": {:.4}, \"playing\": {playing}, \"x\": {}, \"y\": {}, \"w\": {w}, \"h\": {h}}}", now - start, at.0, at.1));
             let scale = self.scale;
             self.queue_write(&format!("loop-media-{k:03}"), w, h, px, scale, None);
         }
         clock::hold(None);
-        let json = format!("{{\"name\": \"media\", \"fps\": {LOOP_FPS}, \"scale\": {}, \"frames\": [\n  {}\n]}}\n", self.scale, placed.join(",\n  "));
+        let json = format!(
+            "{{\"name\": \"media\", \"fps\": {LOOP_FPS}, \"scale\": {}, \"frames\": [\n  {}\n]}}\n",
+            self.scale,
+            placed.join(",\n  ")
+        );
         if let Err(e) = fs::write(self.dir.join("loop-media.json"), json) {
             crate::pwarn!("selftest: writing loop-media.json failed: {e}");
         }
@@ -3070,7 +4198,9 @@ impl SelfTest {
         loop {
             self.apply(app, Scene::Page(PageKind::Media));
             let _ = app.selftest_capture();
-            if (app.selftest_settled() && t.elapsed().as_millis() > 200) || t.elapsed().as_secs_f64() > 2.5 {
+            if (app.selftest_settled() && t.elapsed().as_millis() > 200)
+                || t.elapsed().as_secs_f64() > 2.5
+            {
                 break;
             }
             std::thread::sleep(std::time::Duration::from_millis(16));
@@ -3088,14 +4218,20 @@ impl SelfTest {
                 m.timeline = Timeline::new(SCROLL_FROM_S + (now - start), TRACK_LEN_S, now, true);
             }
             let (w, h, px, _) = app.selftest_capture();
-            let Some(k) = i.checked_sub(pre) else { continue };
+            let Some(k) = i.checked_sub(pre) else {
+                continue;
+            };
             // The right half of the page body: the lyrics column.
             let s = self.scale;
             let body = app.island_body_in_capture();
             let x0 = ((body.x + body.w * 0.5) * s).round().clamp(0.0, w as f32) as usize;
             let x1 = (body.right() * s).round().clamp(0.0, w as f32) as usize;
-            let y0 = ((body.y + pages::HEADER_H) * s).round().clamp(0.0, h as f32) as usize;
-            let y1 = ((body.bottom() - pages::PAD) * s).round().clamp(0.0, h as f32) as usize;
+            let y0 = ((body.y + pages::HEADER_H) * s)
+                .round()
+                .clamp(0.0, h as f32) as usize;
+            let y1 = ((body.bottom() - pages::PAD) * s)
+                .round()
+                .clamp(0.0, h as f32) as usize;
             if x1 <= x0 || y1 <= y0 || px.len() < (w * h * 4) as usize {
                 continue;
             }
@@ -3106,7 +4242,12 @@ impl SelfTest {
                     gray.push(p[0].max(p[1]).max(p[2]));
                 }
             }
-            placed.push(format!("{{\"frame\": {k}, \"t\": {:.5}, \"w\": {}, \"h\": {}}}", now - start, x1 - x0, y1 - y0));
+            placed.push(format!(
+                "{{\"frame\": {k}, \"t\": {:.5}, \"w\": {}, \"h\": {}}}",
+                now - start,
+                x1 - x0,
+                y1 - y0
+            ));
             let path = self.dir.join(format!("scroll-lyrics-{k:03}.png"));
             let (gw, gh) = ((x1 - x0) as u32, (y1 - y0) as u32);
             if let Err(e) = png::save_gray(&path, gw, gh, &gray) {
@@ -3114,7 +4255,11 @@ impl SelfTest {
             }
         }
         clock::hold(None);
-        let json = format!("{{\"name\": \"lyrics\", \"hz\": {hz}, \"scale\": {}, \"frames\": [\n  {}\n]}}\n", self.scale, placed.join(",\n  "));
+        let json = format!(
+            "{{\"name\": \"lyrics\", \"hz\": {hz}, \"scale\": {}, \"frames\": [\n  {}\n]}}\n",
+            self.scale,
+            placed.join(",\n  ")
+        );
         if let Err(e) = fs::write(self.dir.join("scroll-lyrics.json"), json) {
             crate::pwarn!("selftest: writing scroll-lyrics.json failed: {e}");
         }
@@ -3135,7 +4280,11 @@ impl SelfTest {
         };
         if st.settings.theme != self.theme {
             st.settings.theme = self.theme;
-            st.accent = if self.theme == Theme::Oyen { crate::oyen::ORANGE } else { palette::BLUE };
+            st.accent = if self.theme == Theme::Oyen {
+                crate::oyen::ORANGE
+            } else {
+                palette::BLUE
+            };
         }
         if let Some(run) = self.glass {
             // What's under the window: drawn again whenever the window grows.
@@ -3156,7 +4305,11 @@ impl SelfTest {
             st.power.percent = LOW_BATTERY;
         }
         st.stats = fake_stats();
-        st.volume = VolumeState { level: 0.64, muted: false, known: true };
+        st.volume = VolumeState {
+            level: 0.64,
+            muted: false,
+            known: true,
+        };
         st.pinned = false;
         st.drag_hover = scene == Scene::ShelfDrop;
         st.health = match scene {
@@ -3169,7 +4322,11 @@ impl SelfTest {
         // Hide in full-screen apps (the default), except in the Stay on top scene.
         st.settings.hide_in_fullscreen = scene != Scene::SettingsStayOnTop;
         // Every tab in the row, except in the scene that hides two.
-        st.settings.hidden_tabs = if scene == Scene::SettingsTabs { vec!["today".into(), "tasks".into()] } else { Vec::new() };
+        st.settings.hidden_tabs = if scene == Scene::SettingsTabs {
+            vec!["today".into(), "tasks".into()]
+        } else {
+            Vec::new()
+        };
         // Step aside is off in the app since 0.2.6; the self-test keeps drawing what's left of it.
         st.settings.step_aside = scene != Scene::SettingsAsideStay;
         // In the middle, except where the drag left it (`Phase::Drag`) and at the right edge.
@@ -3180,31 +4337,56 @@ impl SelfTest {
         };
         // A later version offered, only where Settings shows it. A copy from
         // GitHub reads the update file itself, so Settings has Check now.
-        let looks = crate::state::UpdateView { looks: true, ..Default::default() };
+        let looks = crate::state::UpdateView {
+            looks: true,
+            ..Default::default()
+        };
         st.update = match scene {
-            Scene::SettingsUpdate | Scene::UpdateSheet | Scene::UpdateReady => crate::state::UpdateView {
-                offer: Some(fake_release()),
-                sheet: scene != Scene::SettingsUpdate,
-                ready: scene == Scene::UpdateReady,
-                ..looks
-            },
+            Scene::SettingsUpdate | Scene::UpdateSheet | Scene::UpdateReady => {
+                crate::state::UpdateView {
+                    offer: Some(fake_release()),
+                    sheet: scene != Scene::SettingsUpdate,
+                    ready: scene == Scene::UpdateReady,
+                    ..looks
+                }
+            }
             _ => looks,
         };
         // A new song's title shows for its few seconds (held here).
-        st.ui.peek_until = if scene == Scene::AsidePeek { now + 30.0 } else { 0.0 };
+        st.ui.peek_until = if scene == Scene::AsidePeek {
+            now + 30.0
+        } else {
+            0.0
+        };
         st.phone = fake_phone(scene, now);
         st.paired = fake_paired(scene, st.unix);
         st.pair_server = (!st.paired.is_empty() || scene == Scene::ShelfPairing).then_some(true);
-        let empty_shelf = matches!(scene, Scene::ShelfEmpty | Scene::ShelfPairing | Scene::ShelfPaired | Scene::ShelfPairedPhones);
-        st.store.shelf.items = if empty_shelf { Vec::new() } else { self.shelf_items.clone() };
+        let empty_shelf = matches!(
+            scene,
+            Scene::ShelfEmpty | Scene::ShelfPairing | Scene::ShelfPaired | Scene::ShelfPairedPhones
+        );
+        st.store.shelf.items = if empty_shelf {
+            Vec::new()
+        } else {
+            self.shelf_items.clone()
+        };
         if !empty_shelf {
             for (path, thumb) in &self.shelf_thumbs {
-                st.shelf_thumbs.entry(path.clone()).or_insert_with(|| thumb.clone());
+                st.shelf_thumbs
+                    .entry(path.clone())
+                    .or_insert_with(|| thumb.clone());
             }
         }
 
         if scene.media_playing() {
-            let pos = if matches!(scene, Scene::MediaLyric | Scene::AsideLyric | Scene::PrayerOk) { self.lyric_pos } else { TRACK_POS_S };
+            let pos = if matches!(
+                scene,
+                Scene::MediaLyric | Scene::AsideLyric | Scene::PrayerOk
+            ) {
+                self.lyric_pos
+            } else {
+                TRACK_POS_S
+            };
             let timeline = Timeline::new(pos, TRACK_LEN_S, now, true);
             match st.media.as_mut() {
                 Some(m) if m.track_key == self.track_key => m.timeline = timeline,
@@ -3220,23 +4402,62 @@ impl SelfTest {
 
         st.pomodoro.phase = PomoPhase::Focus;
         st.pomodoro.cycle_done = 1;
-        st.pomodoro.run = if scene.timer_running() { RunState::Running { ends_at: now + TIMER_LEFT_S } } else { RunState::Idle };
+        st.pomodoro.run = if scene.timer_running() {
+            RunState::Running {
+                ends_at: now + TIMER_LEFT_S,
+            }
+        } else {
+            RunState::Idle
+        };
 
         let until = now + 30.0;
         st.hud = match scene {
-            Scene::VolumeHud | Scene::AsideHud => Some(Hud { kind: HudKind::Volume { level: 0.64, muted: false }, until }),
-            Scene::ChargingHud => Some(Hud { kind: HudKind::Charging { percent: 76, plugged: true }, until }),
-            Scene::BluetoothHud => {
-                Some(Hud { kind: HudKind::Bluetooth { name: "Sound Buds".into(), connected: true, battery: Some(80), audio: true }, until })
-            }
-            Scene::LowBatteryHud => Some(Hud { kind: HudKind::LowBattery { percent: LOW_BATTERY }, until }),
+            Scene::VolumeHud | Scene::AsideHud => Some(Hud {
+                kind: HudKind::Volume {
+                    level: 0.64,
+                    muted: false,
+                },
+                until,
+            }),
+            Scene::ChargingHud => Some(Hud {
+                kind: HudKind::Charging {
+                    percent: 76,
+                    plugged: true,
+                },
+                until,
+            }),
+            Scene::BluetoothHud => Some(Hud {
+                kind: HudKind::Bluetooth {
+                    name: "Sound Buds".into(),
+                    connected: true,
+                    battery: Some(80),
+                    audio: true,
+                },
+                until,
+            }),
+            Scene::LowBatteryHud => Some(Hud {
+                kind: HudKind::LowBattery {
+                    percent: LOW_BATTERY,
+                },
+                until,
+            }),
             _ => None,
         };
         st.notice = match scene {
-            Scene::UpdateNotice => Some(crate::updates::new_version_notice(&fake_release(), st.accent, until)),
-            Scene::UpdatedNotice => Some(crate::updates::updated_notice(Some(fake_release().headline), until)),
+            Scene::UpdateNotice => Some(crate::updates::new_version_notice(
+                &fake_release(),
+                st.accent,
+                until,
+            )),
+            Scene::UpdatedNotice => Some(crate::updates::updated_notice(
+                Some(fake_release().headline),
+                until,
+            )),
             Scene::HealthNotice => {
-                let steps = st.health.as_ref().map_or(0, |h| h.steps_on(&st.local.day_key()));
+                let steps = st
+                    .health
+                    .as_ref()
+                    .map_or(0, |h| h.steps_on(&st.local.day_key()));
                 Some(crate::pages::health::goal_notice(steps, until))
             }
             Scene::OyenzaMoney | Scene::OyenzaMoneyShown => {
@@ -3246,7 +4467,11 @@ impl SelfTest {
                     color: palette::GREEN,
                     title: "Money in · BCA".into(),
                     title_dim: String::new(),
-                    subtitle: if hidden { "Amount and sender hidden".into() } else { "Rp 1.250.000 · Gaji Oktober".into() },
+                    subtitle: if hidden {
+                        "Amount and sender hidden".into()
+                    } else {
+                        "Rp 1.250.000 · Gaji Oktober".into()
+                    },
                     until,
                     action: Some(NoticeAction::OpenPage(PageKind::Oyenza)),
                     inline: Some(InlineAction::ShowAmount),
@@ -3276,8 +4501,17 @@ impl SelfTest {
                 reveal: Some("Rp 89.000 · Tokopedia".into()),
             }),
             Scene::MessageNotice | Scene::MessageHidden => {
-                let choices = NotificationSettings { text: scene == Scene::MessageNotice, ..Default::default() };
-                crate::pages::notifications::message_notice(&sample_message(), &choices, st.accent, now).map(|n| Notice { until, ..n })
+                let choices = NotificationSettings {
+                    text: scene == Scene::MessageNotice,
+                    ..Default::default()
+                };
+                crate::pages::notifications::message_notice(
+                    &sample_message(),
+                    &choices,
+                    st.accent,
+                    now,
+                )
+                .map(|n| Notice { until, ..n })
             }
             Scene::OyenzaBill => Some(Notice {
                 icon: Icon::Calendar,
@@ -3290,18 +4524,27 @@ impl SelfTest {
                 inline: Some(InlineAction::ShowAmount),
                 reveal: Some("Rp 54.990".into()),
             }),
-            Scene::AiNotice | Scene::AiNoticeOut => ai_alert(st, scene == Scene::AiNoticeOut).map(|a| crate::state::usage_notice(&a, st.accent, until)),
+            Scene::AiNotice | Scene::AiNoticeOut => ai_alert(st, scene == Scene::AiNoticeOut)
+                .map(|a| crate::state::usage_notice(&a, st.accent, until)),
             _ => None,
         };
-        st.oyenza = if scene.oyenza() { fake_oyenza(st, scene, now) } else { OyenzaState::default() };
+        st.oyenza = if scene.oyenza() {
+            fake_oyenza(st, scene, now)
+        } else {
+            OyenzaState::default()
+        };
         // Today's list starts at today, or at the date clicked ten days on.
-        st.ui.today_pick = (scene == Scene::TodayPicked).then(|| poni_core::agenda::day_num(&st.day_key()).unwrap_or(0) + 10);
+        st.ui.today_pick = (scene == Scene::TodayPicked)
+            .then(|| poni_core::agenda::day_num(&st.day_key()).unwrap_or(0) + 10);
         st.ui.today_jump = st.ui.today_pick.is_some();
         st.ui.today_scroll = 0.0;
         st.ui.today_drawn = now;
         // Add-ons: what the page shows (settings stay as they are, so the worker downloads nothing).
         let addon = match scene {
-            Scene::AddonsDownloading => AddonStatus::Downloading { done: 1_300_000, total: PRAYER_TIMES.size() },
+            Scene::AddonsDownloading => AddonStatus::Downloading {
+                done: 1_300_000,
+                total: PRAYER_TIMES.size(),
+            },
             Scene::AddonsOn => AddonStatus::Ready,
             Scene::AddonsOffline => AddonStatus::Waiting,
             Scene::AddonsFailed => AddonStatus::Failed,
@@ -3309,26 +4552,51 @@ impl SelfTest {
         };
         st.addons.insert(PRAYER_TIMES.id, addon);
         let ja = match scene {
-            Scene::JaGetting => AddonStatus::Downloading { done: 1_700_000, total: JAPANESE_READINGS.size() },
+            Scene::JaGetting => AddonStatus::Downloading {
+                done: 1_700_000,
+                total: JAPANESE_READINGS.size(),
+            },
             _ => AddonStatus::Off,
         };
         st.addons.insert(JAPANESE_READINGS.id, ja);
         // Script reader: on for the Script page's scenes, off (no tab) elsewhere.
         let script = scene.page() == Some(PageKind::Script);
-        st.addons.insert(SCRIPT_READER.id, if script { AddonStatus::Ready } else { AddonStatus::Off });
+        st.addons.insert(
+            SCRIPT_READER.id,
+            if script {
+                AddonStatus::Ready
+            } else {
+                AddonStatus::Off
+            },
+        );
         // System and Health (add-ons, off by default): on for their own
         // pages' scenes only (and Health for its goal notice).
         let system = scene.page() == Some(PageKind::System);
         let health = scene.page() == Some(PageKind::Health) || scene == Scene::HealthNotice;
         let stocks = scene.page() == Some(PageKind::Stocks);
         // Notifications (Windows, off by default): on for its page and its notices.
-        let notify = scene.page() == Some(PageKind::Notifications) || matches!(scene, Scene::MessageNotice | Scene::MessageHidden);
+        let notify = scene.page() == Some(PageKind::Notifications)
+            || matches!(scene, Scene::MessageNotice | Scene::MessageHidden);
         let ielts = scene.page() == Some(PageKind::Ielts);
         // Meeting notes: on for its page and its pill.
         let notes = scene.page() == Some(PageKind::Notes) || scene == Scene::NotesActivity;
-        for (id, on) in [(SYSTEM.id, system), (HEALTH.id, health), (STOCKS.id, stocks), (NOTIFICATIONS.id, notify), (IELTS.id, ielts), (MEETING_NOTES.id, notes)] {
+        for (id, on) in [
+            (SYSTEM.id, system),
+            (HEALTH.id, health),
+            (STOCKS.id, stocks),
+            (NOTIFICATIONS.id, notify),
+            (IELTS.id, ielts),
+            (MEETING_NOTES.id, notes),
+        ] {
             st.settings.set_addon(id, on);
-            st.addons.insert(id, if on { AddonStatus::Ready } else { AddonStatus::Off });
+            st.addons.insert(
+                id,
+                if on {
+                    AddonStatus::Ready
+                } else {
+                    AddonStatus::Off
+                },
+            );
         }
         seed_stocks(st, scene, now);
         // The Downloader: offered in its own scenes, and on there (its tools
@@ -3337,19 +4605,29 @@ impl SelfTest {
         // Its setting stays as it is, as for Prayer times above.
         st.downloader_offered = scene.downloader();
         let tab = scene.downloader() && scene != Scene::AddonsDownloader;
-        st.addons.insert(DOWNLOADER.id, if tab { AddonStatus::Ready } else { AddonStatus::Off });
+        st.addons.insert(
+            DOWNLOADER.id,
+            if tab {
+                AddonStatus::Ready
+            } else {
+                AddonStatus::Off
+            },
+        );
         seed_downloads(st, scene);
         seed_notifications(st, scene);
         seed_ielts(st, scene, now);
         seed_notes(st, scene, now);
         if scene.pro() {
-            st.oyenza.link = OyenzaLink::Connected { account: "a•••@example.com".into() };
+            st.oyenza.link = OyenzaLink::Connected {
+                account: "a•••@example.com".into(),
+            };
             st.oyenza.pro = Some(true);
         }
         // Oyen in the Oyenza tab long since arrived: at rest in every picture.
         st.ui.oyen_tab = Some((crate::oyen::TabMove::Arrive, f64::NEG_INFINITY));
         if scene.media_playing() {
-            st.lyrics.wants_ja_readings = self.lyrics.wants_ja_readings || matches!(scene, Scene::JaOffer | Scene::JaGetting);
+            st.lyrics.wants_ja_readings =
+                self.lyrics.wants_ja_readings || matches!(scene, Scene::JaOffer | Scene::JaGetting);
         }
         seed_prayer(st, scene, until);
         // The Script page: empty, or partway through the sample script.
@@ -3379,9 +4657,19 @@ impl SelfTest {
             _ => Module::Cpu,
         };
         for (path, rgb) in SAMPLE_ICONS {
-            st.app_icons.entry(path.to_string()).or_insert_with(|| Some(sample_icon(rgb)));
+            st.app_icons
+                .entry(path.to_string())
+                .or_insert_with(|| Some(sample_icon(rgb)));
         }
         seed_ai(st, scene, now);
+        // NUMA's history panel: open only in its own scene, with made-up
+        // turns, so the panel's fit above the pinned bottom row is pinned.
+        st.ui.numa.history_open = scene == Scene::NumaHistory;
+        st.ui.numa.history = if scene == Scene::NumaHistory {
+            sample_numa_turns()
+        } else {
+            Vec::new()
+        };
         if let Some(p) = scene.page() {
             st.page = p;
         }
@@ -3410,7 +4698,9 @@ impl SelfTest {
 
     fn seed_shelf(&mut self, st: &mut AppState) {
         let home = paths::data_dir();
-        let base = std::path::absolute(&home).unwrap_or(home).join("shelf-demo");
+        let base = std::path::absolute(&home)
+            .unwrap_or(home)
+            .join("shelf-demo");
         let txt = base.join("Trip notes.txt");
         let img = base.join("Harbor sketch.png");
         let folder = base.join("Project assets");
@@ -3418,7 +4708,10 @@ impl SelfTest {
         if let Err(e) = fs::create_dir_all(&folder) {
             errors.push(format!("{}: {e}", folder.display()));
         }
-        if let Err(e) = fs::write(folder.join("readme.txt"), "Drafts and exports for the harbor poster.\n") {
+        if let Err(e) = fs::write(
+            folder.join("readme.txt"),
+            "Drafts and exports for the harbor poster.\n",
+        ) {
             errors.push(format!("readme.txt: {e}"));
         }
         if let Err(e) = fs::write(&txt, NOTES_TXT) {
@@ -3430,13 +4723,23 @@ impl SelfTest {
             }
         }
         let made = [&folder, &img, &txt].iter().filter(|p| p.exists()).count();
-        self.checks.push(check("shelf-files", errors.is_empty() && made == 3, if errors.is_empty() { format!("{made} items in {}", base.display()) } else { errors.join("; ") }));
+        self.checks.push(check(
+            "shelf-files",
+            errors.is_empty() && made == 3,
+            if errors.is_empty() {
+                format!("{made} items in {}", base.display())
+            } else {
+                errors.join("; ")
+            },
+        ));
 
         // Oldest first: add_paths puts each new path at the front.
         let unix = st.unix;
         for (k, p) in [&folder, &img, &txt].into_iter().enumerate() {
             let s = p.to_string_lossy().into_owned();
-            st.store.shelf.add_paths(&[s.as_str()], unix - 3600 + k as i64 * 600);
+            st.store
+                .shelf
+                .add_paths(&[s.as_str()], unix - 3600 + k as i64 * 600);
             // Pre-seeded thumbnails keep the screenshots identical on every machine
             // (the app skips LoadThumb for paths it already has an entry for).
             let thumb = if p == &img { self.art.clone() } else { None };
@@ -3489,15 +4792,31 @@ impl SelfTest {
         let frame = Frame { w, h, px: &px };
         let best = samples.iter().copied().fold(f64::INFINITY, f64::min);
 
-        let mut checks = vec![check("settled", settled, format!("{:.0} ms (limit {:.0} ms)", waited * 1000.0, self.settle_limit(app) * 1000.0))];
+        let mut checks = vec![check(
+            "settled",
+            settled,
+            format!(
+                "{:.0} ms (limit {:.0} ms)",
+                waited * 1000.0,
+                self.settle_limit(app) * 1000.0
+            ),
+        )];
         let mut measured = 0;
         if w <= 0 || h <= 0 || px.len() != (w as usize) * (h as usize) * 4 {
-            checks.push(check("pixels", false, format!("{w}x{h} frame with {} bytes", px.len())));
+            checks.push(check(
+                "pixels",
+                false,
+                format!("{w}x{h} frame with {} bytes", px.len()),
+            ));
         } else if scene.rests_aside() {
             // Nothing drawn over the window under the island: the strip it
             // rests as is there only for the pointer (alpha 1/255 at most).
             let seen = px.chunks_exact(4).filter(|p| p[3] > 1).count();
-            checks.push(check("aside-invisible", seen == 0, format!("{seen} pixels drawn with alpha above 1/255")));
+            checks.push(check(
+                "aside-invisible",
+                seen == 0,
+                format!("{seen} pixels drawn with alpha above 1/255"),
+            ));
             let (mode, aside) = app.selftest_mode();
             // The Hidden look's strip: 150 wide, as short as the island gets (8).
             checks.push(check(
@@ -3517,12 +4836,29 @@ impl SelfTest {
                 // Glass shows what's under it, so no one ground colour: opaque is
                 // the rule, and smoked glass (no backdrop) lets the screen through.
                 let copy = app.selftest_glass_state().1;
-                let min = if copy { 254 } else { (poni_core::glass::SMOKED_OPACITY * 255.0) as u8 - 3 };
-                checks.push(check("glass-opaque", a >= min, format!("pixel ({cx}, {top}) = rgba({r}, {g}, {b}, {a}), want alpha >= {min}")));
+                let min = if copy {
+                    254
+                } else {
+                    (poni_core::glass::SMOKED_OPACITY * 255.0) as u8 - 3
+                };
+                checks.push(check(
+                    "glass-opaque",
+                    a >= min,
+                    format!("pixel ({cx}, {top}) = rgba({r}, {g}, {b}, {a}), want alpha >= {min}"),
+                ));
             } else {
                 let ground = rgb8(poni_core::look::of(self.theme).ground);
-                let off = [r, g, b].iter().zip(ground).map(|(&p, q)| p.abs_diff(q)).max().unwrap_or(0);
-                let inside = if pill { ", 3 DIPs inside the floating body" } else { "" };
+                let off = [r, g, b]
+                    .iter()
+                    .zip(ground)
+                    .map(|(&p, q)| p.abs_diff(q))
+                    .max()
+                    .unwrap_or(0);
+                let inside = if pill {
+                    ", 3 DIPs inside the floating body"
+                } else {
+                    ""
+                };
                 checks.push(check(
                     "body-opaque-ground",
                     a >= 254 && off <= 6,
@@ -3530,8 +4866,13 @@ impl SelfTest {
                 ));
             }
 
-            let corners = [(0, 0), (w - 1, 0), (0, h - 1), (w - 1, h - 1)].map(|(x, y)| frame.at(x, y)[3]);
-            checks.push(check("corners-transparent", corners.iter().all(|&a| a <= 1), format!("corner alpha {corners:?}")));
+            let corners =
+                [(0, 0), (w - 1, 0), (0, h - 1), (w - 1, h - 1)].map(|(x, y)| frame.at(x, y)[3]);
+            checks.push(check(
+                "corners-transparent",
+                corners.iter().all(|&a| a <= 1),
+                format!("corner alpha {corners:?}"),
+            ));
 
             let mid = ((body.y + body.h / 2.0) * scale).floor() as i32;
             measured = frame.opaque_run(cx, mid);
@@ -3546,15 +4887,35 @@ impl SelfTest {
                 checks.push(check(
                     "expanded-width",
                     (measured as f32 - ew).abs() <= 2.0,
-                    format!("{measured} px vs settings.expanded_width {:.0} x {scale:.2} = {ew:.1} px", app.st.settings.expanded_width),
+                    format!(
+                        "{measured} px vs settings.expanded_width {:.0} x {scale:.2} = {ew:.1} px",
+                        app.st.settings.expanded_width
+                    ),
                 ));
             }
 
-            let look = if self.glass.is_some() { app.selftest_glass_state().2 } else { poni_core::look::of(self.theme) };
+            let look = if self.glass.is_some() {
+                app.selftest_glass_state().2
+            } else {
+                poni_core::look::of(self.theme)
+            };
             // Glass: away from the bright rim, which isn't content.
-            let area = if self.glass.is_some() { Rect::new(body.x + 10.0, body.y, (body.w - 20.0).max(1.0), (body.h - 10.0).max(1.0)) } else { body };
+            let area = if self.glass.is_some() {
+                Rect::new(
+                    body.x + 10.0,
+                    body.y,
+                    (body.w - 20.0).max(1.0),
+                    (body.h - 10.0).max(1.0),
+                )
+            } else {
+                body
+            };
             let lit = frame.content_pixels(area, scale, rgb8(look.ground));
-            checks.push(check("content-drawn", lit >= 20, format!("{lit} content pixels inside the island")));
+            checks.push(check(
+                "content-drawn",
+                lit >= 20,
+                format!("{lit} content pixels inside the island"),
+            ));
             // Not where the island moved: the backdrop is a page laid out
             // for the island in the middle.
             if let Some(run) = self.glass.filter(|_| !scene.moved()) {
@@ -3566,16 +4927,30 @@ impl SelfTest {
         }
         // Frame time counts on a real GPU only (see FRAME_BUDGET_MS).
         let soft_gpu = app.selftest_software_gpu();
-        let why = if budget > FRAME_BUDGET_MS { ", Glass on a software GPU" } else { "" };
+        let why = if budget > FRAME_BUDGET_MS {
+            ", Glass on a software GPU"
+        } else {
+            ""
+        };
         let timing = format!("best {best:.2} ms of {samples:?} (budget {budget} ms{why})");
         let slow = soft_gpu && best >= budget;
         if !soft_gpu {
             checks.push(check("frame-time", best < budget, timing.clone()));
         }
-        checks.push(window_check(app.hwnd(), app.selftest_surface(), present, w, h));
+        checks.push(window_check(
+            app.hwnd(),
+            app.selftest_surface(),
+            present,
+            w,
+            h,
+        ));
         if let Some(want) = scene.page() {
             let page = app.st.page;
-            checks.push(check("page", page == want, format!("showing '{}', expected '{}'", page.key(), want.key())));
+            checks.push(check(
+                "page",
+                page == want,
+                format!("showing '{}', expected '{}'", page.key(), want.key()),
+            ));
         }
         if scene == Scene::MediaLyric {
             checks.push(lyric_line_check(&app.st));
@@ -3587,52 +4962,102 @@ impl SelfTest {
             // After OK: the song and its sung line until Ashar, as before the countdown.
             let (mode, _) = app.selftest_mode();
             let want = Mode::Activity(crate::activities::Activity::Media);
-            checks.push(check("prayer-ok-song", mode == want, format!("{mode:?}, want {want:?}")));
+            checks.push(check(
+                "prayer-ok-song",
+                mode == want,
+                format!("{mode:?}, want {want:?}"),
+            ));
             checks.push(lyric_line_check(&app.st));
         }
         if matches!(scene, Scene::AsidePeek | Scene::AsideHud) {
             // Stepped aside, and still what just happened shows over the window.
             let (mode, aside) = app.selftest_mode();
-            let want = if scene == Scene::AsideHud { Mode::Hud(HudTag::Volume) } else { Mode::Activity(crate::activities::Activity::Media) };
-            checks.push(check("aside-still-shows", aside && mode == want, format!("{mode:?} (stepped aside: {aside}), want {want:?}")));
+            let want = if scene == Scene::AsideHud {
+                Mode::Hud(HudTag::Volume)
+            } else {
+                Mode::Activity(crate::activities::Activity::Media)
+            };
+            checks.push(check(
+                "aside-still-shows",
+                aside && mode == want,
+                format!("{mode:?} (stepped aside: {aside}), want {want:?}"),
+            ));
         }
         if scene.page() == Some(PageKind::Script) {
             // The script stays out of screen shares and recordings: ask Windows.
             let build = crate::window::windows_build();
             let can = build.is_some_and(|b| b >= crate::glass::EXCLUDE_FROM_CAPTURE_BUILD);
             let hidden = crate::window::capture_excluded(app.hwnd());
-            let said = if hidden { "left out of capture" } else { "in capture" };
+            let said = if hidden {
+                "left out of capture"
+            } else {
+                "in capture"
+            };
             // Wine says Windows 10 but can't leave a window out of capture.
             let wine = under_wine();
-            let note = if wine { " (Wine, which can't leave a window out)" } else { "" };
-            checks.push(check("script-hidden-from-capture", hidden == can || (wine && !hidden), format!("display affinity: {said}, Windows build {build:?}{note}")));
+            let note = if wine {
+                " (Wine, which can't leave a window out)"
+            } else {
+                ""
+            };
+            checks.push(check(
+                "script-hidden-from-capture",
+                hidden == can || (wine && !hidden),
+                format!("display affinity: {said}, Windows build {build:?}{note}"),
+            ));
         }
         if scene == Scene::NotesActivity {
             // A meeting being taken down rests on the closed island: Oyen, the dot, the time.
             let (mode, _) = app.selftest_mode();
             let want = Mode::Activity(crate::activities::Activity::Notes);
-            checks.push(check("notes-pill", mode == want, format!("{mode:?}, want {want:?}")));
+            checks.push(check(
+                "notes-pill",
+                mode == want,
+                format!("{mode:?}, want {want:?}"),
+            ));
         }
         if matches!(scene, Scene::RecordActivity | Scene::RecordPaused) {
             // The recording rests on the closed island, ahead of everything else.
             let (mode, _) = app.selftest_mode();
             let want = Mode::Activity(crate::activities::Activity::Recording);
-            checks.push(check("recording-pill", mode == want, format!("{mode:?}, want {want:?}")));
+            checks.push(check(
+                "recording-pill",
+                mode == want,
+                format!("{mode:?}, want {want:?}"),
+            ));
         }
-        if matches!(scene, Scene::RecordLive | Scene::RecordActivity | Scene::RecordPaused) {
+        if matches!(
+            scene,
+            Scene::RecordLive | Scene::RecordActivity | Scene::RecordPaused
+        ) {
             // The island stays out of the recorder's video: ask Windows.
             let build = crate::window::windows_build();
             let can = build.is_some_and(|b| b >= crate::glass::EXCLUDE_FROM_CAPTURE_BUILD);
             let hidden = crate::window::capture_excluded(app.hwnd());
             let wine = under_wine();
-            checks.push(check("recording-hidden-from-capture", hidden == can || (wine && !hidden), format!("display affinity: {}, Windows build {build:?}", if hidden { "left out of capture" } else { "in capture" })));
+            checks.push(check(
+                "recording-hidden-from-capture",
+                hidden == can || (wine && !hidden),
+                format!(
+                    "display affinity: {}, Windows build {build:?}",
+                    if hidden {
+                        "left out of capture"
+                    } else {
+                        "in capture"
+                    }
+                ),
+            ));
         }
         if scene.downloader() {
             // The Downloads tab shows once the Downloader is on, not while
             // it's off, nor without Pro with its tools in place.
             let shown = pages::tabs(&app.st).contains(&PageKind::Downloads);
             let want = !matches!(scene, Scene::AddonsDownloader | Scene::AddonsPro);
-            checks.push(check("downloads-tab", shown == want, format!("Downloads tab shown: {shown}, want {want}")));
+            checks.push(check(
+                "downloads-tab",
+                shown == want,
+                format!("Downloads tab shown: {shown}, want {want}"),
+            ));
         }
 
         let ok = checks.iter().all(|c| c.ok);
@@ -3656,7 +5081,13 @@ impl SelfTest {
             let back = self.glass.map(|run| {
                 let r = app.selftest_capture_rect();
                 let (_, _, sw, _) = app.selftest_surface();
-                Backdrop { dark: run.dark_page(), scale, left: r.left, top: r.top, cx_dip: sw as f32 / 2.0 / scale }
+                Backdrop {
+                    dark: run.dark_page(),
+                    scale,
+                    left: r.left,
+                    top: r.top,
+                    cx_dip: sw as f32 / 2.0 / scale,
+                }
             });
             self.queue_write(&name, w, h, px, scale, back);
         }
@@ -3684,12 +5115,27 @@ impl SelfTest {
     /// shows the page (smoked glass looks different), text reads at 4.5:1 on
     /// it, and in the flip run small glass is dark and the open island light.
     #[allow(clippy::too_many_arguments)]
-    fn glass_checks(&self, app: &mut App, scene: Scene, run: GlassRun, px: &[u8], w: i32, h: i32, body: Rect, scale: f32, checks: &mut Vec<Check>) {
+    fn glass_checks(
+        &self,
+        app: &mut App,
+        scene: Scene,
+        run: GlassRun,
+        px: &[u8],
+        w: i32,
+        h: i32,
+        body: Rect,
+        scale: f32,
+        checks: &mut Vec<Check>,
+    ) {
         let (shader, copy, look) = app.selftest_glass_state();
         let frame = Frame { w, h, px };
         let on_gpu = self.renderer != "software";
         if on_gpu {
-            checks.push(check("glass-shader", shader && copy, format!("shader drew the glass: {shader}, backdrop on the GPU: {copy}")));
+            checks.push(check(
+                "glass-shader",
+                shader && copy,
+                format!("shader drew the glass: {shader}, backdrop on the GPU: {copy}"),
+            ));
             if shader && copy {
                 let mut again = |lens: f32, use_copy: bool| {
                     app.selftest_glass_switches(lens, use_copy);
@@ -3707,17 +5153,36 @@ impl SelfTest {
                         // A pill over flat browser chrome bends only a few pixels;
                         // a lens that doesn't run moves none.
                         let n = frame.changed_in(&f, body, scale, 6);
-                        checks.push(check("glass-lens", n >= 10, format!("{n} pixels move when the lens is off")));
+                        checks.push(check(
+                            "glass-lens",
+                            n >= 10,
+                            format!("{n} pixels move when the lens is off"),
+                        ));
                     }
-                    None => checks.push(check("glass-lens", false, "the frame changed size between captures")),
+                    None => checks.push(check(
+                        "glass-lens",
+                        false,
+                        "the frame changed size between captures",
+                    )),
                 }
                 match smoked {
                     Some(f) => {
                         let n = frame.changed_in(&f, body, scale, 4);
                         let share = n as f32 / area;
-                        checks.push(check("glass-shows-backdrop", share >= 0.2, format!("{:.0} % of the island differs from smoked glass", share * 100.0)));
+                        checks.push(check(
+                            "glass-shows-backdrop",
+                            share >= 0.2,
+                            format!(
+                                "{:.0} % of the island differs from smoked glass",
+                                share * 100.0
+                            ),
+                        ));
                     }
-                    None => checks.push(check("glass-shows-backdrop", false, "the frame changed size between captures")),
+                    None => checks.push(check(
+                        "glass-shows-backdrop",
+                        false,
+                        "the frame changed size between captures",
+                    )),
                 }
             }
         }
@@ -3729,7 +5194,11 @@ impl SelfTest {
         let mut seen = px.to_vec();
         for (i, p) in seen.chunks_exact_mut(4).enumerate() {
             let (x, y) = ((i as i32 % w) + r.left, (i as i32 / w) + r.top);
-            let bg = backdrop_dip(run.dark_page(), (x as f32 + 0.5) / scale - cx_dip, (y as f32 + 0.5) / scale);
+            let bg = backdrop_dip(
+                run.dark_page(),
+                (x as f32 + 0.5) / scale - cx_dip,
+                (y as f32 + 0.5) / scale,
+            );
             let inv = 1.0 - p[3] as f32 / 255.0;
             for (k, c) in [2, 1, 0].into_iter().enumerate() {
                 p[k] = (p[k] as f32 + bg[c] as f32 * inv).round().min(255.0) as u8;
@@ -3739,19 +5208,43 @@ impl SelfTest {
         let median = Frame { w, h, px: &seen }.median_in(body, scale);
         let ink = [look.ink.r, look.ink.g, look.ink.b];
         let c = poni_core::glass::contrast(median, ink);
-        checks.push(check("glass-ink-contrast", c >= 4.5, format!("{c:.2}:1 for ink rgb{:?} on glass rgb{:?}", rgb8(look.ink), median.map(|v| (v * 255.0).round() as u8))));
+        checks.push(check(
+            "glass-ink-contrast",
+            c >= 4.5,
+            format!(
+                "{c:.2}:1 for ink rgb{:?} on glass rgb{:?}",
+                rgb8(look.ink),
+                median.map(|v| (v * 255.0).round() as u8)
+            ),
+        ));
         if run == GlassRun::Flip {
             let want_light = scene.expanded();
             checks.push(check(
                 "glass-flip",
                 look.light == want_light,
-                format!("{} glass over the dark page in light mode (want {})", if look.light { "light" } else { "dark" }, if want_light { "light: the open island follows the mode" } else { "dark: small glass flips" }),
+                format!(
+                    "{} glass over the dark page in light mode (want {})",
+                    if look.light { "light" } else { "dark" },
+                    if want_light {
+                        "light: the open island follows the mode"
+                    } else {
+                        "dark: small glass flips"
+                    }
+                ),
             ));
         }
     }
 
     /// Composite + alpha PNGs, encoded off the UI thread.
-    fn queue_write(&mut self, name: &str, w: i32, h: i32, px: Vec<u8>, scale: f32, back: Option<Backdrop>) {
+    fn queue_write(
+        &mut self,
+        name: &str,
+        w: i32,
+        h: i32,
+        px: Vec<u8>,
+        scale: f32,
+        back: Option<Backdrop>,
+    ) {
         let dir = self.dir.clone();
         let base = name.to_string();
         let job = move || {
@@ -3761,14 +5254,26 @@ impl SelfTest {
                 errors.push(e);
             }
             let alpha: Vec<u8> = px.as_chunks::<4>().0.iter().map(|p| p[3]).collect();
-            if let Err(e) = png::save_gray(dir.join(format!("{base}-alpha.png")), w as u32, h as u32, &alpha) {
+            if let Err(e) = png::save_gray(
+                dir.join(format!("{base}-alpha.png")),
+                w as u32,
+                h as u32,
+                &alpha,
+            ) {
                 errors.push(e);
             }
             errors
         };
-        match std::thread::Builder::new().name("poni-selftest-png".into()).spawn(job) {
+        match std::thread::Builder::new()
+            .name("poni-selftest-png".into())
+            .spawn(job)
+        {
             Ok(handle) => self.writes.push((name.to_string(), handle)),
-            Err(e) => self.checks.push(check("png-writer", false, format!("{name}: could not start a writer thread: {e}"))),
+            Err(e) => self.checks.push(check(
+                "png-writer",
+                false,
+                format!("{name}: could not start a writer thread: {e}"),
+            )),
         }
     }
 
@@ -3787,33 +5292,62 @@ impl SelfTest {
             }
         }
         let detail = if write_errors.is_empty() {
-            format!("{written} screenshot pairs written in {:.0} ms after the last capture", waited * 1000.0)
+            format!(
+                "{written} screenshot pairs written in {:.0} ms after the last capture",
+                waited * 1000.0
+            )
         } else {
             write_errors.join("; ")
         };
-        self.checks.push(check("png-files", writers_done && write_errors.is_empty(), detail));
+        self.checks.push(check(
+            "png-files",
+            writers_done && write_errors.is_empty(),
+            detail,
+        ));
         // The GPU renderer presents every frame through DXGI, so the count
         // must have seen them; the software renderer presents none.
         if let Some(f) = self.frames.take() {
             let n = f.total();
             drop(f);
             if self.renderer != "software" {
-                self.checks.push(check("frame-count", n > 0, format!("{n} of Oyenza Studio's own frames counted from Windows' frame log")));
+                self.checks.push(check(
+                    "frame-count",
+                    n > 0,
+                    format!("{n} of Oyenza Studio's own frames counted from Windows' frame log"),
+                ));
             } else {
-                crate::pinfo!("selftest: frame count saw {n} frames (the software renderer presents none)");
+                crate::pinfo!(
+                    "selftest: frame count saw {n} frames (the software renderer presents none)"
+                );
             }
         }
         if let Some(rx) = self.addon_fetch.take() {
-            let (ok, detail) = rx.recv_timeout(std::time::Duration::from_secs(60)).unwrap_or((false, "still downloading 60 s after the scenes".into()));
+            let (ok, detail) = rx
+                .recv_timeout(std::time::Duration::from_secs(60))
+                .unwrap_or((false, "still downloading 60 s after the scenes".into()));
             self.checks.push(check("addon-download", ok, detail));
         }
         if self.states.len() < SCENES.len() {
-            self.checks.push(check("states-visited", false, format!("{} of {} states captured", self.states.len(), SCENES.len())));
+            self.checks.push(check(
+                "states-visited",
+                false,
+                format!("{} of {} states captured", self.states.len(), SCENES.len()),
+            ));
         }
 
-        let mut failed: Vec<String> = self.checks.iter().filter(|c| !c.ok).map(|c| c.name.clone()).collect();
+        let mut failed: Vec<String> = self
+            .checks
+            .iter()
+            .filter(|c| !c.ok)
+            .map(|c| c.name.clone())
+            .collect();
         for s in &self.states {
-            failed.extend(s.checks.iter().filter(|c| !c.ok).map(|c| format!("{}: {}", s.name, c.name)));
+            failed.extend(
+                s.checks
+                    .iter()
+                    .filter(|c| !c.ok)
+                    .map(|c| format!("{}: {}", s.name, c.name)),
+            );
         }
         let ok = failed.is_empty();
         let mut code = if ok { 0 } else { 1 };
@@ -3836,7 +5370,10 @@ impl SelfTest {
             states: std::mem::take(&mut self.states),
         };
         let path = self.dir.join("report.json");
-        match serde_json::to_vec_pretty(&report).map_err(|e| e.to_string()).and_then(|j| fs::write(&path, j).map_err(|e| e.to_string())) {
+        match serde_json::to_vec_pretty(&report)
+            .map_err(|e| e.to_string())
+            .and_then(|j| fs::write(&path, j).map_err(|e| e.to_string()))
+        {
             Ok(()) => crate::pinfo!("selftest: report written to {}", path.display()),
             Err(e) => {
                 crate::pwarn!("selftest: could not write {}: {e}", path.display());
@@ -3844,24 +5381,40 @@ impl SelfTest {
             }
         }
         if !report.slow_frames.is_empty() {
-            crate::pinfo!("selftest: {} slow frame(s) on a software GPU, reported and not counted", report.slow_frames.len());
+            crate::pinfo!(
+                "selftest: {} slow frame(s) on a software GPU, reported and not counted",
+                report.slow_frames.len()
+            );
         }
         if ok {
-            crate::pinfo!("selftest: all {} states passed in {total_ms} ms", report.states_total);
+            crate::pinfo!(
+                "selftest: all {} states passed in {total_ms} ms",
+                report.states_total
+            );
         } else {
-            crate::pwarn!("selftest: {} check(s) failed in {total_ms} ms: {}", failed.len(), failed.join(", "));
+            crate::pwarn!(
+                "selftest: {} check(s) failed in {total_ms} ms: {}",
+                failed.len(),
+                failed.join(", ")
+            );
         }
         code
     }
 
     /// Remove screenshots and the report from an earlier run (only our own file names).
     fn clear_old_outputs(&self) {
-        let Ok(entries) = fs::read_dir(&self.dir) else { return };
+        let Ok(entries) = fs::read_dir(&self.dir) else {
+            return;
+        };
         for e in entries.flatten() {
             let name = e.file_name().to_string_lossy().into_owned();
             let b = name.as_bytes();
             let ours = name == "report.json"
-                || (name.ends_with(".png") && b.len() > 3 && b[0].is_ascii_digit() && b[1].is_ascii_digit() && b[2] == b'-');
+                || (name.ends_with(".png")
+                    && b.len() > 3
+                    && b[0].is_ascii_digit()
+                    && b[1].is_ascii_digit()
+                    && b[2] == b'-');
             if ours && e.path().is_file() {
                 if let Err(err) = fs::remove_file(e.path()) {
                     crate::pwarn!("selftest: could not remove old {name}: {err}");
@@ -3907,7 +5460,12 @@ fn sample_week(st: &AppState, days_ago: i64) -> HealthSnapshot {
             }
         })
         .collect();
-    HealthSnapshot { goal: 8000, source: HealthSource::AppleHealth, updated_at: st.unix - days_ago * 86_400 - 8 * 60, days }
+    HealthSnapshot {
+        goal: 8000,
+        source: HealthSource::AppleHealth,
+        updated_at: st.unix - days_ago * 86_400 - 8 * 60,
+        days,
+    }
 }
 
 /// Where the media-lyric scene holds the song: 1.5 s into the first sung line
@@ -3957,16 +5515,26 @@ fn make_art(size: u32) -> Vec<u8> {
 }
 
 fn rgb(hex: u32) -> [f32; 3] {
-    [((hex >> 16) & 0xff) as f32 / 255.0, ((hex >> 8) & 0xff) as f32 / 255.0, (hex & 0xff) as f32 / 255.0]
+    [
+        ((hex >> 16) & 0xff) as f32 / 255.0,
+        ((hex >> 8) & 0xff) as f32 / 255.0,
+        (hex & 0xff) as f32 / 255.0,
+    ]
 }
 
 fn mix(a: [f32; 3], b: [f32; 3], t: f32) -> [f32; 3] {
     let t = t.clamp(0.0, 1.0);
-    [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t]
+    [
+        a[0] + (b[0] - a[0]) * t,
+        a[1] + (b[1] - a[1]) * t,
+        a[2] + (b[2] - a[2]) * t,
+    ]
 }
 
 fn in_triangle(p: (f32, f32), a: (f32, f32), b: (f32, f32), c: (f32, f32)) -> bool {
-    let edge = |p0: (f32, f32), p1: (f32, f32)| (p1.0 - p0.0) * (p.1 - p0.1) - (p1.1 - p0.1) * (p.0 - p0.0);
+    let edge = |p0: (f32, f32), p1: (f32, f32)| {
+        (p1.0 - p0.0) * (p.1 - p0.1) - (p1.1 - p0.1) * (p.0 - p0.0)
+    };
     let (d1, d2, d3) = (edge(a, b), edge(b, c), edge(c, a));
     let neg = d1 < 0.0 || d2 < 0.0 || d3 < 0.0;
     let pos = d1 > 0.0 || d2 > 0.0 || d3 > 0.0;
@@ -3979,7 +5547,11 @@ fn art_sample(u: f32, v: f32) -> [f32; 3] {
     let mut c = if v < HORIZON {
         mix(rgb(0xFFB37A), rgb(0xE0607E), v / HORIZON)
     } else {
-        mix(rgb(0x2F6F8F), rgb(0x13233F), (v - HORIZON) / (1.0 - HORIZON))
+        mix(
+            rgb(0x2F6F8F),
+            rgb(0x13233F),
+            (v - HORIZON) / (1.0 - HORIZON),
+        )
     };
     let d = ((u - sun_x).powi(2) + (v - sun_y).powi(2)).sqrt();
     if v < HORIZON && d < sun_r {
@@ -4004,7 +5576,11 @@ fn art_sample(u: f32, v: f32) -> [f32; 3] {
         c = mix(paper, rgb(0xD8D0C2), ((v - 0.70) / 0.08) * 0.5);
     }
     if sail {
-        c = if u > 0.34 { mix(paper, rgb(0xD9D2C4), 0.55) } else { paper };
+        c = if u > 0.34 {
+            mix(paper, rgb(0xD9D2C4), 0.55)
+        } else {
+            paper
+        };
     }
     c
 }
@@ -4068,7 +5644,12 @@ impl Frame<'_> {
         for y in (body.y * scale).floor().max(0.0) as i32..y1.min(self.h) {
             for x in x0..x1.min(self.w) {
                 let [b, g, r, a] = self.at(x, y);
-                let off = [r, g, b].iter().zip(ground).map(|(&p, q)| p.abs_diff(q)).max().unwrap_or(0);
+                let off = [r, g, b]
+                    .iter()
+                    .zip(ground)
+                    .map(|(&p, q)| p.abs_diff(q))
+                    .max()
+                    .unwrap_or(0);
                 if a >= 200 && off >= 140 {
                     n += 1;
                 }
@@ -4081,8 +5662,14 @@ impl Frame<'_> {
 impl Frame<'_> {
     /// Pixels inside `body` where `other` differs by at least `min` in some channel.
     fn changed_in(&self, other: &[u8], body: Rect, scale: f32, min: u8) -> usize {
-        let (x0, y0) = ((body.x * scale).floor().max(0.0) as i32, (body.y * scale).floor().max(0.0) as i32);
-        let (x1, y1) = (((body.x + body.w) * scale).ceil() as i32, ((body.y + body.h) * scale).ceil() as i32);
+        let (x0, y0) = (
+            (body.x * scale).floor().max(0.0) as i32,
+            (body.y * scale).floor().max(0.0) as i32,
+        );
+        let (x1, y1) = (
+            ((body.x + body.w) * scale).ceil() as i32,
+            ((body.y + body.h) * scale).ceil() as i32,
+        );
         let mut n = 0;
         for y in y0..y1.min(self.h) {
             for x in x0..x1.min(self.w) {
@@ -4099,7 +5686,12 @@ impl Frame<'_> {
 
     /// What rows `0..rows` hold (see [`GapScan`]).
     fn gap_scan(&self, rows: i32) -> GapScan {
-        let mut g = GapScan { most: 0, edge: 0, coloured: 0, hit: 0 };
+        let mut g = GapScan {
+            most: 0,
+            edge: 0,
+            coloured: 0,
+            hit: 0,
+        };
         for y in 0..rows.min(self.h) {
             for x in 0..self.w {
                 let [b, gr, r, a] = self.at(x, y);
@@ -4129,7 +5721,9 @@ impl Frame<'_> {
         for y in 0..self.h {
             for x in 0..self.w {
                 if self.at(x, y)[3] >= min {
-                    b = Some(b.map_or((x, y, x + 1, y + 1), |(x0, y0, x1, y1)| (x0.min(x), y0.min(y), x1.max(x + 1), y1.max(y + 1))));
+                    b = Some(b.map_or((x, y, x + 1, y + 1), |(x0, y0, x1, y1)| {
+                        (x0.min(x), y0.min(y), x1.max(x + 1), y1.max(y + 1))
+                    }));
                 }
             }
         }
@@ -4139,8 +5733,14 @@ impl Frame<'_> {
     /// The median colour (sRGB, 0..=1, per channel) inside `body`, sampled
     /// every other pixel.
     fn median_in(&self, body: Rect, scale: f32) -> [f32; 3] {
-        let (x0, y0) = ((body.x * scale).floor().max(0.0) as i32, (body.y * scale).floor().max(0.0) as i32);
-        let (x1, y1) = (((body.x + body.w) * scale).ceil() as i32, ((body.y + body.h) * scale).ceil() as i32);
+        let (x0, y0) = (
+            (body.x * scale).floor().max(0.0) as i32,
+            (body.y * scale).floor().max(0.0) as i32,
+        );
+        let (x1, y1) = (
+            ((body.x + body.w) * scale).ceil() as i32,
+            ((body.y + body.h) * scale).ceil() as i32,
+        );
         let mut ch: [Vec<u8>; 3] = [Vec::new(), Vec::new(), Vec::new()];
         for y in (y0..y1.min(self.h)).step_by(2) {
             for x in (x0..x1.min(self.w)).step_by(2) {
@@ -4164,7 +5764,13 @@ impl Frame<'_> {
 
 /// The island window must be a visible, top-most, non-activating layered
 /// tool window, laid out where the app placed it, with the frame inside it.
-fn window_check(hwnd: HWND, surface: (i32, i32, i32, i32), present: (i32, i32), w: i32, h: i32) -> Check {
+fn window_check(
+    hwnd: HWND,
+    surface: (i32, i32, i32, i32),
+    present: (i32, i32),
+    w: i32,
+    h: i32,
+) -> Check {
     let need = WS_EX_LAYERED.0 | WS_EX_TOPMOST.0 | WS_EX_TOOLWINDOW.0 | WS_EX_NOACTIVATE.0;
     let (visible, ex, rect) = unsafe {
         let visible = IsWindowVisible(hwnd).as_bool();
@@ -4176,10 +5782,26 @@ fn window_check(hwnd: HWND, surface: (i32, i32, i32, i32), present: (i32, i32), 
     let styles_ok = ex & need == need;
     let (sx, sy, sw, sh) = surface;
     let rect_ok = rect.is_some_and(|r| {
-        r.left == sx && r.top == sy && r.right - r.left == sw && r.bottom - r.top == sh
-            && present.0 >= r.left && present.1 >= r.top && present.0 + w <= r.right && present.1 + h <= r.bottom
+        r.left == sx
+            && r.top == sy
+            && r.right - r.left == sw
+            && r.bottom - r.top == sh
+            && present.0 >= r.left
+            && present.1 >= r.top
+            && present.0 + w <= r.right
+            && present.1 + h <= r.bottom
     });
-    let rect_s = rect.map(|r| format!("({}, {}) {}x{}", r.left, r.top, r.right - r.left, r.bottom - r.top)).unwrap_or_else(|| "unavailable".into());
+    let rect_s = rect
+        .map(|r| {
+            format!(
+                "({}, {}) {}x{}",
+                r.left,
+                r.top,
+                r.right - r.left,
+                r.bottom - r.top
+            )
+        })
+        .unwrap_or_else(|| "unavailable".into());
     check(
         "window",
         visible && styles_ok && rect_ok,
@@ -4253,15 +5875,34 @@ fn lyric_line_check(st: &AppState) -> Check {
         return check("lyric-line", false, "no music playing");
     };
     let pos = m.timeline.position_at(st.now);
-    let lyrics = st.lyrics.lyrics.as_ref().filter(|_| st.lyrics.track_key == m.track_key);
+    let lyrics = st
+        .lyrics
+        .lyrics
+        .as_ref()
+        .filter(|_| st.lyrics.track_key == m.track_key);
     match lyrics.and_then(|l| l.line_index_at(pos).map(|k| (k, l.lines[k].text.trim()))) {
         Some((k, text)) if !text.is_empty() => {
             // The reading the pill sings under it, when the song has them.
-            let reading = st.lyrics.ruby.get(k).filter(|_| st.settings.lyrics_pronunciation).and_then(|p| poni_core::romanize::reading(p));
-            let under = reading.map(|r| format!(", read \"{r}\"")).unwrap_or_default();
-            check("lyric-line", true, format!("line {} \"{text}\"{under} sung at {pos:.1} s", k + 1))
+            let reading = st
+                .lyrics
+                .ruby
+                .get(k)
+                .filter(|_| st.settings.lyrics_pronunciation)
+                .and_then(|p| poni_core::romanize::reading(p));
+            let under = reading
+                .map(|r| format!(", read \"{r}\""))
+                .unwrap_or_default();
+            check(
+                "lyric-line",
+                true,
+                format!("line {} \"{text}\"{under} sung at {pos:.1} s", k + 1),
+            )
         }
-        Some((k, _)) => check("lyric-line", false, format!("line {} at {pos:.1} s has no words", k + 1)),
+        Some((k, _)) => check(
+            "lyric-line",
+            false,
+            format!("line {} at {pos:.1} s has no words", k + 1),
+        ),
         None => check("lyric-line", false, format!("no synced line at {pos:.1} s")),
     }
 }
@@ -4302,7 +5943,13 @@ struct Backdrop {
 /// Frame over a soft wallpaper-like gradient (or, in the Glass theme, the
 /// page under the island), with room around it, the way the island hangs from
 /// the top of a desktop. Returns straight RGBA.
-fn composite(w: usize, h: usize, pbgra: &[u8], scale: f32, back: Option<Backdrop>) -> (u32, u32, Vec<u8>) {
+fn composite(
+    w: usize,
+    h: usize,
+    pbgra: &[u8],
+    scale: f32,
+    back: Option<Backdrop>,
+) -> (u32, u32, Vec<u8>) {
     let pad_x = (48.0 * scale).round().max(0.0) as usize;
     let pad_b = (40.0 * scale).round().max(0.0) as usize;
     let (ow, oh) = (w + 2 * pad_x, h + pad_b);
@@ -4318,7 +5965,8 @@ fn composite(w: usize, h: usize, pbgra: &[u8], scale: f32, back: Option<Backdrop
                 Some(b) => {
                     let wx = (b.left + x as i32 - pad_x as i32) as f32 + 0.5;
                     let wy = (b.top + y as i32) as f32 + 0.5;
-                    backdrop_dip(b.dark, wx / b.scale - b.cx_dip, wy / b.scale).map(|c| c as f32 / 255.0)
+                    backdrop_dip(b.dark, wx / b.scale - b.cx_dip, wy / b.scale)
+                        .map(|c| c as f32 / 255.0)
                 }
                 None => mix(left, right, x as f32 * fx),
             };
@@ -4327,7 +5975,11 @@ fn composite(w: usize, h: usize, pbgra: &[u8], scale: f32, back: Option<Backdrop
                 let o = (y * w + (x - pad_x)) * 4;
                 if let Some(p) = pbgra.get(o..o + 4) {
                     let inv = 1.0 - p[3] as f32 / 255.0;
-                    c = [p[2] as f32 + c[0] * inv, p[1] as f32 + c[1] * inv, p[0] as f32 + c[2] * inv];
+                    c = [
+                        p[2] as f32 + c[0] * inv,
+                        p[1] as f32 + c[1] * inv,
+                        p[0] as f32 + c[2] * inv,
+                    ];
                 }
             }
             let o = (y * ow + x) * 4;
@@ -4361,7 +6013,10 @@ enum GlassRun {
 
 impl GlassRun {
     fn from_env() -> Self {
-        match std::env::var("PONI_SELFTEST_GLASS").map(|v| v.trim().to_ascii_lowercase()).as_deref() {
+        match std::env::var("PONI_SELFTEST_GLASS")
+            .map(|v| v.trim().to_ascii_lowercase())
+            .as_deref()
+        {
             Ok("dark") => GlassRun::Dark,
             Ok("flip") => GlassRun::Flip,
             _ => GlassRun::Light,
@@ -4383,7 +6038,11 @@ fn glass_backdrop(dark: bool, w: i32, h: i32, scale: f32) -> Vec<u8> {
     let mut px = vec![0u8; (w * h * 4) as usize];
     for y in 0..h {
         for x in 0..w {
-            let c = backdrop_dip(dark, (x as f32 + 0.5) / scale - cx, (y as f32 + 0.5) / scale);
+            let c = backdrop_dip(
+                dark,
+                (x as f32 + 0.5) / scale - cx,
+                (y as f32 + 0.5) / scale,
+            );
             let o = ((y * w + x) * 4) as usize;
             px[o..o + 4].copy_from_slice(&[c[2], c[1], c[0], 255]);
         }
@@ -4422,15 +6081,42 @@ fn mix8(a: [u8; 3], b: [u8; 3], t: f32) -> [u8; 3] {
     [0, 1, 2].map(|i| (a[i] as f32 + (b[i] as f32 - a[i] as f32) * t).round() as u8)
 }
 
-const FAVICONS: [[u8; 3]; 6] = [[232, 69, 60], [240, 137, 46], [26, 115, 232], [24, 128, 56], [147, 52, 230], [95, 99, 104]];
+const FAVICONS: [[u8; 3]; 6] = [
+    [232, 69, 60],
+    [240, 137, 46],
+    [26, 115, 232],
+    [24, 128, 56],
+    [147, 52, 230],
+    [95, 99, 104],
+];
 
 /// A browser's tab strip and toolbar (light or dark), `y` < 85 DIPs. Tabs
 /// are 228 DIPs wide, the active one just left of the island's centre.
 fn browser_chrome(dark: bool, x: f32, y: f32) -> [u8; 3] {
     let (strip, active_bg, sep, text, text_dim, bar, pill, url, url_dim) = if dark {
-        ([0x20, 0x21, 0x24], [0x35, 0x36, 0x3A], [0x5F, 0x63, 0x68], [0xE8, 0xEA, 0xED], [0xBD, 0xC1, 0xC6], [0x35, 0x36, 0x3A], [0x20, 0x21, 0x24], [0xE8, 0xEA, 0xED], [0x9A, 0xA0, 0xA6])
+        (
+            [0x20, 0x21, 0x24],
+            [0x35, 0x36, 0x3A],
+            [0x5F, 0x63, 0x68],
+            [0xE8, 0xEA, 0xED],
+            [0xBD, 0xC1, 0xC6],
+            [0x35, 0x36, 0x3A],
+            [0x20, 0x21, 0x24],
+            [0xE8, 0xEA, 0xED],
+            [0x9A, 0xA0, 0xA6],
+        )
     } else {
-        ([0xDF, 0xE3, 0xE8], [0xFF, 0xFF, 0xFF], [0xA9, 0xAD, 0xB3], [0x20, 0x21, 0x24], [0x3C, 0x40, 0x43], [0xFF, 0xFF, 0xFF], [0xF1, 0xF3, 0xF4], [0x20, 0x21, 0x24], [0x5F, 0x63, 0x68])
+        (
+            [0xDF, 0xE3, 0xE8],
+            [0xFF, 0xFF, 0xFF],
+            [0xA9, 0xAD, 0xB3],
+            [0x20, 0x21, 0x24],
+            [0x3C, 0x40, 0x43],
+            [0xFF, 0xFF, 0xFF],
+            [0xF1, 0xF3, 0xF4],
+            [0x20, 0x21, 0x24],
+            [0x5F, 0x63, 0x68],
+        )
     };
     if y < 41.0 {
         let k = ((x + 150.0) / 228.0).floor() as i32;
@@ -4451,7 +6137,8 @@ fn browser_chrome(dark: bool, x: f32, y: f32) -> [u8; 3] {
     if !dark && y >= 84.0 {
         return [0xE3, 0xE3, 0xE3];
     }
-    let in_pill = (47.0..79.0).contains(&y) && (x.abs() < 544.0 || (x.abs() - 544.0).powi(2) + (y - 63.0).powi(2) < 256.0);
+    let in_pill = (47.0..79.0).contains(&y)
+        && (x.abs() < 544.0 || (x.abs() - 544.0).powi(2) + (y - 63.0).powi(2) < 256.0);
     if in_pill {
         if (59.0..67.0).contains(&y) && on_word(x, -500.0, -60.0, 77) {
             return url;
@@ -4475,7 +6162,9 @@ fn backdrop_dip(dark: bool, x: f32, y: f32) -> [u8; 3] {
     if !dark {
         if y < 137.0 {
             let ink = [0x20, 0x21, 0x24];
-            if ((104.0..118.0).contains(&y) && on_word(x, -672.0, -570.0, 5)) || ((107.0..115.0).contains(&y) && on_word(x, -500.0, 120.0, 13)) {
+            if ((104.0..118.0).contains(&y) && on_word(x, -672.0, -570.0, 5))
+                || ((107.0..115.0).contains(&y) && on_word(x, -500.0, 120.0, 13))
+            {
                 return ink;
             }
             if (131.0..133.0).contains(&y) && (-500.0..-452.0).contains(&x) {
@@ -4512,7 +6201,11 @@ fn backdrop_dip(dark: bool, x: f32, y: f32) -> [u8; 3] {
         }
         if (94.0..132.0).contains(&y) && x.abs() < 270.0 {
             let ring = y < 95.0 || y >= 131.0 || x.abs() >= 269.0;
-            c = if ring { [0x30, 0x30, 0x30] } else { [0x12, 0x12, 0x12] };
+            c = if ring {
+                [0x30, 0x30, 0x30]
+            } else {
+                [0x12, 0x12, 0x12]
+            };
             if (109.0..117.0).contains(&y) && on_word(x, -250.0, -180.0, 41) {
                 c = [0x88, 0x88, 0x88];
             }
@@ -4522,13 +6215,21 @@ fn backdrop_dip(dark: bool, x: f32, y: f32) -> [u8; 3] {
     // The video: a sunset sky, hills, water and a skyline.
     let t = (y - 141.0) / 90.0;
     let u = (x + 720.0) / 1440.0;
-    let mut c = mix8(mix8([255, 172, 120], [232, 160, 150], u), [150, 140, 175], t);
+    let mut c = mix8(
+        mix8([255, 172, 120], [232, 160, 150], u),
+        [150, 140, 175],
+        t,
+    );
     let hills = 205.0 + 12.0 * (x * 0.011).sin() + 7.0 * (x * 0.027 + 1.3).sin();
     if y > hills && y < 236.0 {
         c = mix8([96, 108, 140], [120, 128, 160], (y - hills) / 30.0);
     }
     if (236.0..248.0).contains(&y) {
-        c = mix8([196, 170, 176], [228, 196, 186], ((x * 0.09).sin() * 0.5 + 0.5) * 0.6);
+        c = mix8(
+            [196, 170, 176],
+            [228, 196, 186],
+            ((x * 0.09).sin() * 0.5 + 0.5) * 0.6,
+        );
     }
     let b = ((x + 2000.0) / 14.0).floor() as i32;
     let bx = (x + 2000.0).rem_euclid(14.0);

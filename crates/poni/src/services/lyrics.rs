@@ -47,7 +47,11 @@ use std::time::{Duration, Instant};
 use pure::{duration_secs, is_fresh, lyrics_for, prune_victims, retry_delay, usable, CacheEntry};
 
 // LRCLIB asks apps to say who they are.
-const USER_AGENT: &str = concat!("OyenzaStudio/", env!("CARGO_PKG_VERSION"), " (+https://github.com/lucacadalora/oyenza-studio)");
+const USER_AGENT: &str = concat!(
+    "OyenzaStudio/",
+    env!("CARGO_PKG_VERSION"),
+    " (+https://github.com/lucacadalora/oyenza-studio)"
+);
 const SOURCE: &str = "LRCLIB";
 const APPLE_SOURCE: &str = "Apple Music";
 /// Minimum gap between two requests to LRCLIB.
@@ -79,7 +83,11 @@ const MSG_HTTP: &str = "LRCLIB error";
 /// with this copy.
 #[cfg_attr(windows, allow(dead_code))] // only the Mac's smoke run asks (it looks a real song up)
 pub fn lrclib_trouble(msg: &str) -> bool {
-    [MSG_BUSY, MSG_TIMEOUT, MSG_UNREACHABLE].contains(&msg) || msg.strip_prefix(MSG_HTTP).and_then(|s| s.trim().parse::<u16>().ok()).is_some_and(|s| s >= 500)
+    [MSG_BUSY, MSG_TIMEOUT, MSG_UNREACHABLE].contains(&msg)
+        || msg
+            .strip_prefix(MSG_HTTP)
+            .and_then(|s| s.trim().parse::<u16>().ok())
+            .is_some_and(|s| s >= 500)
 }
 
 pub struct LyricsService {
@@ -182,7 +190,11 @@ impl Shared {
         self.q.lock().unwrap_or_else(|p| p.into_inner())
     }
 
-    fn wait_for<'a>(&self, g: MutexGuard<'a, Queue>, timeout: Option<Duration>) -> MutexGuard<'a, Queue> {
+    fn wait_for<'a>(
+        &self,
+        g: MutexGuard<'a, Queue>,
+        timeout: Option<Duration>,
+    ) -> MutexGuard<'a, Queue> {
         match timeout {
             Some(d) => match self.cv.wait_timeout(g, d) {
                 Ok((g, _)) => g,
@@ -200,7 +212,10 @@ enum Halt {
     /// Superseded by a newer track, or shutting down: say nothing.
     Abandoned,
     /// Show `msg`; retry at `retry_at` while the track is still current.
-    Failed { msg: String, retry_at: Option<Instant> },
+    Failed {
+        msg: String,
+        retry_at: Option<Instant>,
+    },
 }
 
 enum Fetched {
@@ -214,7 +229,16 @@ fn worker_main(shared: Arc<Shared>, sink: EventSink) {
     let cache_dir = crate::paths::lyrics_cache_dir();
     prune_cache(&cache_dir);
     let apple = AppleMusic::new();
-    let mut w = Worker { shared, sink, cache_dir, apple, client: None, last_request: None, blocked_until: None, writes: 0 };
+    let mut w = Worker {
+        shared,
+        sink,
+        cache_dir,
+        apple,
+        client: None,
+        last_request: None,
+        blocked_until: None,
+        writes: 0,
+    };
     while let Some(work) = w.next_job() {
         match work {
             Work::Lookup(job) => w.process(job),
@@ -274,7 +298,10 @@ impl Worker {
 
     fn deliver(&self, job: &Job, result: LyricsResult) {
         if self.is_current(job) {
-            self.sink.send(AppEvent::Lyrics { track_key: job.track_key.clone(), result });
+            self.sink.send(AppEvent::Lyrics {
+                track_key: job.track_key.clone(),
+                result,
+            });
         }
     }
 
@@ -284,7 +311,15 @@ impl Worker {
                 // Readings for Japanese / Korean / Chinese lines, worked out
                 // here so the UI thread never waits on the analyzer.
                 let read = super::romanize::pronounce(&lyrics);
-                self.deliver(&job, LyricsResult::Found { lyrics, source, ruby: read.ruby, wants_ja_readings: read.wants_ja_readings })
+                self.deliver(
+                    &job,
+                    LyricsResult::Found {
+                        lyrics,
+                        source,
+                        ruby: read.ruby,
+                        wants_ja_readings: read.wants_ja_readings,
+                    },
+                )
             }
             Ok(result) => self.deliver(&job, result),
             Err(Halt::Abandoned) => {}
@@ -305,7 +340,13 @@ impl Worker {
         if q.shutdown || q.newest_key != job.track_key || q.pending.is_some() {
             return;
         }
-        q.retry = Some((at, Job { attempt: job.attempt + 1, ..job }));
+        q.retry = Some((
+            at,
+            Job {
+                attempt: job.attempt + 1,
+                ..job
+            },
+        ));
         // The worker itself is the only waiter and it is not waiting right
         // now, so no notify is needed.
     }
@@ -348,7 +389,10 @@ impl Worker {
         let cached = read_cache(&path);
         if let Some(entry) = &cached {
             if is_fresh(entry, crate::clock::unix_now()) {
-                return Ok(entry.record.as_ref().map(|r| to_result(Some(r), job, APPLE_SOURCE)));
+                return Ok(entry
+                    .record
+                    .as_ref()
+                    .map(|r| to_result(Some(r), job, APPLE_SOURCE)));
             }
         }
         let (shared, track_key) = (self.shared.clone(), job.track_key.clone());
@@ -359,7 +403,10 @@ impl Worker {
         match self.apple.find(q, &live) {
             Ok(Some(record)) => {
                 crate::pinfo!("lyrics {key}: synced");
-                self.store(&path, &CacheEntry::new(Some(record.clone()), crate::clock::unix_now()));
+                self.store(
+                    &path,
+                    &CacheEntry::new(Some(record.clone()), crate::clock::unix_now()),
+                );
                 Ok(Some(to_result(Some(&record), job, APPLE_SOURCE)))
             }
             Ok(None) => {
@@ -370,13 +417,22 @@ impl Worker {
             Err(Miss::Abandoned) => Err(Halt::Abandoned),
             Err(miss) => {
                 match miss {
-                    Miss::Rejected => self.sink.send(AppEvent::AppleMusic(AppleMusicStatus::Rejected)),
-                    Miss::NoAccess => self.sink.send(AppEvent::AppleMusic(AppleMusicStatus::NoAccess)),
-                    Miss::Unreachable(why) => crate::pwarn!("lyrics: Apple Music unavailable ({why}); asking LRCLIB"),
+                    Miss::Rejected => self
+                        .sink
+                        .send(AppEvent::AppleMusic(AppleMusicStatus::Rejected)),
+                    Miss::NoAccess => self
+                        .sink
+                        .send(AppEvent::AppleMusic(AppleMusicStatus::NoAccess)),
+                    Miss::Unreachable(why) => {
+                        crate::pwarn!("lyrics: Apple Music unavailable ({why}); asking LRCLIB")
+                    }
                     Miss::Abandoned => {}
                 }
                 // An expired hit still beats asking LRCLIB.
-                Ok(cached.as_ref().and_then(|e| e.record.as_ref()).map(|r| to_result(Some(r), job, APPLE_SOURCE)))
+                Ok(cached
+                    .as_ref()
+                    .and_then(|e| e.record.as_ref())
+                    .map(|r| to_result(Some(r), job, APPLE_SOURCE)))
             }
         }
     }
@@ -402,7 +458,10 @@ impl Worker {
                         "plain"
                     }
                 );
-                self.store(&path, &CacheEntry::new(Some(record.clone()), crate::clock::unix_now()));
+                self.store(
+                    &path,
+                    &CacheEntry::new(Some(record.clone()), crate::clock::unix_now()),
+                );
                 Ok(to_result(Some(&record), job, SOURCE))
             }
             Ok(Fetched::Missing) => {
@@ -410,11 +469,13 @@ impl Worker {
                 self.store(&path, &CacheEntry::new(None, crate::clock::unix_now()));
                 Ok(LyricsResult::NotFound)
             }
-            Err(Halt::Failed { msg, retry_at }) => match cached.as_ref().and_then(|e| e.record.as_ref()) {
-                // An expired hit beats an error.
-                Some(record) => Ok(to_result(Some(record), job, SOURCE)),
-                None => Err(Halt::Failed { msg, retry_at }),
-            },
+            Err(Halt::Failed { msg, retry_at }) => {
+                match cached.as_ref().and_then(|e| e.record.as_ref()) {
+                    // An expired hit beats an error.
+                    Some(record) => Ok(to_result(Some(record), job, SOURCE)),
+                    None => Err(Halt::Failed { msg, retry_at }),
+                }
+            }
             Err(Halt::Abandoned) => Err(Halt::Abandoned),
         }
     }
@@ -441,7 +502,10 @@ impl Worker {
         if !q.artist.is_empty() {
             let mut urls = vec![lrclib::get_url(q)];
             if !q.album.is_empty() {
-                urls.push(lrclib::get_url(&TrackQuery { album: String::new(), ..q.clone() }));
+                urls.push(lrclib::get_url(&TrackQuery {
+                    album: String::new(),
+                    ..q.clone()
+                }));
             }
             for url in urls {
                 let resp = self.call(job, &url)?;
@@ -495,7 +559,12 @@ impl Worker {
     /// 5xx is noted in `server_failed` and counts as no match here: LRCLIB
     /// can answer 503 to a search it holds nothing for (a video title read
     /// the wrong way) while the next reading of the title works.
-    fn search(&mut self, job: &Job, q: &TrackQuery, server_failed: &mut Option<Halt>) -> Result<Option<LrclibRecord>, Halt> {
+    fn search(
+        &mut self,
+        job: &Job,
+        q: &TrackQuery,
+        server_failed: &mut Option<Halt>,
+    ) -> Result<Option<LrclibRecord>, Halt> {
         let search = TrackQuery {
             title: q.title.clone(),
             artist: lrclib::primary_artist(&q.artist),
@@ -505,7 +574,9 @@ impl Worker {
         let resp = self.call(job, &lrclib::search_url(&search))?;
         match resp.status {
             200 => match lrclib::parse_search(&resp.body) {
-                Ok(records) => Ok(lrclib::best_match(&records, q).filter(|r| usable(r)).cloned()),
+                Ok(records) => Ok(lrclib::best_match(&records, q)
+                    .filter(|r| usable(r))
+                    .cloned()),
                 Err(e) => Err(self.bad_reply(job, "/api/search", &e)),
             },
             400 | 404 => Ok(None),
@@ -527,7 +598,10 @@ impl Worker {
                 Some(c) => c,
                 None => Client::new(USER_AGENT).map_err(|e| {
                     crate::pwarn!("lyrics: {e}");
-                    Halt::Failed { msg: "Lyrics are unavailable".into(), retry_at: Some(Instant::now() + retry_delay(job.attempt)) }
+                    Halt::Failed {
+                        msg: "Lyrics are unavailable".into(),
+                        retry_at: Some(Instant::now() + retry_delay(job.attempt)),
+                    }
                 })?,
             };
             let res = client.get(url, http::DEFAULT_TIMEOUT);
@@ -535,8 +609,15 @@ impl Worker {
             self.last_request = Some(Instant::now());
             match res {
                 Ok(r) if r.status == 429 => {
-                    let wait = r.retry_after_s.map(Duration::from_secs).unwrap_or(DEFAULT_BACKOFF).min(MAX_BACKOFF);
-                    crate::pwarn!("lyrics: LRCLIB rate limit, backing off {} s", wait.as_secs());
+                    let wait = r
+                        .retry_after_s
+                        .map(Duration::from_secs)
+                        .unwrap_or(DEFAULT_BACKOFF)
+                        .min(MAX_BACKOFF);
+                    crate::pwarn!(
+                        "lyrics: LRCLIB rate limit, backing off {} s",
+                        wait.as_secs()
+                    );
                     self.blocked_until = Some(Instant::now() + wait);
                     // `pace` waits a short back-off out, or fails with a retry.
                 }
@@ -548,7 +629,10 @@ impl Worker {
                         FetchError::Network(_) => MSG_UNREACHABLE,
                         FetchError::Other(_) => "Lyrics are unavailable",
                     };
-                    return Err(Halt::Failed { msg: msg.into(), retry_at: Some(Instant::now() + retry_delay(job.attempt)) });
+                    return Err(Halt::Failed {
+                        msg: msg.into(),
+                        retry_at: Some(Instant::now() + retry_delay(job.attempt)),
+                    });
                 }
             }
         }
@@ -563,7 +647,11 @@ impl Worker {
             until = Some(until.map_or(b, |u| u.max(b)));
         }
         let Some(until) = until else {
-            return if self.is_current(job) { Ok(()) } else { Err(Halt::Abandoned) };
+            return if self.is_current(job) {
+                Ok(())
+            } else {
+                Err(Halt::Abandoned)
+            };
         };
         if until.saturating_duration_since(Instant::now()) > MAX_INLINE_WAIT {
             return Err(self.busy());
@@ -582,15 +670,24 @@ impl Worker {
     }
 
     fn busy(&self) -> Halt {
-        let at = self.blocked_until.unwrap_or_else(Instant::now).max(Instant::now() + MIN_GAP);
-        Halt::Failed { msg: MSG_BUSY.into(), retry_at: Some(at) }
+        let at = self
+            .blocked_until
+            .unwrap_or_else(Instant::now)
+            .max(Instant::now() + MIN_GAP);
+        Halt::Failed {
+            msg: MSG_BUSY.into(),
+            retry_at: Some(at),
+        }
     }
 
     fn http_error(&self, job: &Job, status: u16) -> Halt {
         crate::pwarn!("lyrics: LRCLIB answered HTTP {status}");
         // Server trouble is worth a later retry; other client errors are not.
         let retry_at = (status >= 500).then(|| Instant::now() + retry_delay(job.attempt));
-        Halt::Failed { msg: format!("{MSG_HTTP} {status}"), retry_at }
+        Halt::Failed {
+            msg: format!("{MSG_HTTP} {status}"),
+            retry_at,
+        }
     }
 
     /// A 200 that isn't LRCLIB JSON (captive portal, proxy page, API change):
@@ -615,7 +712,12 @@ fn to_result(record: Option<&LrclibRecord>, job: &Job, source: &str) -> LyricsRe
         return LyricsResult::Instrumental;
     }
     match record.and_then(|r| lyrics_for(r, job.query.duration_s)) {
-        Some(lyrics) => LyricsResult::Found { lyrics, source: source.into(), ruby: Vec::new(), wants_ja_readings: false },
+        Some(lyrics) => LyricsResult::Found {
+            lyrics,
+            source: source.into(),
+            ruby: Vec::new(),
+            wants_ja_readings: false,
+        },
         None => LyricsResult::NotFound,
     }
 }
@@ -655,7 +757,9 @@ fn write_cache(path: &Path, entry: &CacheEntry) {
 /// Remove leftovers of interrupted writes and keep the folder bounded
 /// (oldest entries go first).
 fn prune_cache(dir: &Path) {
-    let Ok(entries) = fs::read_dir(dir) else { return };
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
     let mut files = Vec::new();
     for entry in entries.flatten() {
         let path = entry.path();
@@ -717,7 +821,12 @@ mod pure {
         pub const LOOKUP: u32 = 2;
 
         pub fn new(record: Option<LrclibRecord>, now: i64) -> Self {
-            Self { v: Self::VERSION, lookup: Self::LOOKUP, fetched_at: now, record }
+            Self {
+                v: Self::VERSION,
+                lookup: Self::LOOKUP,
+                fetched_at: now,
+                record,
+            }
         }
     }
 
@@ -737,7 +846,11 @@ mod pure {
             // Written "in the future": the clock was wrong; don't trust it.
             return false;
         }
-        let ttl = if e.record.is_some() { PLAIN_TTL_S } else { NEGATIVE_TTL_S };
+        let ttl = if e.record.is_some() {
+            PLAIN_TTL_S
+        } else {
+            NEGATIVE_TTL_S
+        };
         age < ttl
     }
 
@@ -753,7 +866,11 @@ mod pure {
         if r.instrumental {
             return None;
         }
-        let synced = r.synced_lyrics.as_deref().filter(|s| !s.trim().is_empty()).map(parse_lrc);
+        let synced = r
+            .synced_lyrics
+            .as_deref()
+            .filter(|s| !s.trim().is_empty())
+            .map(parse_lrc);
         if let Some(l) = &synced {
             if l.synced && l.text_lines() >= MIN_LINES {
                 return synced;
@@ -766,7 +883,9 @@ mod pure {
             }
         }
         // "Synced" text without usable timestamps still reads as plain lyrics.
-        synced.map(trim_blank_edges).filter(|l| l.text_lines() >= MIN_LINES)
+        synced
+            .map(trim_blank_edges)
+            .filter(|l| l.text_lines() >= MIN_LINES)
     }
 
     /// The lyrics to show while a `playing_s`-second track plays. Synced
@@ -784,8 +903,18 @@ mod pure {
                 return Some(plain);
             }
         }
-        let lines = l.lines.into_iter().map(|x| LyricLine { time_s: 0.0, text: x.text }).collect();
-        Some(trim_blank_edges(Lyrics { lines, synced: false }))
+        let lines = l
+            .lines
+            .into_iter()
+            .map(|x| LyricLine {
+                time_s: 0.0,
+                text: x.text,
+            })
+            .collect();
+        Some(trim_blank_edges(Lyrics {
+            lines,
+            synced: false,
+        }))
     }
 
     /// Drop blank rows at the start and end of unsynced lyrics (blank rows
@@ -795,7 +924,11 @@ mod pure {
             while l.lines.last().is_some_and(|x| x.text.trim().is_empty()) {
                 l.lines.pop();
             }
-            let lead = l.lines.iter().take_while(|x| x.text.trim().is_empty()).count();
+            let lead = l
+                .lines
+                .iter()
+                .take_while(|x| x.text.trim().is_empty())
+                .count();
             l.lines.drain(..lead);
         }
         l
@@ -817,7 +950,11 @@ mod pure {
 
     /// Which cache files to delete: none while `files.len() <= max`, else the
     /// oldest ones (unknown times first) down to `keep`.
-    pub fn prune_victims(mut files: Vec<(Option<SystemTime>, PathBuf)>, max: usize, keep: usize) -> Vec<PathBuf> {
+    pub fn prune_victims(
+        mut files: Vec<(Option<SystemTime>, PathBuf)>,
+        max: usize,
+        keep: usize,
+    ) -> Vec<PathBuf> {
         if files.len() <= max {
             return Vec::new();
         }
@@ -855,11 +992,18 @@ mod pure {
             assert_eq!(l.lines.len(), 4);
             assert!((l.lines[1].time_s - 4.5).abs() < 1e-9);
 
-            let r = rec(None, Some("\n\nfirst row\n\nsecond row\nthird row\nfourth row\n\n"), false);
+            let r = rec(
+                None,
+                Some("\n\nfirst row\n\nsecond row\nthird row\nfourth row\n\n"),
+                false,
+            );
             let l = lyrics_from_record(&r).unwrap();
             assert!(!l.synced);
             let rows: Vec<&str> = l.lines.iter().map(|x| x.text.as_str()).collect();
-            assert_eq!(rows, vec!["first row", "", "second row", "third row", "fourth row"]);
+            assert_eq!(
+                rows,
+                vec!["first row", "", "second row", "third row", "fourth row"]
+            );
 
             // Blank or stub synced text falls back to plain.
             let r = rec(Some("   "), Some(PLAIN), false);
@@ -910,7 +1054,8 @@ mod pure {
             assert!(is_fresh(&miss, now));
             let miss = CacheEntry::new(None, now - 3 * day);
             assert!(!is_fresh(&miss, now));
-            let synced = CacheEntry::new(Some(rec(Some("[00:01.00]x"), None, false)), now - 900 * day);
+            let synced =
+                CacheEntry::new(Some(rec(Some("[00:01.00]x"), None, false)), now - 900 * day);
             assert!(is_fresh(&synced, now));
             let instrumental = CacheEntry::new(Some(rec(None, None, true)), now - 900 * day);
             assert!(is_fresh(&instrumental, now));
@@ -922,9 +1067,15 @@ mod pure {
             let future = CacheEntry::new(None, now + 2 * day);
             assert!(!is_fresh(&future, now));
             // Misses from an older lookup are asked again; its hits stay.
-            let old_miss = CacheEntry { lookup: CacheEntry::LOOKUP - 1, ..CacheEntry::new(None, now - day) };
+            let old_miss = CacheEntry {
+                lookup: CacheEntry::LOOKUP - 1,
+                ..CacheEntry::new(None, now - day)
+            };
             assert!(!is_fresh(&old_miss, now));
-            let old_synced = CacheEntry { lookup: 0, ..CacheEntry::new(Some(rec(Some("[00:01.00]x"), None, false)), now - day) };
+            let old_synced = CacheEntry {
+                lookup: 0,
+                ..CacheEntry::new(Some(rec(Some("[00:01.00]x"), None, false)), now - day)
+            };
             assert!(is_fresh(&old_synced, now));
         }
 
@@ -935,8 +1086,15 @@ mod pure {
             let back: CacheEntry = serde_json::from_str(&json).unwrap();
             assert_eq!(back, e);
             // Files from before the lookup was recorded read as lookup 0.
-            let miss: CacheEntry = serde_json::from_str(r#"{"v":1,"fetched_at":7,"record":null}"#).unwrap();
-            assert_eq!(miss, CacheEntry { lookup: 0, ..CacheEntry::new(None, 7) });
+            let miss: CacheEntry =
+                serde_json::from_str(r#"{"v":1,"fetched_at":7,"record":null}"#).unwrap();
+            assert_eq!(
+                miss,
+                CacheEntry {
+                    lookup: 0,
+                    ..CacheEntry::new(None, 7)
+                }
+            );
         }
 
         #[test]
@@ -966,7 +1124,10 @@ mod pure {
                 (at(20), PathBuf::from("b")),
             ];
             assert!(prune_victims(files.clone(), 4, 2).is_empty());
-            assert_eq!(prune_victims(files, 3, 2), vec![PathBuf::from("unknown"), PathBuf::from("a")]);
+            assert_eq!(
+                prune_victims(files, 3, 2),
+                vec![PathBuf::from("unknown"), PathBuf::from("a")]
+            );
         }
     }
 }
@@ -977,11 +1138,24 @@ mod trouble_tests {
 
     #[test]
     fn only_lrclibs_own_trouble_counts_as_lrclibs() {
-        for msg in [MSG_BUSY, MSG_TIMEOUT, MSG_UNREACHABLE, "LRCLIB error 500", "LRCLIB error 503"] {
+        for msg in [
+            MSG_BUSY,
+            MSG_TIMEOUT,
+            MSG_UNREACHABLE,
+            "LRCLIB error 500",
+            "LRCLIB error 503",
+        ] {
             assert!(lrclib_trouble(msg), "{msg}");
         }
         // A missing song, a refused request or a reply we can't read is ours to look at.
-        for msg in ["LRCLIB error 404", "LRCLIB error 429", "LRCLIB error", "Unexpected reply from LRCLIB", "Lyrics are unavailable", ""] {
+        for msg in [
+            "LRCLIB error 404",
+            "LRCLIB error 429",
+            "LRCLIB error",
+            "Unexpected reply from LRCLIB",
+            "Lyrics are unavailable",
+            "",
+        ] {
             assert!(!lrclib_trouble(msg), "{msg}");
         }
     }

@@ -8,13 +8,13 @@ pub mod applemusic_ui;
 pub mod audio;
 pub mod backdrop;
 pub mod bluetooth;
-pub mod clipboard;
-pub mod frames;
-pub mod fullscreen;
 pub mod cities;
+pub mod clipboard;
 pub mod downloader;
 #[cfg(test)]
 mod downloader_live;
+pub mod frames;
+pub mod fullscreen;
 pub mod http;
 pub mod ielts;
 pub mod imaging;
@@ -25,7 +25,7 @@ pub mod mic;
 pub mod notes;
 pub mod notifications;
 pub mod numa;
-pub mod numa_takeover;
+pub mod numa_events;
 pub mod oyenza;
 pub mod pairdrop;
 pub mod phonedrop;
@@ -37,13 +37,13 @@ pub mod romanize;
 mod romanize_compare;
 pub mod secret;
 pub mod sound;
-pub mod notifications;
 pub mod stocks;
 pub mod sysmon;
 pub mod sysstats;
 pub mod update;
 pub mod usage;
 pub mod voice;
+pub mod wake;
 
 use crate::commands::{MediaCmd, OyenzaCmd, UsageCmd};
 use crate::events::EventSink;
@@ -56,6 +56,7 @@ pub struct Services {
     media: Option<media::MediaService>,
     lyrics: Option<lyrics::LyricsService>,
     _audio: Option<audio::AudioService>,
+    _wake: Option<wake::WakeListener>,
     _bluetooth: Option<bluetooth::BluetoothService>,
     fullscreen: Option<fullscreen::FullscreenWatcher>,
     oyenza: Option<oyenza::OyenzaService>,
@@ -85,7 +86,13 @@ fn started<T, E: std::fmt::Display>(name: &str, r: Result<T, E>) -> Option<T> {
 }
 
 impl Services {
-    pub fn start(sink: &EventSink, _island: HWND, helper: HWND, settings: &Settings, activity: oyenza::Activity) -> Self {
+    pub fn start(
+        sink: &EventSink,
+        _island: HWND,
+        helper: HWND,
+        settings: &Settings,
+        activity: oyenza::Activity,
+    ) -> Self {
         let media = started("media", media::MediaService::start(sink.clone()));
         let lyrics = started("lyrics", lyrics::LyricsService::start(sink.clone()));
         let audio = started("audio", audio::AudioService::start(sink.clone()));
@@ -99,7 +106,10 @@ impl Services {
             fullscreen::FullscreenWatcher::start(helper, sink.clone()),
         );
         // Idle (no calls) until the person signs in to Oyenza from the tray.
-        let oyenza = started("oyenza", oyenza::OyenzaService::start(sink.clone(), activity));
+        let oyenza = started(
+            "oyenza",
+            oyenza::OyenzaService::start(sink.clone(), activity),
+        );
         // Asks nothing until a phone is paired.
         let pairdrop = started("pair drop", pairdrop::PairDropService::start(sink.clone()));
         // Asleep unless an add-on is on; then it only checks the files it has.
@@ -110,11 +120,27 @@ impl Services {
         let store = crate::autostart::packaged();
         let on = poni_core::addons::ALL
             .iter()
-            .filter(|a| settings.addon_on(a.id) && !(store && a.id == poni_core::addons::DOWNLOADER.id))
+            .filter(|a| {
+                settings.addon_on(a.id) && !(store && a.id == poni_core::addons::DOWNLOADER.id)
+            })
             .map(|a| a.id)
             .collect();
         let addons = started("add-ons", addons::AddonService::start(sink.clone(), on));
-        Self { media, lyrics, _audio: audio, _bluetooth: bluetooth, fullscreen, oyenza, pairdrop, addons, stocks: std::cell::OnceCell::new(), usage: std::cell::OnceCell::new(), downloader: std::cell::OnceCell::new(), sink: sink.clone() }
+        Self {
+            media,
+            lyrics,
+            _audio: audio,
+            _wake: wake,
+            _bluetooth: bluetooth,
+            fullscreen,
+            oyenza,
+            pairdrop,
+            addons,
+            stocks: std::cell::OnceCell::new(),
+            usage: std::cell::OnceCell::new(),
+            downloader: std::cell::OnceCell::new(),
+            sink: sink.clone(),
+        }
     }
 
     pub fn stop(self, _helper: HWND) {
@@ -135,14 +161,22 @@ impl Services {
         if !w.open && self.stocks.get().is_none() {
             return;
         }
-        if let Some(s) = self.stocks.get_or_init(|| started("stocks", stocks::StocksService::start(self.sink.clone()))) {
+        if let Some(s) = self
+            .stocks
+            .get_or_init(|| started("stocks", stocks::StocksService::start(self.sink.clone())))
+        {
             s.set_watch(w);
         }
     }
 
     /// Run yt-dlp for `req` (the Downloader add-on's tools are in place).
     pub fn download(&self, req: poni_core::ytdlp::Request) {
-        if let Some(d) = self.downloader.get_or_init(|| started("downloader", downloader::DownloaderService::start(self.sink.clone()))) {
+        if let Some(d) = self.downloader.get_or_init(|| {
+            started(
+                "downloader",
+                downloader::DownloaderService::start(self.sink.clone()),
+            )
+        }) {
             d.run(req);
         }
     }
@@ -191,6 +225,12 @@ impl Services {
         }
     }
 
+    pub fn set_numa_muted(&self, muted: bool) {
+        if let Some(wake) = &self._wake {
+            wake.set_muted(muted);
+        }
+    }
+
     pub fn request_lyrics(&self, s: &MediaSession) {
         if let Some(l) = &self.lyrics {
             l.request(s);
@@ -217,7 +257,10 @@ impl Services {
         if !(w.open || w.notices) && self.usage.get().is_none() {
             return;
         }
-        if let Some(s) = self.usage.get_or_init(|| started("usage", usage::UsageService::start(self.sink.clone()))) {
+        if let Some(s) = self
+            .usage
+            .get_or_init(|| started("usage", usage::UsageService::start(self.sink.clone())))
+        {
             s.set_watch(w);
         }
     }
@@ -225,13 +268,10 @@ impl Services {
     /// Something the AI tab asked its worker for (a key, a refresh, the
     /// inference.oyenza.com link): it starts the thread if need be.
     pub fn usage_cmd(&self, c: UsageCmd) {
-    pub fn set_numa_muted(&self, muted: bool) {
-        if let Some(wake) = &self._wake {
-            wake.set_muted(muted);
-        }
-    }
-
-        if let Some(s) = self.usage.get_or_init(|| started("usage", usage::UsageService::start(self.sink.clone()))) {
+        if let Some(s) = self
+            .usage
+            .get_or_init(|| started("usage", usage::UsageService::start(self.sink.clone())))
+        {
             s.command(c);
         }
     }
@@ -264,7 +304,10 @@ impl Services {
     }
 
     pub fn pairs(&self) -> Vec<poni_core::pairdrop::Pair> {
-        self.pairdrop.as_ref().map(|p| p.pairs()).unwrap_or_default()
+        self.pairdrop
+            .as_ref()
+            .map(|p| p.pairs())
+            .unwrap_or_default()
     }
 
     /// The Apple Music token on disk was saved or removed.
@@ -277,7 +320,9 @@ impl Services {
     /// Handle the AppBar callback message; `Some(true)` when a full-screen
     /// app covers the island's monitor.
     pub fn on_appbar_message(&self, wp: WPARAM, lp: LPARAM, monitor: isize) -> Option<bool> {
-        self.fullscreen.as_ref().and_then(|f| f.on_appbar_message(wp, lp, monitor))
+        self.fullscreen
+            .as_ref()
+            .and_then(|f| f.on_appbar_message(wp, lp, monitor))
     }
 }
 
@@ -285,7 +330,10 @@ impl Services {
 pub fn apps_use_light_theme() -> bool {
     use windows::UI::ViewManagement::{UIColorType, UISettings};
     // The system background is white in light mode and black in dark mode.
-    UISettings::new().and_then(|s| s.GetColorValue(UIColorType::Background)).map(|c| c.R as u32 + c.G as u32 + c.B as u32 > 382).unwrap_or(true)
+    UISettings::new()
+        .and_then(|s| s.GetColorValue(UIColorType::Background))
+        .map(|c| c.R as u32 + c.G as u32 + c.B as u32 > 382)
+        .unwrap_or(true)
 }
 
 /// The Windows accent colour as it is: the Glass theme's text and fills sit
@@ -294,7 +342,12 @@ pub fn system_accent_base() -> Option<Color> {
     use windows::UI::ViewManagement::{UIColorType, UISettings};
     let s = UISettings::new().ok()?;
     let c = s.GetColorValue(UIColorType::Accent).ok()?;
-    Some(Color::rgba(c.R as f32 / 255.0, c.G as f32 / 255.0, c.B as f32 / 255.0, 1.0))
+    Some(Color::rgba(
+        c.R as f32 / 255.0,
+        c.G as f32 / 255.0,
+        c.B as f32 / 255.0,
+        1.0,
+    ))
 }
 
 /// The Windows accent colour, lightened for use on the black island.
@@ -302,5 +355,13 @@ pub fn system_accent() -> Option<Color> {
     use windows::UI::ViewManagement::{UIColorType, UISettings};
     let s = UISettings::new().ok()?;
     let c = s.GetColorValue(UIColorType::AccentLight2).ok()?;
-    Some(Color::rgba(c.R as f32 / 255.0, c.G as f32 / 255.0, c.B as f32 / 255.0, 1.0).for_island_accent())
+    Some(
+        Color::rgba(
+            c.R as f32 / 255.0,
+            c.G as f32 / 255.0,
+            c.B as f32 / 255.0,
+            1.0,
+        )
+        .for_island_accent(),
+    )
 }

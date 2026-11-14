@@ -18,12 +18,18 @@ use std::thread::JoinHandle;
 use std::time::Duration;
 use windows::core::{implement, Result, PCWSTR};
 use windows::Win32::Foundation::E_FAIL;
-use windows::Win32::Media::Audio::Endpoints::{IAudioEndpointVolume, IAudioEndpointVolumeCallback, IAudioEndpointVolumeCallback_Impl};
-use windows::Win32::Media::Audio::{
-    eConsole, eMultimedia, eRender, EDataFlow, ERole, IMMDevice, IMMDeviceEnumerator, IMMNotificationClient, IMMNotificationClient_Impl,
-    MMDeviceEnumerator, AUDCLNT_E_DEVICE_INVALIDATED, AUDIO_VOLUME_NOTIFICATION_DATA, DEVICE_STATE,
+use windows::Win32::Media::Audio::Endpoints::{
+    IAudioEndpointVolume, IAudioEndpointVolumeCallback, IAudioEndpointVolumeCallback_Impl,
 };
-use windows::Win32::System::Com::{CoCreateInstance, CoInitializeEx, CoTaskMemFree, CoUninitialize, CLSCTX_ALL, COINIT_MULTITHREADED};
+use windows::Win32::Media::Audio::{
+    eConsole, eMultimedia, eRender, EDataFlow, ERole, IMMDevice, IMMDeviceEnumerator,
+    IMMNotificationClient, IMMNotificationClient_Impl, MMDeviceEnumerator,
+    AUDCLNT_E_DEVICE_INVALIDATED, AUDIO_VOLUME_NOTIFICATION_DATA, DEVICE_STATE,
+};
+use windows::Win32::System::Com::{
+    CoCreateInstance, CoInitializeEx, CoTaskMemFree, CoUninitialize, CLSCTX_ALL,
+    COINIT_MULTITHREADED,
+};
 use windows::Win32::UI::Shell::PropertiesSystem::PROPERTYKEY;
 
 /// How long `Drop` waits for the worker to unregister before detaching it.
@@ -48,20 +54,28 @@ impl AudioService {
                 let _ = done_tx.send(());
             })
             .map_err(|e| windows::core::Error::new(E_FAIL, format!("audio thread: {e}")))?;
-        Ok(Self { tx, done, thread: Some(thread) })
+        Ok(Self {
+            tx,
+            done,
+            thread: Some(thread),
+        })
     }
 }
 
 impl Drop for AudioService {
     fn drop(&mut self) {
         let _ = self.tx.send(Msg::Shutdown);
-        let Some(thread) = self.thread.take() else { return };
+        let Some(thread) = self.thread.take() else {
+            return;
+        };
         match self.done.recv_timeout(STOP_TIMEOUT) {
             // Finished (or died): joining is immediate.
             Ok(()) | Err(RecvTimeoutError::Disconnected) => {
                 let _ = thread.join();
             }
-            Err(RecvTimeoutError::Timeout) => crate::pwarn!("audio: worker did not stop in time; detaching it"),
+            Err(RecvTimeoutError::Timeout) => {
+                crate::pwarn!("audio: worker did not stop in time; detaching it")
+            }
         }
     }
 }
@@ -106,7 +120,11 @@ impl Gate {
     /// duplicate path. Holding the lock while sending keeps reports ordered
     /// with respect to re-binds.
     fn publish(&self, generation: u32, level: f32, muted: bool) {
-        let level = if level.is_finite() { level.clamp(0.0, 1.0) } else { 0.0 };
+        let level = if level.is_finite() {
+            level.clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
         let key = ((level * 10_000.0).round() as u32, muted);
         let mut s = self.lock();
         if s.generation != generation || s.last == Some(key) {
@@ -131,7 +149,8 @@ impl IAudioEndpointVolumeCallback_Impl for VolumeCallback_Impl {
         // SAFETY: Core Audio passes either null or a struct that is valid for
         // the duration of this call; we only read two fields.
         if let Some(data) = unsafe { pnotify.as_ref() } {
-            self.gate.publish(self.generation, data.fMasterVolume, data.bMuted.as_bool());
+            self.gate
+                .publish(self.generation, data.fMasterVolume, data.bMuted.as_bool());
         }
         Ok(())
     }
@@ -184,7 +203,9 @@ impl ComApartment {
         if hr.is_err() {
             crate::pwarn!("audio: CoInitializeEx failed ({hr:?})");
         }
-        Self { initialized: hr.is_ok() }
+        Self {
+            initialized: hr.is_ok(),
+        }
     }
 }
 
@@ -222,7 +243,9 @@ fn worker(sink: EventSink, rx: Receiver<Msg>, client_tx: Sender<Msg>) {
         return;
     }
 
-    let enumerator: IMMDeviceEnumerator = match unsafe { CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL) } {
+    let enumerator: IMMDeviceEnumerator = match unsafe {
+        CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL)
+    } {
         Ok(e) => e,
         Err(e) => {
             crate::pwarn!("audio: MMDeviceEnumerator unavailable ({e}); volume pop-ups disabled");
@@ -231,15 +254,22 @@ fn worker(sink: EventSink, rx: Receiver<Msg>, client_tx: Sender<Msg>) {
     };
 
     let client: IMMNotificationClient = DeviceClient { tx: client_tx }.into();
-    let client_registered = match unsafe { enumerator.RegisterEndpointNotificationCallback(&client) } {
-        Ok(()) => true,
-        Err(e) => {
-            crate::pwarn!("audio: default-device notifications unavailable ({e})");
-            false
-        }
-    };
+    let client_registered =
+        match unsafe { enumerator.RegisterEndpointNotificationCallback(&client) } {
+            Ok(()) => true,
+            Err(e) => {
+                crate::pwarn!("audio: default-device notifications unavailable ({e})");
+                false
+            }
+        };
 
-    let gate = Arc::new(Gate { sink, state: Mutex::new(GateState { generation: 0, last: None }) });
+    let gate = Arc::new(Gate {
+        sink,
+        state: Mutex::new(GateState {
+            generation: 0,
+            last: None,
+        }),
+    });
     // The first report doubles as the initial state, which the app shows silently.
     let mut binding = rebind(&enumerator, &gate, None);
 
@@ -276,7 +306,11 @@ fn worker(sink: EventSink, rx: Receiver<Msg>, client_tx: Sender<Msg>) {
 
 /// Bind to the current default endpoint (unless it is the one already bound)
 /// and report its state.
-fn rebind(enumerator: &IMMDeviceEnumerator, gate: &Arc<Gate>, current: Option<Binding>) -> Option<Binding> {
+fn rebind(
+    enumerator: &IMMDeviceEnumerator,
+    gate: &Arc<Gate>,
+    current: Option<Binding>,
+) -> Option<Binding> {
     let device = match unsafe { enumerator.GetDefaultAudioEndpoint(eRender, eConsole) } {
         Ok(d) => d,
         Err(e) => {
@@ -294,7 +328,8 @@ fn rebind(enumerator: &IMMDeviceEnumerator, gate: &Arc<Gate>, current: Option<Bi
         // Same endpoint (a per-role repeat of one switch) and still alive. A
         // quick unplug + replug keeps the id but invalidates the old object,
         // which then fails this read and gets re-bound below.
-        if !id.is_empty() && b.id == id && unsafe { b.volume.GetMasterVolumeLevelScalar() }.is_ok() {
+        if !id.is_empty() && b.id == id && unsafe { b.volume.GetMasterVolumeLevelScalar() }.is_ok()
+        {
             return current;
         }
     }
@@ -308,7 +343,9 @@ fn rebind(enumerator: &IMMDeviceEnumerator, gate: &Arc<Gate>, current: Option<Bi
         Ok(b) => {
             match unsafe { (b.volume.GetMasterVolumeLevelScalar(), b.volume.GetMute()) } {
                 (Ok(level), Ok(muted)) => gate.publish(generation, level, muted.as_bool()),
-                (Err(e), _) | (_, Err(e)) => crate::pwarn!("audio: reading the volume failed ({e})"),
+                (Err(e), _) | (_, Err(e)) => {
+                    crate::pwarn!("audio: reading the volume failed ({e})")
+                }
             }
             Some(b)
         }
@@ -321,9 +358,17 @@ fn rebind(enumerator: &IMMDeviceEnumerator, gate: &Arc<Gate>, current: Option<Bi
 
 fn bind(device: &IMMDevice, id: String, gate: &Arc<Gate>, generation: u32) -> Result<Binding> {
     let volume: IAudioEndpointVolume = unsafe { device.Activate(CLSCTX_ALL, None)? };
-    let callback: IAudioEndpointVolumeCallback = VolumeCallback { gate: Arc::clone(gate), generation }.into();
+    let callback: IAudioEndpointVolumeCallback = VolumeCallback {
+        gate: Arc::clone(gate),
+        generation,
+    }
+    .into();
     unsafe { volume.RegisterControlChangeNotify(&callback)? };
-    Ok(Binding { id, volume, callback })
+    Ok(Binding {
+        id,
+        volume,
+        callback,
+    })
 }
 
 /// The endpoint id string ("" if it cannot be read).

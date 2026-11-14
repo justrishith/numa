@@ -133,7 +133,13 @@ pub fn sings(st: &AppState) -> bool {
 /// rows): it sings, readings are on, and some line has one. For the whole
 /// song, as [`sings`] is.
 pub fn reads(st: &AppState) -> bool {
-    sings(st) && st.settings.lyrics_pronunciation && st.lyrics.ruby.iter().any(|p| p.iter().any(|r| !r.roman.is_empty()))
+    sings(st)
+        && st.settings.lyrics_pronunciation
+        && st
+            .lyrics
+            .ruby
+            .iter()
+            .any(|p| p.iter().any(|r| !r.roman.is_empty()))
 }
 
 /// The lyrics the pill follows for the song playing now (see [`sings`]).
@@ -141,7 +147,11 @@ fn followed(st: &AppState) -> Option<&Lyrics> {
     let m = st.media.as_ref()?;
     let lyr = &st.lyrics;
     // A song without a known length has no position to follow.
-    if !st.settings.lyrics || lyr.status != LyricsStatus::Found || lyr.track_key != m.track_key || !m.timeline.has_duration() {
+    if !st.settings.lyrics
+        || lyr.status != LyricsStatus::Found
+        || lyr.track_key != m.track_key
+        || !m.timeline.has_duration()
+    {
         return None;
     }
     lyr.lyrics.as_ref().filter(|l| l.synced)
@@ -183,7 +193,13 @@ fn spot_at(l: &Lyrics, t: f64) -> Option<Spot> {
     }
     let lines = &l.lines;
     let first = lines.iter().position(has_text)?;
-    let text_after = |i: usize| lines.iter().skip(i + 1).position(has_text).map(|k| i + 1 + k);
+    let text_after = |i: usize| {
+        lines
+            .iter()
+            .skip(i + 1)
+            .position(has_text)
+            .map(|k| i + 1 + k)
+    };
     // When the pause that starts at row `g` ends (at the next line with
     // words; never, after the last), and whether it is long enough to show.
     let pause = |g: usize| {
@@ -203,21 +219,37 @@ fn spot_at(l: &Lyrics, t: f64) -> Option<Spot> {
             (_, true) => Some(row.time_s),
         }
     };
-    let line = |i: usize| Spot { line: Some(i), start: lines[i].time_s, next: ends(i) };
+    let line = |i: usize| Spot {
+        line: Some(i),
+        start: lines[i].time_s,
+        next: ends(i),
+    };
     match l.line_index_at(t) {
         Some(r) if r >= first => {
             if has_text(&lines[r]) {
                 return Some(line(r));
             }
             // In a pause: from its first empty row, after line `g - 1`.
-            let g = (first + 1..=r).rev().take_while(|&i| !has_text(&lines[i])).last().unwrap_or(r);
+            let g = (first + 1..=r)
+                .rev()
+                .take_while(|&i| !has_text(&lines[i]))
+                .last()
+                .unwrap_or(r);
             Some(match pause(g) {
-                (end, true) => Spot { line: None, start: lines[g].time_s, next: end },
+                (end, true) => Spot {
+                    line: None,
+                    start: lines[g].time_s,
+                    next: end,
+                },
                 (_, false) => line(g - 1),
             })
         }
         // Before the first line: the intro, unless the line starts soon.
-        _ if lines[first].time_s >= GAP_MIN_S => Some(Spot { line: None, start: 0.0, next: Some(lines[first].time_s) }),
+        _ if lines[first].time_s >= GAP_MIN_S => Some(Spot {
+            line: None,
+            start: 0.0,
+            next: Some(lines[first].time_s),
+        }),
         _ => Some(line(first)),
     }
 }
@@ -273,13 +305,25 @@ impl Follow {
         let (m, lyr) = (st.media.as_ref()?, &st.lyrics);
         let now = st.now;
         let playing = m.is_playing();
-        let hold_end = if playing { None } else { Some(st.media_paused_at? + PAUSE_HOLD_S) };
+        let hold_end = if playing {
+            None
+        } else {
+            Some(st.media_paused_at? + PAUSE_HOLD_S)
+        };
         if hold_end.is_some_and(|end| now >= end) {
             return None;
         }
 
-        let shape = (l.lines.len(), line_bits(l.lines.first()), line_bits(l.lines.last()));
-        if !self.sig.as_ref().is_some_and(|(k, n, a, b)| *k == lyr.track_key && (*n, *a, *b) == shape) {
+        let shape = (
+            l.lines.len(),
+            line_bits(l.lines.first()),
+            line_bits(l.lines.last()),
+        );
+        if !self
+            .sig
+            .as_ref()
+            .is_some_and(|(k, n, a, b)| *k == lyr.track_key && (*n, *a, *b) == shape)
+        {
             self.sig = Some((lyr.track_key.clone(), shape.0, shape.1, shape.2));
             self.clock.reset();
             self.read = None;
@@ -288,14 +332,22 @@ impl Follow {
         }
 
         let tl = m.timeline;
-        let rate = if tl.rate.is_finite() && tl.rate > 0.0 { tl.rate } else { 1.0 };
+        let rate = if tl.rate.is_finite() && tl.rate > 0.0 {
+            tl.rate
+        } else {
+            1.0
+        };
         // Lyric time `t` at app time `at`.
         let (at, t) = match self.read {
             // Asked again before the next frame (an event between frames): what this frame said.
             Some((at, t)) if now <= at => (at, t),
             _ => {
-                let lead = lyrics_lead_s(&m.app_id) + f64::from(st.settings.lyrics_offset_ms) / 1000.0;
-                let t = self.clock.tick(now, tl.position_at(now) + lead, playing, rate) + LYRIC_LEAD_S;
+                let lead =
+                    lyrics_lead_s(&m.app_id) + f64::from(st.settings.lyrics_offset_ms) / 1000.0;
+                let t = self
+                    .clock
+                    .tick(now, tl.position_at(now) + lead, playing, rate)
+                    + LYRIC_LEAD_S;
                 self.read = Some((now, t));
                 (now, t)
             }
@@ -310,17 +362,30 @@ impl Follow {
             Some(end) => spot.line.map(|_| end),
             None => spot.next.map(|n| at + (n - t).max(0.0) / rate + WAKE_PAD_S),
         };
-        Some(Pick { line: spot.line, started: self.started, wake })
+        Some(Pick {
+            line: spot.line,
+            started: self.started,
+            wake,
+        })
     }
 }
 
 fn line_text(st: &AppState, i: usize) -> Option<&str> {
-    st.lyrics.lyrics.as_ref()?.lines.get(i).map(|l| l.text.trim())
+    st.lyrics
+        .lyrics
+        .as_ref()?
+        .lines
+        .get(i)
+        .map(|l| l.text.trim())
 }
 
 /// Line `i`'s reading in Latin letters, when readings are on and it has one.
 fn reading_at(st: &AppState, i: usize) -> Option<String> {
-    let pieces = st.lyrics.ruby.get(i).filter(|_| st.settings.lyrics_pronunciation)?;
+    let pieces = st
+        .lyrics
+        .ruby
+        .get(i)
+        .filter(|_| st.settings.lyrics_pronunciation)?;
     romanize::reading(pieces)
 }
 
@@ -329,7 +394,9 @@ fn reading_at(st: &AppState, i: usize) -> Option<String> {
 /// comes in and the song is read again.
 fn reading_sig(st: &AppState, i: usize) -> usize {
     match st.lyrics.ruby.get(i) {
-        Some(pieces) if st.settings.lyrics_pronunciation => pieces.iter().map(|p| p.roman.len() + 1).sum(),
+        Some(pieces) if st.settings.lyrics_pronunciation => {
+            pieces.iter().map(|p| p.roman.len() + 1).sum()
+        }
         _ => 0,
     }
 }
@@ -370,7 +437,10 @@ thread_local! {
 }
 
 fn with_state<R>(f: impl FnOnce(&mut State) -> R) -> Option<R> {
-    STATE.try_with(|s| s.try_borrow_mut().ok().map(|mut s| f(&mut s))).ok().flatten()
+    STATE
+        .try_with(|s| s.try_borrow_mut().ok().map(|mut s| f(&mut s)))
+        .ok()
+        .flatten()
 }
 
 /// Opacity and rise (DIPs, up is negative) of the line coming in and of the
@@ -381,7 +451,10 @@ fn fade(k: f32) -> ((f32, f32), (f32, f32)) {
     let ease = |x: f32| 1.0 - (1.0 - x).powi(3);
     let come = ease(((k - COME_FROM) / (1.0 - COME_FROM)).clamp(0.0, 1.0));
     let gone = (k / LEAVE_UNTIL).min(1.0);
-    ((come, RISE * (1.0 - come)), ((1.0 - gone) * (1.0 - gone), -RISE * ease(gone)))
+    (
+        (come, RISE * (1.0 - come)),
+        ((1.0 - gone) * (1.0 - gone), -RISE * ease(gone)),
+    )
 }
 
 impl State {
@@ -401,7 +474,15 @@ impl State {
     /// the two; any other line just shows (it takes over from the title, or
     /// from a pill that was away). `reading` builds the line's reading, once
     /// a line, and again when its readings change under it.
-    fn show(&mut self, now: f64, on_screen: bool, i: usize, text: &str, sig: usize, reading: impl FnOnce() -> Option<String>) -> &mut Shown {
+    fn show(
+        &mut self,
+        now: f64,
+        on_screen: bool,
+        i: usize,
+        text: &str,
+        sig: usize,
+        reading: impl FnOnce() -> Option<String>,
+    ) -> &mut Shown {
         let generation = self.follow.generation;
         let shown = match self.shown.take() {
             Some(mut s) if s.line == i && s.text == text => {
@@ -414,9 +495,24 @@ impl State {
                 s
             }
             old => {
-                let leaving = old.filter(|s| on_screen && s.generation == generation).map(|s| (s.text, s.reading, s.slot_w));
-                let since = if leaving.is_some() { now } else { f64::NEG_INFINITY };
-                Shown { line: i, text: text.to_string(), reading: reading(), sig, generation, slot_w: 0.0, leaving, since }
+                let leaving = old
+                    .filter(|s| on_screen && s.generation == generation)
+                    .map(|s| (s.text, s.reading, s.slot_w));
+                let since = if leaving.is_some() {
+                    now
+                } else {
+                    f64::NEG_INFINITY
+                };
+                Shown {
+                    line: i,
+                    text: text.to_string(),
+                    reading: reading(),
+                    sig,
+                    generation,
+                    slot_w: 0.0,
+                    leaving,
+                    since,
+                }
             }
         };
         self.shown.insert(shown)
@@ -426,13 +522,20 @@ impl State {
         let now = st.now;
         let pick = self.follow.update(st);
         let on_screen = self.seen(now, pick.and_then(|p| p.wake));
-        let Some((i, text)) = pick.and_then(|p| p.line.and_then(|i| line_text(st, i).map(|t| (i, t)))) else {
+        let Some((i, text)) =
+            pick.and_then(|p| p.line.and_then(|i| line_text(st, i).map(|t| (i, t))))
+        else {
             self.shown = None;
             return None;
         };
-        let shown = self.show(now, on_screen, i, text, reading_sig(st, i), || reading_at(st, i));
+        let shown = self.show(now, on_screen, i, text, reading_sig(st, i), || {
+            reading_at(st, i)
+        });
         let line_w = ui.c.measure(&shown.text, &style(), 10_000.0).0;
-        let reading_w = shown.reading.as_ref().map_or(0.0, |r| ui.c.measure(r, &reading_style(), 10_000.0).0);
+        let reading_w = shown
+            .reading
+            .as_ref()
+            .map_or(0.0, |r| ui.c.measure(r, &reading_style(), 10_000.0).0);
         let w = line_w.max(reading_w);
         if area.w < MIN_W {
             return Some(w);
@@ -441,7 +544,11 @@ impl State {
         shown.slot_w = area.w;
         // On battery saver a change is a plain swap: one frame a line, not a
         // fade's worth (the change repeats all song long).
-        let k = if st.power.saver { 1.0 } else { ((now - shown.since) / FADE_S) as f32 };
+        let k = if st.power.saver {
+            1.0
+        } else {
+            ((now - shown.since) / FADE_S) as f32
+        };
         if k >= 1.0 {
             shown.leaving = None;
             words(ui.c, &shown.text, shown.reading.as_deref(), area);
@@ -455,7 +562,14 @@ impl State {
             let r = Rect::from_center(area.center(), *w, area.h).offset(0.0, gone_dy);
             ui.c.with_alpha(gone_a, |c| words(c, old, old_reading.as_deref(), r));
         }
-        ui.c.with_alpha(come_a, |c| words(c, &shown.text, shown.reading.as_deref(), area.offset(0.0, come_dy)));
+        ui.c.with_alpha(come_a, |c| {
+            words(
+                c,
+                &shown.text,
+                shown.reading.as_deref(),
+                area.offset(0.0, come_dy),
+            )
+        });
         ui.c.set_text_snap(snap);
         Some(w)
     }
@@ -469,7 +583,14 @@ fn rows(area: Rect, reading: bool) -> (Rect, Option<Rect>) {
     }
     let c = area.center();
     let line = Rect::from_center(Point::new(c.x, c.y + LINE_DY), area.w, LINE_BOX);
-    (line, Some(Rect::from_center(Point::new(c.x, c.y + READING_DY), area.w, READING_BOX)))
+    (
+        line,
+        Some(Rect::from_center(
+            Point::new(c.x, c.y + READING_DY),
+            area.w,
+            READING_BOX,
+        )),
+    )
 }
 
 /// A line centred in `area`, with its reading under it when it has one.
@@ -477,7 +598,13 @@ fn words(c: &mut Canvas, text: &str, reading: Option<&str>, area: Rect) {
     let (line, under) = rows(area, reading.is_some());
     c.text(text, line, &style().center().color(palette::TEXT));
     if let (Some(reading), Some(under)) = (reading, under) {
-        c.text(reading, under, &reading_style().center().color(palette::TEXT.mul_alpha(READING_ALPHA)));
+        c.text(
+            reading,
+            under,
+            &reading_style()
+                .center()
+                .color(palette::TEXT.mul_alpha(READING_ALPHA)),
+        );
     }
 }
 
@@ -525,7 +652,14 @@ mod tests {
             can_seek: true,
             track_key: key.clone(),
         });
-        st.lyrics = LyricsState { track_key: key, status: LyricsStatus::Found, lyrics: Some(parse_lrc(lrc)), source: "Sample".into(), ruby: Vec::new(), wants_ja_readings: false };
+        st.lyrics = LyricsState {
+            track_key: key,
+            status: LyricsStatus::Found,
+            lyrics: Some(parse_lrc(lrc)),
+            source: "Sample".into(),
+            ruby: Vec::new(),
+            wants_ja_readings: false,
+        };
         st
     }
 
@@ -646,13 +780,21 @@ mod tests {
         report(&mut st, 100.0, 9.0, true);
         let p = f.update(&st).unwrap();
         assert_eq!(p.line, None);
-        assert!((p.wake.unwrap() - (100.88 + WAKE_PAD_S)).abs() < 1e-9, "{:?}", p.wake);
+        assert!(
+            (p.wake.unwrap() - (100.88 + WAKE_PAD_S)).abs() < 1e-9,
+            "{:?}",
+            p.wake
+        );
         // Woken then: the first line, and the next wake at the second (14 s).
         st.now = p.wake.unwrap();
         let p = f.update(&st).unwrap();
         assert_eq!(p.line, Some(0));
         let next = 100.0 + (14.0 - 9.0 - LYRIC_LEAD_S) + WAKE_PAD_S;
-        assert!((p.wake.unwrap() - next).abs() < 1e-6, "{:?} vs {next}", p.wake);
+        assert!(
+            (p.wake.unwrap() - next).abs() < 1e-6,
+            "{:?} vs {next}",
+            p.wake
+        );
         // In the long break: woken when the line after it starts (30 s).
         report(&mut st, 200.0, 20.0, true);
         let p = f.update(&st).unwrap();
@@ -753,33 +895,57 @@ mod tests {
         // First draw: nothing was on screen before, so the line just shows.
         assert!(!s.seen(100.0, Some(103.0)));
         let first = s.show(100.0, false, 0, "First", 0, || None);
-        assert_eq!((first.leaving.clone(), first.since), (None, f64::NEG_INFINITY));
+        assert_eq!(
+            (first.leaving.clone(), first.since),
+            (None, f64::NEG_INFINITY)
+        );
         // The same line a frame later: nothing new.
         assert!(s.seen(100.016, Some(103.0)));
-        assert_eq!(s.show(100.016, true, 0, "First", 0, || None).since, f64::NEG_INFINITY);
+        assert_eq!(
+            s.show(100.016, true, 0, "First", 0, || None).since,
+            f64::NEG_INFINITY
+        );
         // No frames until the wake for the next line (no equalizer): still on screen.
         assert!(s.seen(103.02, Some(106.0)));
         s.shown.as_mut().unwrap().slot_w = 180.0;
         let next = s.show(103.02, true, 1, "Second", 0, || None);
         // It leaves in the slot it had.
-        assert_eq!((next.leaving.clone(), next.since), (Some(("First".to_string(), None, 180.0)), 103.02));
+        assert_eq!(
+            (next.leaving.clone(), next.since),
+            (Some(("First".to_string(), None, 180.0)), 103.02)
+        );
         // Back after a while away (the page was open): the old line just goes.
         assert!(!s.seen(120.0, Some(121.0)));
         let back = s.show(120.0, false, 5, "Sixth", 0, || None);
-        assert_eq!((back.leaving.clone(), back.since), (None, f64::NEG_INFINITY));
+        assert_eq!(
+            (back.leaving.clone(), back.since),
+            (None, f64::NEG_INFINITY)
+        );
         // Other lyrics (another song): never fade a line of the last one out over them.
         assert!(s.seen(120.016, None));
         s.follow.generation += 1;
-        assert_eq!(s.show(120.016, true, 0, "Another song", 0, || None).leaving, None);
+        assert_eq!(
+            s.show(120.016, true, 0, "Another song", 0, || None).leaving,
+            None
+        );
         // After the title (a break, drawn every frame): the line takes over at
         // once, the music pill fades the hand-off.
         s.shown = None;
-        assert_eq!(s.show(130.0, true, 1, "After the break", 0, || None).since, f64::NEG_INFINITY);
+        assert_eq!(
+            s.show(130.0, true, 1, "After the break", 0, || None).since,
+            f64::NEG_INFINITY
+        );
     }
 
     /// The pieces of a line of [`SONG_JA`], as a reader gives them.
     fn pieces(parts: &[(&str, &str)]) -> Vec<Ruby> {
-        parts.iter().map(|(text, roman)| Ruby { text: (*text).into(), roman: (*roman).into() }).collect()
+        parts
+            .iter()
+            .map(|(text, roman)| Ruby {
+                text: (*text).into(),
+                roman: (*roman).into(),
+            })
+            .collect()
     }
 
     // Original placeholder text, not real song lyrics: two Japanese lines
@@ -825,14 +991,30 @@ mod tests {
         let st = song_ja();
         let mut s = State::default();
         assert!(!s.seen(100.0, Some(103.0)));
-        let first = s.show(100.0, false, 0, "紙の舟よ", reading_sig(&st, 0), || reading_at(&st, 0));
+        let first = s.show(100.0, false, 0, "紙の舟よ", reading_sig(&st, 0), || {
+            reading_at(&st, 0)
+        });
         assert_eq!(first.reading.as_deref(), Some("kami no fune yo"));
         first.slot_w = 180.0;
         // The next line rises in while this one rises away, its reading with it.
         assert!(s.seen(103.0, Some(106.0)));
-        let next = s.show(103.0, true, 2, "光を見つける", reading_sig(&st, 2), || reading_at(&st, 2));
+        let next = s.show(
+            103.0,
+            true,
+            2,
+            "光を見つける",
+            reading_sig(&st, 2),
+            || reading_at(&st, 2),
+        );
         assert_eq!(next.reading.as_deref(), Some("hikari wo mitsukeru"));
-        assert_eq!(next.leaving, Some(("紙の舟よ".to_string(), Some("kami no fune yo".to_string()), 180.0)));
+        assert_eq!(
+            next.leaving,
+            Some((
+                "紙の舟よ".to_string(),
+                Some("kami no fune yo".to_string()),
+                180.0
+            ))
+        );
     }
 
     #[test]
@@ -843,25 +1025,52 @@ mod tests {
         let mut s = State::default();
         let mut built = 0;
         assert!(!s.seen(100.0, Some(103.0)));
-        s.show(100.0, false, 2, "光を見つける", reading_sig(&st, 2), || {
-            built += 1;
-            reading_at(&st, 2)
-        });
-        assert_eq!(s.shown.as_ref().unwrap().reading.as_deref(), Some("wo 見つける"));
+        s.show(
+            100.0,
+            false,
+            2,
+            "光を見つける",
+            reading_sig(&st, 2),
+            || {
+                built += 1;
+                reading_at(&st, 2)
+            },
+        );
+        assert_eq!(
+            s.shown.as_ref().unwrap().reading.as_deref(),
+            Some("wo 見つける")
+        );
         // Frame after frame, the same readings: built once.
         for i in 1..5 {
             assert!(s.seen(100.0 + f64::from(i) * 0.016, Some(103.0)));
-            s.show(100.0 + f64::from(i) * 0.016, true, 2, "光を見つける", reading_sig(&st, 2), || {
-                built += 1;
-                reading_at(&st, 2)
-            });
+            s.show(
+                100.0 + f64::from(i) * 0.016,
+                true,
+                2,
+                "光を見つける",
+                reading_sig(&st, 2),
+                || {
+                    built += 1;
+                    reading_at(&st, 2)
+                },
+            );
         }
         assert_eq!(built, 1);
         // The add-on comes in and the song is read again: the same line, its new reading at once.
         let read = song_ja();
         assert!(s.seen(100.1, Some(103.0)));
-        let now = s.show(100.1, true, 2, "光を見つける", reading_sig(&read, 2), || reading_at(&read, 2));
-        assert_eq!((now.reading.as_deref(), now.leaving.clone(), now.since), (Some("hikari wo mitsukeru"), None, f64::NEG_INFINITY));
+        let now = s.show(
+            100.1,
+            true,
+            2,
+            "光を見つける",
+            reading_sig(&read, 2),
+            || reading_at(&read, 2),
+        );
+        assert_eq!(
+            (now.reading.as_deref(), now.leaving.clone(), now.since),
+            (Some("hikari wo mitsukeru"), None, f64::NEG_INFINITY)
+        );
     }
 
     #[test]
@@ -871,7 +1080,10 @@ mod tests {
         let (line, under) = rows(area, true);
         let under = under.unwrap();
         assert!(line.center().y < area.center().y && under.center().y > area.center().y);
-        assert!(line.bottom() <= under.y + 4.0, "the boxes barely overlap: {line:?} over {under:?}");
+        assert!(
+            line.bottom() <= under.y + 4.0,
+            "the boxes barely overlap: {line:?} over {under:?}"
+        );
         // Both inside the two-row pill, centred across it.
         assert!(line.y >= area.y && under.bottom() <= area.bottom());
         assert_eq!((line.center().x, under.center().x), (150.0, 150.0));
@@ -891,8 +1103,14 @@ mod tests {
         let mut prev = fade(0.0);
         for i in 1..=100 {
             let f = fade(i as f32 / 100.0);
-            assert!(f.0 .0 >= prev.0 .0 && f.0 .1 <= prev.0 .1, "the new line only comes in");
-            assert!(f.1 .0 <= prev.1 .0 && f.1 .1 <= prev.1 .1, "the old line only leaves");
+            assert!(
+                f.0 .0 >= prev.0 .0 && f.0 .1 <= prev.0 .1,
+                "the new line only comes in"
+            );
+            assert!(
+                f.1 .0 <= prev.1 .0 && f.1 .1 <= prev.1 .1,
+                "the old line only leaves"
+            );
             prev = f;
         }
     }

@@ -34,7 +34,9 @@ use poni_core::datetime::LocalDateTime;
 #[cfg(windows)]
 use poni_core::ielts::peak;
 use poni_core::ielts::WavWriter;
-use poni_core::notes::{self, CaptureIssue, Lang, Mixer, Problem, Reply, Saved, View, PART_SECS, RATE};
+use poni_core::notes::{
+    self, CaptureIssue, Lang, Mixer, Problem, Reply, Saved, View, PART_SECS, RATE,
+};
 use poni_core::oyenza;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
@@ -42,11 +44,21 @@ use std::sync::{mpsc, Arc};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 #[cfg(windows)]
-use windows::Win32::Media::Audio::{eCapture, eConsole, eRender, EDataFlow, IMMDeviceEnumerator, MMDeviceEnumerator, AUDCLNT_BUFFERFLAGS_SILENT};
+use windows::Win32::Media::Audio::{
+    eCapture, eConsole, eRender, EDataFlow, IMMDeviceEnumerator, MMDeviceEnumerator,
+    AUDCLNT_BUFFERFLAGS_SILENT,
+};
 #[cfg(windows)]
-use windows::Win32::System::Com::{CoCreateInstance, CoInitializeEx, CoTaskMemFree, CoUninitialize, CLSCTX_ALL, COINIT_MULTITHREADED};
+use windows::Win32::System::Com::{
+    CoCreateInstance, CoInitializeEx, CoTaskMemFree, CoUninitialize, CLSCTX_ALL,
+    COINIT_MULTITHREADED,
+};
 
-const USER_AGENT: &str = concat!("OyenzaStudio/", env!("CARGO_PKG_VERSION"), " (+https://github.com/lucacadalora/oyenza-studio)");
+const USER_AGENT: &str = concat!(
+    "OyenzaStudio/",
+    env!("CARGO_PKG_VERSION"),
+    " (+https://github.com/lucacadalora/oyenza-studio)"
+);
 /// How long `start` waits for the devices to open.
 const OPEN_TIMEOUT: Duration = Duration::from_secs(5);
 /// How often the recording checks whether Windows' default devices changed.
@@ -89,13 +101,23 @@ impl Recording {
     /// Start recording into a new folder under `root` (the meeting's local
     /// start written beside its parts, for [`kept`]): the recording, and
     /// whether the microphone and the PC's sound each opened.
-    pub fn start(root: &Path, started: &LocalDateTime, sink: &EventSink) -> Result<(Recording, bool, bool), CaptureIssue> {
+    pub fn start(
+        root: &Path,
+        started: &LocalDateTime,
+        sink: &EventSink,
+    ) -> Result<(Recording, bool, bool), CaptureIssue> {
         let dir = root.join(format!("meeting-{}", crate::clock::unix_now()));
-        std::fs::create_dir_all(&dir).and_then(|()| std::fs::write(dir.join(STARTED), fmt_started(started))).map_err(|e| {
-            crate::pwarn!("notes: no folder for the recording ({e})");
-            CaptureIssue::Failed
-        })?;
-        let shared = Arc::new(Shared { stop: AtomicBool::new(false), mic: AtomicU32::new(0), pc: AtomicU32::new(0) });
+        std::fs::create_dir_all(&dir)
+            .and_then(|()| std::fs::write(dir.join(STARTED), fmt_started(started)))
+            .map_err(|e| {
+                crate::pwarn!("notes: no folder for the recording ({e})");
+                CaptureIssue::Failed
+            })?;
+        let shared = Arc::new(Shared {
+            stop: AtomicBool::new(false),
+            mic: AtomicU32::new(0),
+            pc: AtomicU32::new(0),
+        });
         let (ready_tx, ready_rx) = mpsc::channel();
         let (worker, folder, sink) = (shared.clone(), dir.clone(), sink.clone());
         let thread = std::thread::Builder::new()
@@ -103,7 +125,14 @@ impl Recording {
             .spawn(move || capture(&folder, &worker, &sink, ready_tx))
             .map_err(|_| CaptureIssue::Failed)?;
         match ready_rx.recv_timeout(OPEN_TIMEOUT) {
-            Ok(Ok((mic, pc))) => Ok((Recording { shared, thread: Some(thread) }, mic, pc)),
+            Ok(Ok((mic, pc))) => Ok((
+                Recording {
+                    shared,
+                    thread: Some(thread),
+                },
+                mic,
+                pc,
+            )),
             Ok(Err(e)) => {
                 let _ = thread.join();
                 let _ = std::fs::remove_dir_all(&dir);
@@ -118,7 +147,10 @@ impl Recording {
 
     /// The microphone's and the PC's sound's loudness, 0..1.
     pub fn levels(&self) -> (f32, f32) {
-        (f32::from_bits(self.shared.mic.load(Ordering::Relaxed)), f32::from_bits(self.shared.pc.load(Ordering::Relaxed)))
+        (
+            f32::from_bits(self.shared.mic.load(Ordering::Relaxed)),
+            f32::from_bits(self.shared.pc.load(Ordering::Relaxed)),
+        )
     }
 
     pub fn stop(mut self) -> Result<Take, CaptureIssue> {
@@ -162,7 +194,14 @@ impl Source {
     }
 
     fn new(flow: EDataFlow, what: &'static str) -> Source {
-        Source { flow, what, dev: None, id: None, pcm: Vec::with_capacity(RATE as usize / 4), level: 0.0 }
+        Source {
+            flow,
+            what,
+            dev: None,
+            id: None,
+            pcm: Vec::with_capacity(RATE as usize / 4),
+            level: 0.0,
+        }
     }
 
     /// Not open, or Windows' default device changed (a headset plugged in, or
@@ -202,7 +241,10 @@ impl Source {
                     return Ok(());
                 }
                 let (mut data, mut n, mut flags) = (std::ptr::null_mut::<u8>(), 0u32, 0u32);
-                unsafe { d.capture.GetBuffer(&mut data, &mut n, &mut flags, None, None) }?;
+                unsafe {
+                    d.capture
+                        .GetBuffer(&mut data, &mut n, &mut flags, None, None)
+                }?;
                 if flags & AUDCLNT_BUFFERFLAGS_SILENT.0 as u32 != 0 || data.is_null() {
                     d.downmix.silence(n as usize, &mut self.pcm);
                 } else {
@@ -213,7 +255,11 @@ impl Source {
             }
         })();
         if let Err(e) = r {
-            crate::pwarn!("notes: {} went away (0x{:08X})", self.what, e.code().0 as u32);
+            crate::pwarn!(
+                "notes: {} went away (0x{:08X})",
+                self.what,
+                e.code().0 as u32
+            );
             self.close();
         }
         self.level = (self.level * METER_FALL).max(peak(&self.pcm));
@@ -224,8 +270,13 @@ impl Source {
 #[cfg(windows)]
 fn default_id(flow: EDataFlow) -> Option<String> {
     unsafe {
-        let devices: IMMDeviceEnumerator = CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL).ok()?;
-        let p = devices.GetDefaultAudioEndpoint(flow, eConsole).ok()?.GetId().ok()?;
+        let devices: IMMDeviceEnumerator =
+            CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL).ok()?;
+        let p = devices
+            .GetDefaultAudioEndpoint(flow, eConsole)
+            .ok()?
+            .GetId()
+            .ok()?;
         let s = p.to_string().ok();
         CoTaskMemFree(Some(p.0 as *const _));
         s
@@ -256,7 +307,9 @@ impl Parts {
     fn write(&mut self, mut pcm: &[i16]) -> std::io::Result<()> {
         while !pcm.is_empty() {
             if self.open.is_none() {
-                self.open = Some(WavWriter::create(&self.dir.join(format!("part-{:03}.wav", self.done.len())))?);
+                self.open = Some(WavWriter::create(
+                    &self.dir.join(format!("part-{:03}.wav", self.done.len())),
+                )?);
                 self.in_part = 0;
             }
             let n = ((PART_SAMPLES - self.in_part) as usize).min(pcm.len());
@@ -281,7 +334,12 @@ impl Parts {
 
 /// The `poni-notes` thread: open both sources, say which did, then record
 /// until told to stop (or the longest meeting the server takes).
-fn capture(dir: &Path, shared: &Shared, sink: &EventSink, ready: mpsc::Sender<Result<(bool, bool), CaptureIssue>>) -> Result<Take, CaptureIssue> {
+fn capture(
+    dir: &Path,
+    shared: &Shared,
+    sink: &EventSink,
+    ready: mpsc::Sender<Result<(bool, bool), CaptureIssue>>,
+) -> Result<Take, CaptureIssue> {
     #[cfg(windows)]
     let com = unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) };
     let out = (|| {
@@ -298,7 +356,13 @@ fn capture(dir: &Path, shared: &Shared, sink: &EventSink, ready: mpsc::Sender<Re
             crate::pwarn!("notes: recording without the microphone ({e})");
         }
         let _ = ready.send(Ok((m.is_ok(), p.is_ok())));
-        let mut parts = Parts { dir: dir.to_path_buf(), done: Vec::new(), open: None, in_part: 0, total: 0 };
+        let mut parts = Parts {
+            dir: dir.to_path_buf(),
+            done: Vec::new(),
+            open: None,
+            in_part: 0,
+            total: 0,
+        };
         let mut mixer = Mixer::default();
         let mut track: Vec<i16> = Vec::with_capacity(RATE as usize / 4);
         let t0 = Instant::now();
@@ -317,7 +381,10 @@ fn capture(dir: &Path, shared: &Shared, sink: &EventSink, ready: mpsc::Sender<Re
             if last {
                 mixer.drain(&mut track);
             } else {
-                mixer.take((t0.elapsed().as_secs_f64() * RATE as f64) as u64, &mut track);
+                mixer.take(
+                    (t0.elapsed().as_secs_f64() * RATE as f64) as u64,
+                    &mut track,
+                );
             }
             let room = max.saturating_sub(parts.total) as usize;
             if track.len() >= room {
@@ -357,8 +424,15 @@ fn capture(dir: &Path, shared: &Shared, sink: &EventSink, ready: mpsc::Sender<Re
         shared.pc.store(0, Ordering::Relaxed);
         parts.close().map_err(|_| CaptureIssue::Failed)?;
         let secs = parts.total as f64 / RATE as f64;
-        crate::pinfo!("notes: recorded {secs:.0} s in {} part(s)", parts.done.len());
-        Ok(Take { dir: dir.to_path_buf(), parts: parts.done, secs })
+        crate::pinfo!(
+            "notes: recorded {secs:.0} s in {} part(s)",
+            parts.done.len()
+        );
+        Ok(Take {
+            dir: dir.to_path_buf(),
+            parts: parts.done,
+            secs,
+        })
     })();
     #[cfg(windows)]
     if com.is_ok() {
@@ -371,14 +445,24 @@ fn capture(dir: &Path, shared: &Shared, sink: &EventSink, ready: mpsc::Sender<Re
 const STARTED: &str = "started.txt";
 
 fn fmt_started(t: &LocalDateTime) -> String {
-    format!("{:04}-{:02}-{:02} {:02}:{:02}", t.year, t.month, t.day, t.hour, t.minute)
+    format!(
+        "{:04}-{:02}-{:02} {:02}:{:02}",
+        t.year, t.month, t.day, t.hour, t.minute
+    )
 }
 
 fn parse_started(s: &str) -> Option<LocalDateTime> {
     let (d, t) = s.trim().split_once(' ')?;
     let mut d = d.split('-').map(|x| x.parse::<i32>().ok());
     let mut t = t.split(':').map(|x| x.parse::<u8>().ok());
-    Some(LocalDateTime { year: d.next()??, month: d.next()?? as u8, day: d.next()?? as u8, hour: t.next()??, minute: t.next()??, second: 0 })
+    Some(LocalDateTime {
+        year: d.next()??,
+        month: d.next()?? as u8,
+        day: d.next()?? as u8,
+        hour: t.next()??,
+        minute: t.next()??,
+        second: 0,
+    })
 }
 
 /// A meeting the app closed on before its notes were saved (a crash, a
@@ -388,19 +472,42 @@ fn parse_started(s: &str) -> Option<LocalDateTime> {
 /// second in them, go.
 pub fn kept() -> Option<(Take, LocalDateTime)> {
     let root = crate::paths::notes_audio_dir();
-    let mut dirs: Vec<PathBuf> = std::fs::read_dir(&root).ok()?.flatten().map(|e| e.path()).filter(|p| p.is_dir()).collect();
+    let mut dirs: Vec<PathBuf> = std::fs::read_dir(&root)
+        .ok()?
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.is_dir())
+        .collect();
     dirs.sort();
     let newest = dirs.pop()?;
     for old in dirs {
         let _ = std::fs::remove_dir_all(old);
     }
-    let mut parts: Vec<PathBuf> = std::fs::read_dir(&newest).ok()?.flatten().map(|e| e.path()).filter(|p| p.extension().is_some_and(|x| x == "wav")).collect();
+    let mut parts: Vec<PathBuf> = std::fs::read_dir(&newest)
+        .ok()?
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.extension().is_some_and(|x| x == "wav"))
+        .collect();
     parts.sort();
-    let bytes: u64 = parts.iter().filter_map(|p| std::fs::metadata(p).ok()).map(|m| m.len().saturating_sub(44)).sum();
+    let bytes: u64 = parts
+        .iter()
+        .filter_map(|p| std::fs::metadata(p).ok())
+        .map(|m| m.len().saturating_sub(44))
+        .sum();
     let secs = bytes as f64 / 2.0 / RATE as f64;
-    let started = std::fs::read_to_string(newest.join(STARTED)).ok().and_then(|s| parse_started(&s));
+    let started = std::fs::read_to_string(newest.join(STARTED))
+        .ok()
+        .and_then(|s| parse_started(&s));
     match started {
-        Some(started) if secs >= 1.0 => Some((Take { dir: newest, parts, secs }, started)),
+        Some(started) if secs >= 1.0 => Some((
+            Take {
+                dir: newest,
+                parts,
+                secs,
+            },
+            started,
+        )),
         _ => {
             let _ = std::fs::remove_dir_all(newest);
             None
@@ -439,17 +546,24 @@ pub struct Job {
 /// and ends with the notes saved or a problem.
 pub fn send(job: Job, sink: &EventSink) {
     let sink = sink.clone();
-    let spawned = std::thread::Builder::new().name("poni-notes-send".into()).spawn(move || {
-        let _com = MtaGuard::new();
-        let reply = match Client::uncached(USER_AGENT) {
-            Ok(client) => Sender { client, job: &job, sink: &sink }.run(),
-            Err(e) => {
-                crate::pwarn!("notes: no HTTP client ({e})");
-                Reply::Failed(Problem::Offline)
-            }
-        };
-        sink.send(AppEvent::Notes(Box::new(reply)));
-    });
+    let spawned = std::thread::Builder::new()
+        .name("poni-notes-send".into())
+        .spawn(move || {
+            let _com = MtaGuard::new();
+            let reply = match Client::uncached(USER_AGENT) {
+                Ok(client) => Sender {
+                    client,
+                    job: &job,
+                    sink: &sink,
+                }
+                .run(),
+                Err(e) => {
+                    crate::pwarn!("notes: no HTTP client ({e})");
+                    Reply::Failed(Problem::Offline)
+                }
+            };
+            sink.send(AppEvent::Notes(Box::new(reply)));
+        });
     if spawned.is_err() {
         crate::pwarn!("notes: no thread to send the meeting");
     }
@@ -463,13 +577,18 @@ struct Sender<'a> {
 
 impl Sender<'_> {
     fn base(&self) -> String {
-        self.job.api.as_ref().map_or(notes::BASE.to_string(), |a| a.0.clone())
+        self.job
+            .api
+            .as_ref()
+            .map_or(notes::BASE.to_string(), |a| a.0.clone())
     }
 
     fn key(&self) -> Option<String> {
         match &self.job.api {
             Some((_, k)) => Some(k.clone()),
-            None => crate::services::secret::load(&crate::paths::oyenza_link_path()).and_then(|s| oyenza::parse_link(&s)).map(|l| l.key),
+            None => crate::services::secret::load(&crate::paths::oyenza_link_path())
+                .and_then(|s| oyenza::parse_link(&s))
+                .map(|l| l.key),
         }
     }
 
@@ -482,12 +601,19 @@ impl Sender<'_> {
         }
         match out {
             Ok(saved) => {
-                crate::pinfo!("notes: {:.0} s of meeting written up in {:.0} s", self.job.take.secs, started.elapsed().as_secs_f64());
+                crate::pinfo!(
+                    "notes: {:.0} s of meeting written up in {:.0} s",
+                    self.job.take.secs,
+                    started.elapsed().as_secs_f64()
+                );
                 let _ = std::fs::remove_dir_all(&self.job.take.dir);
                 Reply::Saved(Box::new(saved))
             }
             Err(p) => {
-                crate::pwarn!("notes: not written ({p:?}) after {:.0} s; the recording is kept", started.elapsed().as_secs_f64());
+                crate::pwarn!(
+                    "notes: not written ({p:?}) after {:.0} s; the recording is kept",
+                    started.elapsed().as_secs_f64()
+                );
                 Reply::Failed(p)
             }
         }
@@ -498,33 +624,77 @@ impl Sender<'_> {
         let auth = format!("Bearer {key}");
         let headers = [("Authorization", auth.as_str())];
         let base = self.base();
-        let body = self.call(|| self.client.send(Method::Post, &notes::start_url(&base), &headers, Some(&notes::start_body(self.job.lang)), CALL_TIMEOUT))?;
+        let body = self.call(|| {
+            self.client.send(
+                Method::Post,
+                &notes::start_url(&base),
+                &headers,
+                Some(&notes::start_body(self.job.lang)),
+                CALL_TIMEOUT,
+            )
+        })?;
         let id = notes::parse_started(&body).ok_or(Problem::Server)?;
         let parts = self.job.take.parts.len() as u32;
         for (n, path) in self.job.take.parts.iter().enumerate() {
             let bytes = std::fs::read(path).map_err(|_| Problem::Capture(CaptureIssue::Failed))?;
             let url = notes::part_url(&base, &id, n as u32);
-            self.call(|| self.client.post_bytes(&url, &headers, &bytes, "audio/wav", PART_TIMEOUT))?;
-            self.sink.send(AppEvent::Notes(Box::new(Reply::Sent { sent: n as u32 + 1, parts })));
+            self.call(|| {
+                self.client
+                    .post_bytes(&url, &headers, &bytes, "audio/wav", PART_TIMEOUT)
+            })?;
+            self.sink.send(AppEvent::Notes(Box::new(Reply::Sent {
+                sent: n as u32 + 1,
+                parts,
+            })));
         }
-        self.call(|| self.client.send(Method::Post, &notes::finish_url(&base, &id), &headers, Some("{}"), CALL_TIMEOUT))?;
+        self.call(|| {
+            self.client.send(
+                Method::Post,
+                &notes::finish_url(&base, &id),
+                &headers,
+                Some("{}"),
+                CALL_TIMEOUT,
+            )
+        })?;
         self.sink.send(AppEvent::Notes(Box::new(Reply::Writing)));
         let asked = Instant::now();
         loop {
             std::thread::sleep(Duration::from_secs_f64(notes::POLL_S));
-            let body = self.call(|| self.client.send(Method::Get, &notes::view_url(&base, &id), &headers, None, CALL_TIMEOUT))?;
+            let body = self.call(|| {
+                self.client.send(
+                    Method::Get,
+                    &notes::view_url(&base, &id),
+                    &headers,
+                    None,
+                    CALL_TIMEOUT,
+                )
+            })?;
             match notes::parse_view(&body) {
                 Some(View::Done(n)) => {
                     let saved = self.save(*n)?;
                     // Fetched and saved here: the server needn't keep them for the day.
-                    let _ = self.client.send(Method::Delete, &notes::view_url(&base, &id), &headers, None, CALL_TIMEOUT);
+                    let _ = self.client.send(
+                        Method::Delete,
+                        &notes::view_url(&base, &id),
+                        &headers,
+                        None,
+                        CALL_TIMEOUT,
+                    );
                     return Ok(saved);
                 }
                 Some(View::Failed(p)) => return Err(p),
                 Some(View::Working) => {}
                 // The finish didn't land (its answer was lost, so it was never sent again): say it again.
                 Some(View::Open) => {
-                    self.call(|| self.client.send(Method::Post, &notes::finish_url(&base, &id), &headers, Some("{}"), CALL_TIMEOUT))?;
+                    self.call(|| {
+                        self.client.send(
+                            Method::Post,
+                            &notes::finish_url(&base, &id),
+                            &headers,
+                            Some("{}"),
+                            CALL_TIMEOUT,
+                        )
+                    })?;
                 }
                 None => return Err(Problem::Server),
             }
@@ -536,7 +706,10 @@ impl Sender<'_> {
 
     /// One call, tried again on a dropped connection or a busy server; the
     /// body of a 2xx, or what went wrong.
-    fn call(&self, f: impl Fn() -> Result<crate::services::http::Response, crate::services::http::FetchError>) -> Result<String, Problem> {
+    fn call(
+        &self,
+        f: impl Fn() -> Result<crate::services::http::Response, crate::services::http::FetchError>,
+    ) -> Result<String, Problem> {
         let mut last = Problem::Offline;
         for attempt in 0..TRIES {
             if attempt > 0 {
@@ -578,7 +751,15 @@ impl Sender<'_> {
             crate::pwarn!("notes: can't save the notes ({e})");
             Problem::Server
         })?;
-        crate::pinfo!("notes: saved \"{}\" ({} lines of transcript)", n.title, n.transcript.len());
-        Ok(Saved { notes: n, file: path.to_string_lossy().into_owned(), started: self.job.started })
+        crate::pinfo!(
+            "notes: saved \"{}\" ({} lines of transcript)",
+            n.title,
+            n.transcript.len()
+        );
+        Ok(Saved {
+            notes: n,
+            file: path.to_string_lossy().into_owned(),
+            started: self.job.started,
+        })
     }
 }

@@ -16,12 +16,12 @@
 //!
 //! The password never goes into the log.
 
-use studio_usage::{Got, FILE_MAX};
 use std::io::Read;
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicU32, AtomicU8, Ordering};
 use std::sync::{mpsc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
+use studio_usage::{Got, FILE_MAX};
 
 const SECURITY: &str = "/usr/bin/security";
 /// One read waits this long at most: time for the person to read macOS's
@@ -55,7 +55,12 @@ struct Gate {
     kept: Vec<Kept>,
 }
 
-static GATE: Mutex<Gate> = Mutex::new(Gate { open: false, keep: false, opening: 0, kept: Vec::new() });
+static GATE: Mutex<Gate> = Mutex::new(Gate {
+    open: false,
+    keep: false,
+    opening: 0,
+    kept: Vec::new(),
+});
 /// What the island last told [`set_watch`], packed, so telling it every
 /// frame costs nothing while it stays the same.
 static TOLD: AtomicU8 = AtomicU8::new(0);
@@ -114,9 +119,15 @@ pub fn asked() -> u32 {
 pub fn read(service: &str, account: Option<&str>) -> Got {
     let opening = {
         let g = gate();
-        match g.kept.iter().find(|k| k.service == service && k.account.as_deref() == account) {
+        match g
+            .kept
+            .iter()
+            .find(|k| k.service == service && k.account.as_deref() == account)
+        {
             // Tab closed, already asked this opening, or a no: no prompt.
-            Some(k) if !g.open || k.opening == g.opening || k.got == Got::Denied => return k.got.clone(),
+            Some(k) if !g.open || k.opening == g.opening || k.got == Got::Denied => {
+                return k.got.clone()
+            }
             // Tab closed and never read: nothing, rather than a prompt from nowhere.
             None if !g.open => return Got::Missing,
             _ => g.opening,
@@ -124,9 +135,15 @@ pub fn read(service: &str, account: Option<&str>) -> Got {
     };
     let got = ask(service, account);
     let mut g = gate();
-    g.kept.retain(|k| !(k.service == service && k.account.as_deref() == account));
+    g.kept
+        .retain(|k| !(k.service == service && k.account.as_deref() == account));
     if g.keep || got == Got::Denied {
-        g.kept.push(Kept { service: service.into(), account: account.map(Into::into), got: got.clone(), opening });
+        g.kept.push(Kept {
+            service: service.into(),
+            account: account.map(Into::into),
+            got: got.clone(),
+            opening,
+        });
     }
     got
 }
@@ -141,7 +158,13 @@ fn ask(service: &str, account: Option<&str>) -> Got {
     if let Some(a) = account.filter(|a| !a.is_empty()) {
         cmd.args(["-a", a]);
     }
-    let mut child = match cmd.arg("-w").stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null()).spawn() {
+    let mut child = match cmd
+        .arg("-w")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+    {
         Ok(c) => c,
         Err(e) => {
             pwarn!("keychain: {service}: couldn't run security ({e})");
@@ -153,13 +176,15 @@ fn ask(service: &str, account: Option<&str>) -> Got {
     // big item can't fill the pipe and hold `security` up meanwhile.
     let (tx, rx) = mpsc::channel();
     let out = child.stdout.take();
-    let reader = std::thread::Builder::new().name("poni-keychain".into()).spawn(move || {
-        let mut buf = Vec::new();
-        if let Some(out) = out {
-            let _ = out.take(FILE_MAX + 1).read_to_end(&mut buf);
-        }
-        let _ = tx.send(buf);
-    });
+    let reader = std::thread::Builder::new()
+        .name("poni-keychain".into())
+        .spawn(move || {
+            let mut buf = Vec::new();
+            if let Some(out) = out {
+                let _ = out.take(FILE_MAX + 1).read_to_end(&mut buf);
+            }
+            let _ = tx.send(buf);
+        });
     if let Err(e) = reader {
         let _ = child.kill();
         let _ = child.wait();
@@ -184,13 +209,18 @@ fn ask(service: &str, account: Option<&str>) -> Got {
                 s if s.is_empty() => (Got::Missing, "empty".to_string()),
                 s => (Got::Text(s), "read".to_string()),
             },
-            Some(NOT_FOUND | NO_DEFAULT_KEYCHAIN | NO_KEYCHAIN) => (Got::Missing, "not there".to_string()),
+            Some(NOT_FOUND | NO_DEFAULT_KEYCHAIN | NO_KEYCHAIN) => {
+                (Got::Missing, "not there".to_string())
+            }
             // Deny, a closed prompt, a keychain left locked, or no way to ask.
             Some(code) => (Got::Denied, format!("no (security exited {code})")),
             None => (Got::Denied, "security stopped".to_string()),
         },
     };
-    pinfo!("keychain: {service}: {what} after {} ms", started.elapsed().as_millis());
+    pinfo!(
+        "keychain: {service}: {what} after {} ms",
+        started.elapsed().as_millis()
+    );
     got
 }
 
@@ -201,7 +231,9 @@ fn ask(service: &str, account: Option<&str>) -> Got {
 fn password(out: &[u8]) -> String {
     let out = out.strip_suffix(b"\n").unwrap_or(out);
     match unhex(out) {
-        Some(bytes) if bytes.iter().any(|b| !(0x20..0x7f).contains(b)) => String::from_utf8_lossy(&bytes).into_owned(),
+        Some(bytes) if bytes.iter().any(|b| !(0x20..0x7f).contains(b)) => {
+            String::from_utf8_lossy(&bytes).into_owned()
+        }
         _ => String::from_utf8_lossy(out).into_owned(),
     }
 }
@@ -211,5 +243,7 @@ fn unhex(s: &[u8]) -> Option<Vec<u8>> {
         return None;
     }
     let digit = |c: u8| (c as char).to_digit(16).map(|d| d as u8);
-    s.chunks(2).map(|p| Some(digit(p[0])? << 4 | digit(p[1])?)).collect()
+    s.chunks(2)
+        .map(|p| Some(digit(p[0])? << 4 | digit(p[1])?))
+        .collect()
 }

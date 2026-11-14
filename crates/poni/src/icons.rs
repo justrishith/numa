@@ -418,7 +418,8 @@ const GEMINI: &str = "M11.6 2.3c.1-.4.7-.4.8 0l.4 1.2c.6 1.7 1.6 3.3 2.9 4.6 1.3
     c.4.1.4.7 0 .9l-1.3.4c-1.7.7-3.2 1.6-4.5 2.9-1.3 1.3-2.2 2.8-2.8 4.5l-.6 1.4c-.1.4-.7.4-.8 0L11 20.3\
     c-.6-1.7-1.6-3.2-2.8-4.5-1.3-1.3-2.8-2.2-4.5-2.9l-1.3-.4c-.4-.2-.4-.8 0-.9l1.4-.5c1.6-.7 3.1-1.6 4.4-2.9\
     C9.4 6.9 10.4 5.4 11 3.7Z";
-const CURSOR: &str = "M19.8 7.1 12.4 2.9c-.3-.2-.5-.2-.8 0L4.2 7.1c-.2.1-.3.4-.3.6v8.6c0 .2.1.5.3.6l7.4 4.2\
+const CURSOR: &str =
+    "M19.8 7.1 12.4 2.9c-.3-.2-.5-.2-.8 0L4.2 7.1c-.2.1-.3.4-.3.6v8.6c0 .2.1.5.3.6l7.4 4.2\
     c.3.2.5.2.8 0l7.4-4.2c.2-.1.3-.4.3-.6V7.7c0-.2-.1-.5-.3-.6Zm-.4.9-7.2 12.4c-.1.1-.2.1-.2 0V12.3\
     c0-.2-.1-.3-.2-.4L4.7 7.8c-.1 0 0-.2.1-.2H19.1c.2 0 .4.3.3.4Z";
 const COPILOT: &str = "M18.3 6c1.2 1.3 1.7 2.9 1.9 5.3.5 0 1 .1 1.4.6l.6.8c.2.3.3.6.3.9v2.3c0 .2 0 .3-.1.5\
@@ -438,7 +439,8 @@ const KIMI: &str = "M19.5 3c1 0 1.7.8 1.7 1.7 0 1-.7 1.8-1.7 1.8H18c-.1 0-.2-.1-
     M10 13.1c-.1.1-.1.2 0 .3l5.1 3.7c.5.3 1.1.6 1.8.7.1 0 .1.1.1.2v2.7c0 .2-.1.2-.2.2-1-.1-2.1-.5-3.1-1.1\
     L7.9 15.5c0 0-.1 0-.2 0L5.6 17.7c-.1 0-.1.1-.1.2v2.9c0 .1-.1.2-.2.2H2.9c-.1 0-.1-.1-.1-.2V6.5\
     c0-.2 0-.3.1-.3H5.3c.1 0 .2.1.2.3v6.6c0 .2.2.3.3.2l7-7c0 0 .1-.1.1-.1h3.5c.2 0 .2.3.1.4Z";
-const ZAI: &str = "M12.5 4.4 11.2 6.1c-.2.3-.5.5-.9.5H3.5V4.3c-.1.1 9 .1 9 .1Zm8.5 0L10.2 19.7H3L13.8 4.4Z\
+const ZAI: &str =
+    "M12.5 4.4 11.2 6.1c-.2.3-.5.5-.9.5H3.5V4.3c-.1.1 9 .1 9 .1Zm8.5 0L10.2 19.7H3L13.8 4.4Z\
     M11.5 19.7l1.3-1.8c.2-.3.5-.5.9-.5h6.8v2.3Z";
 const MINIMAX: &str = "M15.7 3.2c1.1 0 1.9.9 1.9 1.9V16c0 .3.3.6.6.6.4 0 .7-.3.7-.6V9.5c0-.5.2-1 .5-1.3\
     c.4-.3.8-.5 1.3-.5.5 0 .9.2 1.3.5.3.3.5.8.5 1.3v5.7c0 .3-.3.6-.6.6-.1 0-.3-.1-.4-.2-.1-.1-.1-.2-.1-.4V9.5\
@@ -475,18 +477,87 @@ mod tests {
     use super::*;
 
     const ALL: &[Icon] = &[
-        Icon::Play, Icon::Pause, Icon::Next, Icon::Prev, Icon::Music, Icon::Lyrics, Icon::Timer, Icon::Coffee, Icon::Steps,
-        Icon::Tray, Icon::ListChecks, Icon::Check, Icon::CheckCircle, Icon::Circle, Icon::Plus, Icon::Minus,
-        Icon::Close, Icon::Clipboard, Icon::Copy, Icon::Calendar, Icon::Clock, Icon::Cpu, Icon::Memory, Icon::Disk,
-        Icon::Battery, Icon::Bolt, Icon::Bluetooth, Icon::Headphones, Icon::Volume, Icon::VolumeLow, Icon::VolumeMute,
-        Icon::Pin, Icon::PinFill, Icon::Folder, Icon::File, Icon::Trash, Icon::Undo, Icon::Reset,
-        Icon::Sliders, Icon::Open, Icon::Phone, Icon::Eye, Icon::MoneyIn, Icon::MoneyOut, Icon::Transfer, Icon::Card, Icon::Wallet,
-        Icon::Unlink, Icon::Gear,
-        Icon::Gauge, Icon::App, Icon::Windows, Icon::Addons, Icon::Moon, Icon::Stop, Icon::Script, Icon::Record, Icon::Download,
-        Icon::Stocks, Icon::Search,
-        Icon::Recorder, Icon::Screen, Icon::AppWindow, Icon::Area, Icon::Camera, Icon::Mic, Icon::Bell, Icon::Notes, Icon::Message,
-        Icon::Ai, Icon::OpenAi, Icon::Claude, Icon::OpenCode, Icon::Gemini, Icon::Cursor, Icon::Copilot, Icon::Kimi, Icon::Zai,
-        Icon::MiniMax, Icon::OpenRouter, Icon::Oyenza,
+        Icon::Play,
+        Icon::Pause,
+        Icon::Next,
+        Icon::Prev,
+        Icon::Music,
+        Icon::Lyrics,
+        Icon::Timer,
+        Icon::Coffee,
+        Icon::Steps,
+        Icon::Tray,
+        Icon::ListChecks,
+        Icon::Check,
+        Icon::CheckCircle,
+        Icon::Circle,
+        Icon::Plus,
+        Icon::Minus,
+        Icon::Close,
+        Icon::Clipboard,
+        Icon::Copy,
+        Icon::Calendar,
+        Icon::Clock,
+        Icon::Cpu,
+        Icon::Memory,
+        Icon::Disk,
+        Icon::Battery,
+        Icon::Bolt,
+        Icon::Bluetooth,
+        Icon::Headphones,
+        Icon::Volume,
+        Icon::VolumeLow,
+        Icon::VolumeMute,
+        Icon::Pin,
+        Icon::PinFill,
+        Icon::Folder,
+        Icon::File,
+        Icon::Trash,
+        Icon::Undo,
+        Icon::Reset,
+        Icon::Sliders,
+        Icon::Open,
+        Icon::Phone,
+        Icon::Eye,
+        Icon::MoneyIn,
+        Icon::MoneyOut,
+        Icon::Transfer,
+        Icon::Card,
+        Icon::Wallet,
+        Icon::Unlink,
+        Icon::Gear,
+        Icon::Gauge,
+        Icon::App,
+        Icon::Windows,
+        Icon::Addons,
+        Icon::Moon,
+        Icon::Stop,
+        Icon::Script,
+        Icon::Record,
+        Icon::Download,
+        Icon::Stocks,
+        Icon::Search,
+        Icon::Recorder,
+        Icon::Screen,
+        Icon::AppWindow,
+        Icon::Area,
+        Icon::Camera,
+        Icon::Mic,
+        Icon::Bell,
+        Icon::Notes,
+        Icon::Message,
+        Icon::Ai,
+        Icon::OpenAi,
+        Icon::Claude,
+        Icon::OpenCode,
+        Icon::Gemini,
+        Icon::Cursor,
+        Icon::Copilot,
+        Icon::Kimi,
+        Icon::Zai,
+        Icon::MiniMax,
+        Icon::OpenRouter,
+        Icon::Oyenza,
         Icon::Lock,
     ];
 
@@ -505,7 +576,10 @@ mod tests {
             for p in parts(i) {
                 for (at, _) in p.d.match_indices(|c| c == 'Z' || c == 'z') {
                     let next = p.d[at + 1..].trim_start().chars().next();
-                    assert!(matches!(next, None | Some('M' | 'm')), "{i:?}: the figure after byte {at} has no M");
+                    assert!(
+                        matches!(next, None | Some('M' | 'm')),
+                        "{i:?}: the figure after byte {at} has no M"
+                    );
                 }
             }
         }
@@ -536,23 +610,47 @@ mod tests {
                         out.push([f32::MAX, f32::MAX, f32::MIN, f32::MIN]);
                         (x, y)
                     }
-                    Seg::LineTo(x, y) | Seg::QuadTo(_, _, x, y) | Seg::CubicTo(_, _, _, _, x, y) | Seg::ArcTo(_, _, _, _, _, x, y) => (x, y),
+                    Seg::LineTo(x, y)
+                    | Seg::QuadTo(_, _, x, y)
+                    | Seg::CubicTo(_, _, _, _, x, y)
+                    | Seg::ArcTo(_, _, _, _, _, x, y) => (x, y),
                     Seg::Close => continue,
                 };
-                let (x, y) = if on_grid { (x, y) } else { (12.0 + x * 0.1875, 12.0 + (y + 11.04) * 0.1875) };
+                let (x, y) = if on_grid {
+                    (x, y)
+                } else {
+                    (12.0 + x * 0.1875, 12.0 + (y + 11.04) * 0.1875)
+                };
                 let b = out.last_mut().unwrap();
                 *b = [b[0].min(x), b[1].min(y), b[2].max(x), b[3].max(y)];
             }
             out
         };
         let ours = figures(OYENZA, true);
-        let theirs: Vec<[f32; 4]> = [mark::HEAD, mark::FOLD, mark::EYES_SMALL].into_iter().flat_map(|d| figures(d, false)).collect();
+        let theirs: Vec<[f32; 4]> = [mark::HEAD, mark::FOLD, mark::EYES_SMALL]
+            .into_iter()
+            .flat_map(|d| figures(d, false))
+            .collect();
         assert_eq!(ours.len(), theirs.len());
         for (n, (a, b)) in ours.iter().zip(&theirs).enumerate() {
             // The eyes are circles here, whose end points sit on their middle line.
-            let mid = |b: &[f32; 4]| if n >= 2 { [(b[1] + b[3]) / 2.0; 2] } else { [b[1], b[3]] };
-            for (u, v) in [(a[0], b[0]), (a[2], b[2]), (mid(a)[0], mid(b)[0]), (mid(a)[1], mid(b)[1])] {
-                assert!((u - v).abs() < 0.06, "figure {n}: {u} where the mark has {v}");
+            let mid = |b: &[f32; 4]| {
+                if n >= 2 {
+                    [(b[1] + b[3]) / 2.0; 2]
+                } else {
+                    [b[1], b[3]]
+                }
+            };
+            for (u, v) in [
+                (a[0], b[0]),
+                (a[2], b[2]),
+                (mid(a)[0], mid(b)[0]),
+                (mid(a)[1], mid(b)[1]),
+            ] {
+                assert!(
+                    (u - v).abs() < 0.06,
+                    "figure {n}: {u} where the mark has {v}"
+                );
             }
         }
     }

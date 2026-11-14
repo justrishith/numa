@@ -12,8 +12,8 @@ use windows::Win32::Foundation::{HWND, LPARAM, POINT, RECT, WPARAM};
 use windows::Win32::Graphics::Dwm::DwmFlush;
 use windows::Win32::Graphics::Dxgi::{CreateDXGIFactory1, IDXGIFactory1, IDXGIOutput};
 use windows::Win32::Graphics::Gdi::{
-    EnumDisplaySettingsW, GetMonitorInfoW, MonitorFromPoint, DEVMODEW, ENUM_CURRENT_SETTINGS, HMONITOR, MONITORINFO, MONITORINFOEXW,
-    MONITOR_DEFAULTTOPRIMARY,
+    EnumDisplaySettingsW, GetMonitorInfoW, MonitorFromPoint, DEVMODEW, ENUM_CURRENT_SETTINGS,
+    HMONITOR, MONITORINFO, MONITORINFOEXW, MONITOR_DEFAULTTOPRIMARY,
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::HiDpi::{GetDpiForMonitor, MDT_EFFECTIVE_DPI};
@@ -23,10 +23,16 @@ pub const ISLAND_CLASS: PCWSTR = w!("Poni.Island");
 pub const HELPER_CLASS: PCWSTR = w!("Poni.Helper");
 pub const VISUAL_CLASS: PCWSTR = w!("Poni.Visual");
 
-pub type WndProc = unsafe extern "system" fn(HWND, u32, WPARAM, LPARAM) -> windows::Win32::Foundation::LRESULT;
+pub type WndProc =
+    unsafe extern "system" fn(HWND, u32, WPARAM, LPARAM) -> windows::Win32::Foundation::LRESULT;
 
 /// The visual window takes no input and has next to nothing to handle.
-unsafe extern "system" fn visual_wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> windows::Win32::Foundation::LRESULT {
+unsafe extern "system" fn visual_wndproc(
+    hwnd: HWND,
+    msg: u32,
+    wp: WPARAM,
+    lp: LPARAM,
+) -> windows::Win32::Foundation::LRESULT {
     use windows::Win32::Foundation::LRESULT;
     match msg {
         // WS_EX_TRANSPARENT already keeps hit tests off it; should one land
@@ -238,7 +244,20 @@ pub fn windows_build() -> Option<u32> {
 pub fn create_helper_window() -> Result<HWND> {
     unsafe {
         let hinst = GetModuleHandleW(None)?;
-        CreateWindowExW(WS_EX_TOOLWINDOW, HELPER_CLASS, w!("Poni Helper"), WS_POPUP, 0, 0, 0, 0, None, None, hinst, None)
+        CreateWindowExW(
+            WS_EX_TOOLWINDOW,
+            HELPER_CLASS,
+            w!("Poni Helper"),
+            WS_POPUP,
+            0,
+            0,
+            0,
+            0,
+            None,
+            None,
+            hinst,
+            None,
+        )
     }
 }
 
@@ -258,7 +277,10 @@ impl MonitorInfo {
     }
     /// Y where the island hangs from: below a top-docked taskbar, else the monitor top.
     pub fn top(&self) -> i32 {
-        if self.work.top > self.rect.top && self.work.left <= self.rect.left && self.work.right >= self.rect.right {
+        if self.work.top > self.rect.top
+            && self.work.left <= self.rect.left
+            && self.work.right >= self.rect.right
+        {
             self.work.top
         } else {
             self.rect.top
@@ -271,13 +293,21 @@ impl MonitorInfo {
 
 pub fn monitor_info(hmon: HMONITOR) -> Option<MonitorInfo> {
     unsafe {
-        let mut mi = MONITORINFO { cbSize: std::mem::size_of::<MONITORINFO>() as u32, ..Default::default() };
+        let mut mi = MONITORINFO {
+            cbSize: std::mem::size_of::<MONITORINFO>() as u32,
+            ..Default::default()
+        };
         if !GetMonitorInfoW(hmon, &mut mi).as_bool() {
             return None;
         }
         let (mut dx, mut dy) = (96u32, 96u32);
         let _ = GetDpiForMonitor(hmon, MDT_EFFECTIVE_DPI, &mut dx, &mut dy);
-        Some(MonitorInfo { handle: hmon.0 as isize, rect: mi.rcMonitor, work: mi.rcWork, dpi: dx.max(96) })
+        Some(MonitorInfo {
+            handle: hmon.0 as isize,
+            rect: mi.rcMonitor,
+            work: mi.rcWork,
+            dpi: dx.max(96),
+        })
     }
 }
 
@@ -294,8 +324,18 @@ pub fn pick_monitor(choice: MonitorChoice) -> MonitorInfo {
         let hmon = MonitorFromPoint(point, MONITOR_DEFAULTTOPRIMARY);
         monitor_info(hmon).unwrap_or(MonitorInfo {
             handle: 0,
-            rect: RECT { left: 0, top: 0, right: 1920, bottom: 1080 },
-            work: RECT { left: 0, top: 0, right: 1920, bottom: 1040 },
+            rect: RECT {
+                left: 0,
+                top: 0,
+                right: 1920,
+                bottom: 1080,
+            },
+            work: RECT {
+                left: 0,
+                top: 0,
+                right: 1920,
+                bottom: 1040,
+            },
             dpi: 96,
         })
     }
@@ -311,8 +351,13 @@ pub fn refresh_hz(hmon: HMONITOR) -> u32 {
         if !GetMonitorInfoW(hmon, &mut mi as *mut MONITORINFOEXW as *mut MONITORINFO).as_bool() {
             return 0;
         }
-        let mut dm = DEVMODEW { dmSize: std::mem::size_of::<DEVMODEW>() as u16, ..Default::default() };
-        if EnumDisplaySettingsW(PCWSTR(mi.szDevice.as_ptr()), ENUM_CURRENT_SETTINGS, &mut dm).as_bool() {
+        let mut dm = DEVMODEW {
+            dmSize: std::mem::size_of::<DEVMODEW>() as u16,
+            ..Default::default()
+        };
+        if EnumDisplaySettingsW(PCWSTR(mi.szDevice.as_ptr()), ENUM_CURRENT_SETTINGS, &mut dm)
+            .as_bool()
+        {
             dm.dmDisplayFrequency
         } else {
             0
@@ -528,7 +573,11 @@ fn clock_thread(s: Arc<ClockShared>, hwnd: SendHwnd) {
     // When the display mode was last read (it is re-read every second while
     // running: modes change without telling a background thread).
     let mut checked_at = clock::mono();
-    crate::pinfo!("frame clock: {} at {:.1} Hz", src.name(), 1.0 / timeline.period());
+    crate::pinfo!(
+        "frame clock: {} at {:.1} Hz",
+        src.name(),
+        1.0 / timeline.period()
+    );
     // Vblanks counted since the last posted frame.
     let mut since_post = u32::MAX;
     // Waits that returned at once / failed in a row (a source that doesn't block).
@@ -551,7 +600,9 @@ fn clock_thread(s: Arc<ClockShared>, hwnd: SendHwnd) {
         if s.stop.load(Ordering::Relaxed) {
             break;
         }
-        let mut recheck = s.display_changed.swap(false, Ordering::AcqRel) || timeline.off_rhythm() >= OFF_RHYTHM_LIMIT || clock::mono() - checked_at > 1.0;
+        let mut recheck = s.display_changed.swap(false, Ordering::AcqRel)
+            || timeline.off_rhythm() >= OFF_RHYTHM_LIMIT
+            || clock::mono() - checked_at > 1.0;
         if parked {
             parked = false;
             recheck = true;
@@ -570,7 +621,11 @@ fn clock_thread(s: Arc<ClockShared>, hwnd: SendHwnd) {
                 src = Vblank::for_monitor(hmon(m));
                 bad = 0;
                 timeline.set_nominal_period(period_for_hz(hz));
-                crate::pinfo!("frame clock: {} at {:.1} Hz", src.name(), 1.0 / timeline.period());
+                crate::pinfo!(
+                    "frame clock: {} at {:.1} Hz",
+                    src.name(),
+                    1.0 / timeline.period()
+                );
             } else if timeline.off_rhythm() >= OFF_RHYTHM_LIMIT {
                 timeline.reset();
             }
@@ -590,7 +645,11 @@ fn clock_thread(s: Arc<ClockShared>, hwnd: SendHwnd) {
             bad += 1;
             if bad >= 3 && !matches!(src, Vblank::Timer) {
                 if timer_since == 0.0 {
-                    crate::pwarn!("frame clock: {} isn't blocking ({}); using the timer", src.name(), if ok { "returns at once" } else { "fails" });
+                    crate::pwarn!(
+                        "frame clock: {} isn't blocking ({}); using the timer",
+                        src.name(),
+                        if ok { "returns at once" } else { "fails" }
+                    );
                 }
                 src = Vblank::Timer;
                 timer_since = raw;

@@ -75,7 +75,8 @@ pub fn watch(st: &AppState, open: bool) -> Watch {
     Watch {
         open,
         codes: w.codes.clone(),
-        chart: (open && w.range != Range::Day && !st.stocks.years.contains_key(&w.pick)).then(|| w.pick.clone()),
+        chart: (open && w.range != Range::Day && !st.stocks.years.contains_key(&w.pick))
+            .then(|| w.pick.clone()),
         names: open && st.ui.stocks.adding && st.stocks.names.is_none(),
     }
 }
@@ -163,7 +164,9 @@ pub fn picture(st: &mut AppState, shows: Picture, now: f64) {
     board.t = board.at - board.delay_s;
     let today = poni_core::agenda::day_num(&st.day_key()).unwrap_or(0);
     let bbca = board.quote("BBCA").map_or(4_940.0, |q| q.price);
-    st.stocks.years.insert("BBCA".into(), stocks::sample_history("BBCA", today, bbca));
+    st.stocks
+        .years
+        .insert("BBCA".into(), stocks::sample_history("BBCA", today, bbca));
     st.stocks.board = Some(board);
     st.stocks.checked = Some(st.unix - 8);
     st.stocks.names = Some(std::sync::Arc::new(stocks::sample_names()));
@@ -197,7 +200,12 @@ pub fn draw(ui: &mut Ui, st: &mut AppState, area: Rect) {
     s.swap_k = glide(s.swap_k, 1.0, dt, 0.01, &mut moving);
     let list_w = (area.w * 0.44).clamp(LIST_MIN, LIST_MAX).round();
     let left = Rect::new(area.x, area.y, list_w, area.h.min(HEIGHT));
-    let right = Rect::new(left.right() + COL_GAP, area.y, (area.w - list_w - COL_GAP).max(0.0), left.h);
+    let right = Rect::new(
+        left.right() + COL_GAP,
+        area.y,
+        (area.w - list_w - COL_GAP).max(0.0),
+        left.h,
+    );
     let base = ui.c.alpha();
     ui.c.set_alpha(base * ease_out(st.ui.stocks.swap_k));
     if st.ui.stocks.adding {
@@ -262,14 +270,31 @@ fn list(ui: &mut Ui, st: &mut AppState, r: Rect, dt: f32, moving: &mut bool) {
 
     let notches = ui.wheel_in(r);
     s.scroll = (s.scroll - notches * ROW_H).clamp(0.0, max_scroll);
-    s.shown_scroll = glide(s.shown_scroll.clamp(0.0, max_scroll), s.scroll, dt, 0.25, moving);
-    s.edit_k = glide(s.edit_k, if s.editing { 1.0 } else { 0.0 }, dt, 0.005, moving);
+    s.shown_scroll = glide(
+        s.shown_scroll.clamp(0.0, max_scroll),
+        s.scroll,
+        dt,
+        0.25,
+        moving,
+    );
+    s.edit_k = glide(
+        s.edit_k,
+        if s.editing { 1.0 } else { 0.0 },
+        dt,
+        0.005,
+        moving,
+    );
 
     // A drag in edit mode: the row follows the pointer and the list makes
     // room where it would land; letting go keeps the new order.
     let drag_dy = s.drag.as_ref().and_then(|(c, _)| {
         let held = ui.input.down && ui.input.pressed_id == Some(handle_id(c));
-        held.then(|| ui.input.mouse.zip(ui.input.press_pos).map_or(0.0, |(m, p)| m.y - p.y))
+        held.then(|| {
+            ui.input
+                .mouse
+                .zip(ui.input.press_pos)
+                .map_or(0.0, |(m, p)| m.y - p.y)
+        })
     });
     if s.drag.is_some() && drag_dy.is_none() {
         s.drag = None;
@@ -283,12 +308,16 @@ fn list(ui: &mut Ui, st: &mut AppState, r: Rect, dt: f32, moving: &mut bool) {
     }
 
     // Each row glides to its place; one new to the list starts there.
-    let order: Vec<String> = std::iter::once(INDEX.to_string()).chain(wl.codes.iter().cloned()).collect();
+    let order: Vec<String> = std::iter::once(INDEX.to_string())
+        .chain(wl.codes.iter().cloned())
+        .collect();
     let mut shown = Vec::with_capacity(order.len());
     for (i, code) in order.iter().enumerate() {
         let target = i as f32 * ROW_H;
         let y = match (&s.drag, drag_dy) {
-            (Some((c, y0)), Some(dy)) if c == code => (y0 + dy).clamp(ROW_H, (n - 1).max(1) as f32 * ROW_H),
+            (Some((c, y0)), Some(dy)) if c == code => {
+                (y0 + dy).clamp(ROW_H, (n - 1).max(1) as f32 * ROW_H)
+            }
             _ => match s.rows.iter().find(|(c, _)| c == code) {
                 Some((_, y)) => glide(*y, target, dt, 0.25, moving),
                 None => target,
@@ -298,7 +327,11 @@ fn list(ui: &mut Ui, st: &mut AppState, r: Rect, dt: f32, moving: &mut bool) {
     }
     s.rows = shown;
     let top = r.y - s.shown_scroll;
-    let pick_target = s.rows.iter().find(|(c, _)| *c == wl.pick).map_or(0.0, |p| p.1);
+    let pick_target = s
+        .rows
+        .iter()
+        .find(|(c, _)| *c == wl.pick)
+        .map_or(0.0, |p| p.1);
     let pick_y = match s.pick_y {
         Some(y) if s.drag.is_none() => glide(y, pick_target, dt, 0.25, moving),
         _ => pick_target,
@@ -331,9 +364,26 @@ fn list(ui: &mut Ui, st: &mut AppState, r: Rect, dt: f32, moving: &mut bool) {
             continue;
         }
         let q = board.and_then(|b| b.quote(code));
-        let name = q.map(|q| q.name.as_str()).or_else(|| names.and_then(|n| n.name(code))).unwrap_or(if code == INDEX { "IDX Composite" } else { "" });
+        let name = q
+            .map(|q| q.name.as_str())
+            .or_else(|| names.and_then(|n| n.name(code)))
+            .unwrap_or(if code == INDEX { "IDX Composite" } else { "" });
         let dragged = s.drag.as_ref().is_some_and(|(c, _)| c == code);
-        let act = draw_row(ui, RowView { code, name, q, span, show: wl.show, edit_k: s.edit_k, dragged, picked: *code == wl.pick }, row, card);
+        let act = draw_row(
+            ui,
+            RowView {
+                code,
+                name,
+                q,
+                span,
+                show: wl.show,
+                edit_k: s.edit_k,
+                dragged,
+                picked: *code == wl.pick,
+            },
+            row,
+            card,
+        );
         match act {
             RowAct::Pick => picked = Some(code.clone()),
             RowAct::Cycle => cycle = true,
@@ -354,26 +404,62 @@ fn list(ui: &mut Ui, st: &mut AppState, r: Rect, dt: f32, moving: &mut bool) {
     let edit_label = if s.editing { "Done" } else { "Edit" };
     let edit_st = TextStyle::body().weight(Weight::Semibold).right();
     let ew = ui.c.measure(edit_label, &edit_st, 100.0).0.ceil();
-    let edit_r = Rect::new(line.right() - ew - 8.0, line.y - 3.0, ew + 16.0, line.h + 6.0);
+    let edit_r = Rect::new(
+        line.right() - ew - 8.0,
+        line.y - 3.0,
+        ew + 16.0,
+        line.h + 6.0,
+    );
     let mut start_add = false;
     if wl.full() {
-        ui.c.text("Your list is full: 10 stocks", line, &TextStyle::footnote().color(palette::TEXT_FAINT));
+        ui.c.text(
+            "Your list is full: 10 stocks",
+            line,
+            &TextStyle::footnote().color(palette::TEXT_FAINT),
+        );
     } else if !s.editing {
-        let add_r = Rect::new(add.x, line.y - 3.0, (edit_r.x - add.x - 8.0).max(0.0), line.h + 6.0);
+        let add_r = Rect::new(
+            add.x,
+            line.y - 3.0,
+            (edit_r.x - add.x - 8.0).max(0.0),
+            line.h + 6.0,
+        );
         let resp = ui.button(wid("stocks.add"), add_r);
         if resp.hovered || resp.pressed {
-            super::card::fill_box(ui, card, add_r, 9.0, Color::white(if resp.pressed { 0.10 } else { 0.06 }));
+            super::card::fill_box(
+                ui,
+                card,
+                add_r,
+                9.0,
+                Color::white(if resp.pressed { 0.10 } else { 0.06 }),
+            );
         }
         let cy = line.center().y;
         ui.c.fill_circle(Point::new(line.x + 9.0, cy), 9.0, accent.with_alpha(0.20));
-        ui.c.icon(Icon::Plus, Rect::from_center(Point::new(line.x + 9.0, cy), 13.0, 13.0), accent);
-        ui.c.text("Add a stock", Rect::new(line.x + 26.0, line.y, line.w - 26.0 - ew - 20.0, line.h), &TextStyle::body().weight(Weight::Semibold).color(accent));
+        ui.c.icon(
+            Icon::Plus,
+            Rect::from_center(Point::new(line.x + 9.0, cy), 13.0, 13.0),
+            accent,
+        );
+        ui.c.text(
+            "Add a stock",
+            Rect::new(line.x + 26.0, line.y, line.w - 26.0 - ew - 20.0, line.h),
+            &TextStyle::body().weight(Weight::Semibold).color(accent),
+        );
         start_add = resp.clicked;
     }
     if !wl.codes.is_empty() || s.editing {
         let resp = ui.button(wid("stocks.edit"), edit_r);
-        let c = if resp.hovered { palette::TEXT } else { palette::TEXT_DIM };
-        ui.c.text(edit_label, Rect::new(edit_r.x, line.y, edit_r.w - 8.0, line.h), &edit_st.color(c));
+        let c = if resp.hovered {
+            palette::TEXT
+        } else {
+            palette::TEXT_DIM
+        };
+        ui.c.text(
+            edit_label,
+            Rect::new(edit_r.x, line.y, edit_r.w - 8.0, line.h),
+            &edit_st.color(c),
+        );
         if resp.clicked {
             s.editing = !s.editing;
             s.drag = None;
@@ -381,14 +467,22 @@ fn list(ui: &mut Ui, st: &mut AppState, r: Rect, dt: f32, moving: &mut bool) {
         }
     }
     let credit = "Prices from oyenza.trade, 10 min behind IDX";
-    ui.c.text(credit, Rect::new(line.x, add.y + 28.0, line.w, 14.0), &TextStyle::caption().color(palette::TEXT_FAINT));
+    ui.c.text(
+        credit,
+        Rect::new(line.x, add.y + 28.0, line.w, 14.0),
+        &TextStyle::caption().color(palette::TEXT_FAINT),
+    );
 
     // The list fades out at an edge that scrolls further.
     if s.shown_scroll > 0.5 {
         fade(ui, Rect::new(r.x - 8.0, r.y, r.w + 16.0, 14.0), true);
     }
     if s.shown_scroll < max_scroll - 0.5 {
-        fade(ui, Rect::new(r.x - 8.0, r.bottom() - 18.0, r.w + 16.0, 18.0), false);
+        fade(
+            ui,
+            Rect::new(r.x - 8.0, r.bottom() - 18.0, r.w + 16.0, 18.0),
+            false,
+        );
     }
     ui.c.unclip();
 
@@ -450,7 +544,13 @@ fn draw_row(ui: &mut Ui, v: RowView, r: Rect, card: Option<(Rect, f32)>) -> RowA
     if v.dragged {
         super::card::fill_box(ui, card, hit, 10.0, Color::white(0.14));
     } else if (resp.hovered || resp.pressed) && !v.picked && !editing {
-        super::card::fill_box(ui, card, hit, 10.0, Color::white(if resp.pressed { 0.08 } else { 0.05 }));
+        super::card::fill_box(
+            ui,
+            card,
+            hit,
+            10.0,
+            Color::white(if resp.pressed { 0.08 } else { 0.05 }),
+        );
     }
     if resp.clicked && !editing {
         act = RowAct::Pick;
@@ -461,8 +561,16 @@ fn draw_row(ui: &mut Ui, v: RowView, r: Rect, card: Option<(Rect, f32)>) -> RowA
     let pill = Rect::new(right - PILL_W, r.y + 25.0, PILL_W, PILL_H);
     let spark = Rect::new(pill.x - 10.0 - SPARK_W, r.y + 11.0, SPARK_W, 26.0);
     let text_w = (spark.x - 8.0 - x0).max(0.0);
-    ui.c.text(v.code, Rect::new(x0, r.y + 6.0, text_w, 19.0), &TextStyle::headline().weight(Weight::Semibold));
-    ui.c.text(v.name, Rect::new(x0, r.y + 25.0, text_w, 17.0), &TextStyle::footnote().color(palette::TEXT_DIM));
+    ui.c.text(
+        v.code,
+        Rect::new(x0, r.y + 6.0, text_w, 19.0),
+        &TextStyle::headline().weight(Weight::Semibold),
+    );
+    ui.c.text(
+        v.name,
+        Rect::new(x0, r.y + 25.0, text_w, 17.0),
+        &TextStyle::footnote().color(palette::TEXT_DIM),
+    );
 
     // The price side fades out as edit mode comes in.
     let base = ui.c.alpha();
@@ -473,7 +581,11 @@ fn draw_row(ui: &mut Ui, v: RowView, r: Rect, card: Option<(Rect, f32)>) -> RowA
             Some(q) => {
                 mini_chart(ui, q, v.span, spark);
                 let price = stocks::fmt_price(q.price, index);
-                ui.c.text(&price, Rect::new(right - 110.0, r.y + 5.0, 110.0, 19.0), &TextStyle::body().weight(Weight::Semibold).tabular().right());
+                ui.c.text(
+                    &price,
+                    Rect::new(right - 110.0, r.y + 5.0, 110.0, 19.0),
+                    &TextStyle::body().weight(Weight::Semibold).tabular().right(),
+                );
                 let pr = ui.button(wid_n("stocks.pill", n), pill);
                 let mut fill = trend_color(q.trend());
                 if pr.pressed {
@@ -481,13 +593,25 @@ fn draw_row(ui: &mut Ui, v: RowView, r: Rect, card: Option<(Rect, f32)>) -> RowA
                 }
                 ui.c.fill_rrect(pill, 6.0, fill);
                 let label = q.pill(v.show);
-                ui.c.text(&label, Rect::new(pill.x + 6.0, pill.y, pill.w - 12.0, pill.h), &TextStyle::footnote().weight(Weight::Semibold).tabular().right().color(Color::white(1.0)));
+                ui.c.text(
+                    &label,
+                    Rect::new(pill.x + 6.0, pill.y, pill.w - 12.0, pill.h),
+                    &TextStyle::footnote()
+                        .weight(Weight::Semibold)
+                        .tabular()
+                        .right()
+                        .color(Color::white(1.0)),
+                );
                 if pr.clicked && !editing {
                     act = RowAct::Cycle;
                 }
             }
             None => {
-                ui.c.text("\u{2014}", Rect::new(right - 80.0, r.y + 5.0, 80.0, 19.0), &TextStyle::body().color(palette::TEXT_FAINT).right());
+                ui.c.text(
+                    "\u{2014}",
+                    Rect::new(right - 80.0, r.y + 5.0, 80.0, 19.0),
+                    &TextStyle::body().color(palette::TEXT_FAINT).right(),
+                );
                 ui.c.fill_rrect(pill, 6.0, Color::white(0.10));
             }
         }
@@ -498,7 +622,15 @@ fn draw_row(ui: &mut Ui, v: RowView, r: Rect, card: Option<(Rect, f32)>) -> RowA
         // Remove: a red disc with a white bar, in the room the text left.
         let c = Point::new(r.x + ROW_PAD + 9.0, r.center().y);
         let rm = ui.button(wid_n("stocks.remove", n), Rect::from_center(c, 26.0, 26.0));
-        ui.c.fill_circle(c, 9.0, if rm.pressed { palette::RED.mul_alpha(0.7) } else { palette::RED });
+        ui.c.fill_circle(
+            c,
+            9.0,
+            if rm.pressed {
+                palette::RED.mul_alpha(0.7)
+            } else {
+                palette::RED
+            },
+        );
         ui.c.fill_rrect(Rect::from_center(c, 9.0, 2.0), 1.0, Color::white(1.0));
         if rm.clicked {
             act = RowAct::Remove;
@@ -506,9 +638,22 @@ fn draw_row(ui: &mut Ui, v: RowView, r: Rect, card: Option<(Rect, f32)>) -> RowA
         // The handle: three bars to drag the row by.
         let h = Rect::new(right - 36.0, r.y + 4.0, 36.0, r.h - 8.0);
         let hr = ui.button(handle_id(v.code), h);
-        let hc = if hr.hovered || hr.pressed || v.dragged { palette::TEXT } else { palette::TEXT_FAINT };
+        let hc = if hr.hovered || hr.pressed || v.dragged {
+            palette::TEXT
+        } else {
+            palette::TEXT_FAINT
+        };
         for j in 0..3 {
-            ui.c.fill_rrect(Rect::new(h.right() - 22.0, h.center().y - 5.0 + j as f32 * 5.0 - 0.75, 16.0, 1.5), 0.75, hc);
+            ui.c.fill_rrect(
+                Rect::new(
+                    h.right() - 22.0,
+                    h.center().y - 5.0 + j as f32 * 5.0 - 0.75,
+                    16.0,
+                    1.5,
+                ),
+                0.75,
+                hc,
+            );
         }
         if hr.pressed {
             act = RowAct::Drag;
@@ -521,25 +666,55 @@ fn draw_row(ui: &mut Ui, v: RowView, r: Rect, card: Option<(Rect, f32)>) -> RowA
 /// A row's small chart: the day's line from the first session's open, the
 /// previous close dotted across.
 fn mini_chart(ui: &mut Ui, q: &Quote, span: (u16, u16), r: Rect) {
-    let Some((lo, hi)) = stocks::bounds(q.spark.iter().map(|p| p.1), Some(q.prev)) else { return };
+    let Some((lo, hi)) = stocks::bounds(q.spark.iter().map(|p| p.1), Some(q.prev)) else {
+        return;
+    };
     let y = |v: f64| r.bottom() - ((v - lo) / (hi - lo)) as f32 * r.h;
-    dotted(ui, r.x, r.right(), y(q.prev).round() + 0.5, Color::white(0.30));
+    dotted(
+        ui,
+        r.x,
+        r.right(),
+        y(q.prev).round() + 0.5,
+        Color::white(0.30),
+    );
     if q.spark.len() < 2 {
         return;
     }
     let color = trend_color(q.trend());
-    let pts: Vec<(f32, f32)> = q.spark.iter().map(|p| (r.x + stocks::day_x(p.0, span) * r.w, y(p.1))).collect();
+    let pts: Vec<(f32, f32)> = q
+        .spark
+        .iter()
+        .map(|p| (r.x + stocks::day_x(p.0, span) * r.w, y(p.1)))
+        .collect();
     draw_line(ui, &pts, color, r.y, r.bottom(), 1.25, None);
 }
 
 /// A line through `pts` with the area under it washed in its colour: from
 /// `fade` at `top` to clear at `bottom` (the chart's), or one faint wash (a
 /// row's, which draws without making a gradient each frame).
-fn draw_line(ui: &mut Ui, pts: &[(f32, f32)], color: Color, top: f32, bottom: f32, width: f32, fade: Option<f32>) {
+fn draw_line(
+    ui: &mut Ui,
+    pts: &[(f32, f32)],
+    color: Color,
+    top: f32,
+    bottom: f32,
+    width: f32,
+    fade: Option<f32>,
+) {
     if pts.len() < 2 {
         return;
     }
-    let line: Vec<Seg> = pts.iter().enumerate().map(|(i, &(x, y))| if i == 0 { Seg::MoveTo(x, y) } else { Seg::LineTo(x, y) }).collect();
+    let line: Vec<Seg> = pts
+        .iter()
+        .enumerate()
+        .map(|(i, &(x, y))| {
+            if i == 0 {
+                Seg::MoveTo(x, y)
+            } else {
+                Seg::LineTo(x, y)
+            }
+        })
+        .collect();
     let mut area = line.clone();
     area.push(Seg::LineTo(pts[pts.len() - 1].0, bottom));
     area.push(Seg::LineTo(pts[0].0, bottom));
@@ -575,7 +750,11 @@ fn fade(ui: &mut Ui, r: Rect, top: bool) {
     for k in 0..STEPS {
         // k = 0 is the strip at the edge.
         let a = 0.92 * (1.0 - (k as f32 + 0.5) / STEPS as f32).powf(1.4);
-        let y = if top { r.y + k as f32 * step } else { r.bottom() - (k as f32 + 1.0) * step };
+        let y = if top {
+            r.y + k as f32 * step
+        } else {
+            r.bottom() - (k as f32 + 1.0) * step
+        };
         ui.c.fill_rect(Rect::new(r.x, y, r.w, step), palette::ISLAND.with_alpha(a));
     }
 }
@@ -586,7 +765,12 @@ fn search(ui: &mut Ui, st: &mut AppState, r: Rect) {
     let accent = st.accent;
     let id = wid("stocks.search");
     let cancel_w = ui.pill_width("Cancel", false, true);
-    let cancel = Rect::new(r.right() - cancel_w, r.y + (FIELD_H - PILL_SMALL) / 2.0, cancel_w, PILL_SMALL);
+    let cancel = Rect::new(
+        r.right() - cancel_w,
+        r.y + (FIELD_H - PILL_SMALL) / 2.0,
+        cancel_w,
+        PILL_SMALL,
+    );
     let field = Rect::new(r.x, r.y, (cancel.x - 8.0 - r.x).max(0.0), FIELD_H);
     let card = super::card::pill_card(st, r);
     let s = &mut st.ui.stocks;
@@ -608,37 +792,64 @@ fn search(ui: &mut Ui, st: &mut AppState, r: Rect) {
             _ => true,
         });
     }
-    let resp = ui.text_input_row(id, field, &mut s.query, "Code or name, like BBCA or Telkom", 32, accent, Some(Icon::Search));
+    let resp = ui.text_input_row(
+        id,
+        field,
+        &mut s.query,
+        "Code or name, like BBCA or Telkom",
+        32,
+        accent,
+        Some(Icon::Search),
+    );
     if resp.changed {
         s.hit = 0;
     }
     let names = st.stocks.names.clone();
-    let results = names.as_ref().map(|n| n.search(&s.query, &st.store.stocks.codes, RESULTS)).unwrap_or_default();
+    let results = names
+        .as_ref()
+        .map(|n| n.search(&s.query, &st.store.stocks.codes, RESULTS))
+        .unwrap_or_default();
     if !results.is_empty() {
         s.hit = (s.hit as i32 + moves).clamp(0, results.len() as i32 - 1) as usize;
     }
     // A typed code goes in as it is only when the list of names isn't there
     // to look in (oyenza.trade then says whether it lists it).
     let code = stocks::code_of(&s.query);
-    let typed = code.clone().filter(|c| names.is_none() && !st.store.stocks.has(c));
+    let typed = code
+        .clone()
+        .filter(|c| names.is_none() && !st.store.stocks.has(c));
     let mut chosen = None;
     if resp.submitted {
         chosen = results.get(s.hit).map(|p| p.0.clone()).or(typed.clone());
     }
-    let cancelled = ui.pill(wid("stocks.cancel"), cancel, "Cancel", None, PillStyle::Utility).clicked || resp.cancelled;
+    let cancelled = ui
+        .pill(
+            wid("stocks.cancel"),
+            cancel,
+            "Cancel",
+            None,
+            PillStyle::Utility,
+        )
+        .clicked
+        || resp.cancelled;
 
     let top = r.y + FIELD_H + 8.0;
     let hint_r = Rect::new(r.x + 4.0, top + 2.0, r.w - 8.0, 34.0);
     let hint = TextStyle::footnote().color(palette::TEXT_DIM).wrap().top();
     if results.is_empty() {
         let line = match (&names, st.stocks.names_failed) {
-            (_, _) if st.store.stocks.full() => "Your list is full: remove a stock first.".to_string(),
+            (_, _) if st.store.stocks.full() => {
+                "Your list is full: remove a stock first.".to_string()
+            }
             (None, false) => "Getting every listed stock from oyenza.trade\u{2026}".to_string(),
             (_, _) if s.query.trim().is_empty() => "Type a code or a company's name.".to_string(),
-            (_, _) if code.as_ref().is_some_and(|c| st.store.stocks.has(c)) => format!("{} is on your list already.", code.unwrap_or_default()),
+            (_, _) if code.as_ref().is_some_and(|c| st.store.stocks.has(c)) => {
+                format!("{} is on your list already.", code.unwrap_or_default())
+            }
             (None, true) => match &typed {
                 Some(c) => format!("Couldn't get the list of stocks. Press Enter to add {c}."),
-                None => "Couldn't get the list of stocks. Type a code, like BBCA, and press Enter.".to_string(),
+                None => "Couldn't get the list of stocks. Type a code, like BBCA, and press Enter."
+                    .to_string(),
             },
             _ => "No listed stock by that code or name.".to_string(),
         };
@@ -652,13 +863,29 @@ fn search(ui: &mut Ui, st: &mut AppState, r: Rect) {
         }
         let lit = i == s.hit || b.hovered;
         if lit {
-            super::card::fill_box(ui, card, row.inset(0.0, 1.0), 9.0, Color::white(if b.pressed { 0.12 } else if i == s.hit { 0.09 } else { 0.06 }));
+            super::card::fill_box(
+                ui,
+                card,
+                row.inset(0.0, 1.0),
+                9.0,
+                Color::white(if b.pressed {
+                    0.12
+                } else if i == s.hit {
+                    0.09
+                } else {
+                    0.06
+                }),
+            );
         }
         let tx = row.x + ROW_PAD;
         let code_st = TextStyle::body().weight(Weight::Semibold);
         let cw = ui.c.measure(code, &code_st, 100.0).0.ceil().max(40.0);
         ui.c.text(code, Rect::new(tx, row.y, cw + 2.0, row.h), &code_st);
-        ui.c.text(name, Rect::new(tx + cw + 12.0, row.y, row.right() - tx - cw - 20.0, row.h), &TextStyle::footnote().color(palette::TEXT_DIM));
+        ui.c.text(
+            name,
+            Rect::new(tx + cw + 12.0, row.y, row.right() - tx - cw - 20.0, row.h),
+            &TextStyle::footnote().color(palette::TEXT_DIM),
+        );
     }
 
     if let Some(code) = chosen {
@@ -695,11 +922,42 @@ fn detail(ui: &mut Ui, st: &mut AppState, r: Rect) {
     let cw = ui.c.measure(&pick, &code_st, 200.0).0.ceil();
     let title = Rect::new(r.x, r.y, r.w, 22.0);
     let seg_x = r.right() - SEG_W * Range::ALL.len() as f32;
-    ui.c.text(&pick, Rect::new(title.x, title.y, cw + 2.0, title.h), &code_st);
-    let name = q.map(|q| q.name.clone()).or_else(|| st.stocks.names.as_ref().and_then(|n| n.name(&pick).map(str::to_string))).unwrap_or_else(|| if index { "IDX Composite".into() } else { String::new() });
-    let name_r = Rect::new(title.x + cw + 8.0, title.y + 1.0, (seg_x - title.x - cw - 18.0).max(0.0), title.h);
-    ui.c.text(&name, name_r, &TextStyle::headline().color(palette::TEXT_DIM));
-    if let Some(pick_range) = range_control(ui, Rect::new(seg_x, title.y, r.right() - seg_x, SEG_H), range) {
+    ui.c.text(
+        &pick,
+        Rect::new(title.x, title.y, cw + 2.0, title.h),
+        &code_st,
+    );
+    let name = q
+        .map(|q| q.name.clone())
+        .or_else(|| {
+            st.stocks
+                .names
+                .as_ref()
+                .and_then(|n| n.name(&pick).map(str::to_string))
+        })
+        .unwrap_or_else(|| {
+            if index {
+                "IDX Composite".into()
+            } else {
+                String::new()
+            }
+        });
+    let name_r = Rect::new(
+        title.x + cw + 8.0,
+        title.y + 1.0,
+        (seg_x - title.x - cw - 18.0).max(0.0),
+        title.h,
+    );
+    ui.c.text(
+        &name,
+        name_r,
+        &TextStyle::headline().color(palette::TEXT_DIM),
+    );
+    if let Some(pick_range) = range_control(
+        ui,
+        Rect::new(seg_x, title.y, r.right() - seg_x, SEG_H),
+        range,
+    ) {
         st.store.stocks.range = pick_range;
         st.save();
     }
@@ -710,11 +968,20 @@ fn detail(ui: &mut Ui, st: &mut AppState, r: Rect) {
         let line = match (board, st.stocks.trouble) {
             (None, Some(t)) => trouble_text(t).to_string(),
             (None, None) => "Getting prices from oyenza.trade\u{2026}".to_string(),
-            (Some(b), _) if b.missing.contains(&pick) => format!("oyenza.trade doesn't list {pick}."),
+            (Some(b), _) if b.missing.contains(&pick) => {
+                format!("oyenza.trade doesn't list {pick}.")
+            }
             (Some(_), _) => format!("Getting {pick}\u{2026}"),
         };
         let m = Rect::new(r.x, r.y + CHART_Y, r.w, CHART_H);
-        ui.c.text(&line, m, &TextStyle::footnote().color(palette::TEXT_DIM).center().wrap());
+        ui.c.text(
+            &line,
+            m,
+            &TextStyle::footnote()
+                .color(palette::TEXT_DIM)
+                .center()
+                .wrap(),
+        );
         return;
     };
     let q = q.clone();
@@ -732,13 +999,32 @@ fn detail(ui: &mut Ui, st: &mut AppState, r: Rect) {
         let (from, base_from, color_from) = if still {
             (target.clone(), line.base, Some(line.color))
         } else if m.to.is_empty() {
-            let flat = line.base.unwrap_or_else(|| target.first().map_or(0.5, |p| p.1));
-            (target.iter().map(|p| (p.0, flat)).collect(), line.base, Some(line.color))
+            let flat = line
+                .base
+                .unwrap_or_else(|| target.first().map_or(0.5, |p| p.1));
+            (
+                target.iter().map(|p| (p.0, flat)).collect(),
+                line.base,
+                Some(line.color),
+            )
         } else {
             let e = morph_k(m.t0, now);
-            (lerp_pts(&m.from, &m.to, e), lerp_base(m.base_from, m.base_to, e), Some(lerp_color(m.color_from, m.color_to, e)))
+            (
+                lerp_pts(&m.from, &m.to, e),
+                lerp_base(m.base_from, m.base_to, e),
+                Some(lerp_color(m.color_from, m.color_to, e)),
+            )
         };
-        *m = Morph { key: line.key.clone(), from, to: target.clone(), base_from, base_to: line.base, color_from, color_to: Some(line.color), t0: now };
+        *m = Morph {
+            key: line.key.clone(),
+            from,
+            to: target.clone(),
+            base_from,
+            base_to: line.base,
+            color_from,
+            color_to: Some(line.color),
+            t0: now,
+        };
     }
     let e = morph_k(m.t0, now);
     if e < 1.0 {
@@ -749,11 +1035,25 @@ fn detail(ui: &mut Ui, st: &mut AppState, r: Rect) {
     let base = lerp_base(m.base_from, m.base_to, e);
     let to_px = |p: (f32, f32)| (chart.x + p.0 * chart.w, chart.bottom() - p.1 * chart.h);
     if let Some(b) = base {
-        dotted(ui, chart.x, chart.right(), (chart.bottom() - b * chart.h).round() + 0.5, Color::white(0.30));
+        dotted(
+            ui,
+            chart.x,
+            chart.right(),
+            (chart.bottom() - b * chart.h).round() + 0.5,
+            Color::white(0.30),
+        );
     }
     let px: Vec<(f32, f32)> = shown.iter().map(|p| to_px(*p)).collect();
     if line.pts.len() >= 2 {
-        draw_line(ui, &px, color, chart.y, chart.bottom() + 6.0, 2.0, Some(0.34));
+        draw_line(
+            ui,
+            &px,
+            color,
+            chart.y,
+            chart.bottom() + 6.0,
+            2.0,
+            Some(0.34),
+        );
     } else {
         let msg = match range {
             // Before the bell, or (the day the feed starts keeping lines) a first point.
@@ -762,18 +1062,36 @@ fn detail(ui: &mut Ui, st: &mut AppState, r: Rect) {
             _ if st.stocks.no_year.contains(&pick) => "No chart for this range yet.",
             _ => "Getting the year from oyenza.trade\u{2026}",
         };
-        ui.c.text(msg, chart, &TextStyle::footnote().color(palette::TEXT_FAINT).center());
+        ui.c.text(
+            msg,
+            chart,
+            &TextStyle::footnote().color(palette::TEXT_FAINT).center(),
+        );
     }
 
     // Under the pointer: that point's price and time, as Stocks scrubs.
-    let scrub = ui.input.mouse.filter(|p| chart.inset(-4.0, -6.0).contains(*p) && line.pts.len() >= 2).map(|p| {
-        let x = ((p.x - chart.x) / chart.w).clamp(0.0, 1.0);
-        let i = line.pts.iter().enumerate().min_by(|a, b| (a.1 .0 - x).abs().total_cmp(&(b.1 .0 - x).abs())).map_or(0, |(i, _)| i);
-        i
-    });
+    let scrub = ui
+        .input
+        .mouse
+        .filter(|p| chart.inset(-4.0, -6.0).contains(*p) && line.pts.len() >= 2)
+        .map(|p| {
+            let x = ((p.x - chart.x) / chart.w).clamp(0.0, 1.0);
+            let i = line
+                .pts
+                .iter()
+                .enumerate()
+                .min_by(|a, b| (a.1 .0 - x).abs().total_cmp(&(b.1 .0 - x).abs()))
+                .map_or(0, |(i, _)| i);
+            i
+        });
     if let Some(i) = scrub.filter(|_| e >= 1.0) {
         let (sx, sy) = to_px(line.pts[i]);
-        ui.c.line(Point::new(sx, chart.y - 2.0), Point::new(sx, chart.bottom()), Color::white(0.32), 1.0);
+        ui.c.line(
+            Point::new(sx, chart.y - 2.0),
+            Point::new(sx, chart.bottom()),
+            Color::white(0.32),
+            1.0,
+        );
         ui.c.fill_circle(Point::new(sx, sy), 5.0, palette::ISLAND);
         ui.c.fill_circle(Point::new(sx, sy), 3.5, color);
     }
@@ -784,7 +1102,11 @@ fn detail(ui: &mut Ui, st: &mut AppState, r: Rect) {
         None => (q.price, None),
     };
     // The day's change is from the previous close; a range's from its first close.
-    let from = if range == Range::Day { q.prev } else { line.values.first().copied().unwrap_or(q.prev) };
+    let from = if range == Range::Day {
+        q.prev
+    } else {
+        line.values.first().copied().unwrap_or(q.prev)
+    };
     let price = stocks::fmt_price(value, index);
     let price_st = TextStyle::value().weight(Weight::Semibold).tabular();
     let pw = ui.c.measure(&price, &price_st, 200.0).0.ceil();
@@ -792,14 +1114,34 @@ fn detail(ui: &mut Ui, st: &mut AppState, r: Rect) {
     ui.c.text(&price, Rect::new(r.x, py, pw + 2.0, 24.0), &price_st);
     let d = value - from;
     let pct = if from > 0.0 { d / from * 100.0 } else { 0.0 };
-    let change = format!("{} ({})", stocks::fmt_change(d, index), stocks::fmt_pct(pct));
+    let change = format!(
+        "{} ({})",
+        stocks::fmt_change(d, index),
+        stocks::fmt_pct(pct)
+    );
     let ccol = trend_color(stocks::trend_of(value, from));
-    let change_st = TextStyle::body().weight(Weight::Semibold).tabular().color(ccol);
+    let change_st = TextStyle::body()
+        .weight(Weight::Semibold)
+        .tabular()
+        .color(ccol);
     let cw2 = ui.c.measure(&change, &change_st, 200.0).0.ceil();
-    ui.c.text(&change, Rect::new(r.x + pw + 10.0, py + 2.0, (r.right() - r.x - pw - 10.0).max(0.0), 22.0), &change_st);
+    ui.c.text(
+        &change,
+        Rect::new(
+            r.x + pw + 10.0,
+            py + 2.0,
+            (r.right() - r.x - pw - 10.0).max(0.0),
+            22.0,
+        ),
+        &change_st,
+    );
     if let Some(when) = when {
         let wx = r.x + pw + 10.0 + cw2 + 8.0;
-        ui.c.text(&when, Rect::new(wx, py + 3.0, (r.right() - wx).max(0.0), 22.0), &TextStyle::footnote().color(palette::TEXT_FAINT));
+        ui.c.text(
+            &when,
+            Rect::new(wx, py + 3.0, (r.right() - wx).max(0.0), 22.0),
+            &TextStyle::footnote().color(palette::TEXT_FAINT),
+        );
     }
 
     // The axis: the day's open and close, or the range's first and last
@@ -812,10 +1154,29 @@ fn detail(ui: &mut Ui, st: &mut AppState, r: Rect) {
     ui.c.text(&a, axis, &axis_st);
     ui.c.text(&b, axis, &axis_st.right());
     let (status, warn) = status_line(st, st.stocks.board.as_ref());
-    let room = Rect::new(axis.x + aw + 10.0, axis.y, (axis.w - aw - bw - 20.0).max(0.0), axis.h);
-    ui.c.text(&status, room, &TextStyle::caption().color(if warn { palette::ORANGE } else { palette::TEXT_FAINT }).center());
+    let room = Rect::new(
+        axis.x + aw + 10.0,
+        axis.y,
+        (axis.w - aw - bw - 20.0).max(0.0),
+        axis.h,
+    );
+    ui.c.text(
+        &status,
+        room,
+        &TextStyle::caption()
+            .color(if warn {
+                palette::ORANGE
+            } else {
+                palette::TEXT_FAINT
+            })
+            .center(),
+    );
 
-    stats(ui, &q, Rect::new(r.x, r.y + STATS_Y, r.w, (r.h - STATS_Y).max(2.0 * STAT_H)));
+    stats(
+        ui,
+        &q,
+        Rect::new(r.x, r.y + STATS_Y, r.w, (r.h - STATS_Y).max(2.0 * STAT_H)),
+    );
 }
 
 /// The four ranges as a small segmented control; the one clicked, if any.
@@ -830,8 +1191,19 @@ fn range_control(ui: &mut Ui, r: Rect, now: Range) -> Option<Range> {
         } else if resp.hovered {
             ui.c.fill_rrect(seg.inset(1.0, 0.0), r.h / 2.0, Color::white(0.07));
         }
-        let c = if on || resp.hovered { palette::TEXT } else { palette::TEXT_DIM };
-        ui.c.text(range.label(), seg, &TextStyle::footnote().weight(Weight::Semibold).center().color(c));
+        let c = if on || resp.hovered {
+            palette::TEXT
+        } else {
+            palette::TEXT_DIM
+        };
+        ui.c.text(
+            range.label(),
+            seg,
+            &TextStyle::footnote()
+                .weight(Weight::Semibold)
+                .center()
+                .color(c),
+        );
         if resp.clicked && !on {
             out = Some(range);
         }
@@ -875,10 +1247,28 @@ fn stats(ui: &mut Ui, q: &Quote, r: Rect) {
     let value_st = TextStyle::footnote().weight(Weight::Semibold).tabular();
     for (i, (label, value)) in cells.iter().enumerate() {
         let (row, col) = (i / 4, i % 4);
-        let cell = Rect::new(r.x + col as f32 * (cw + gap), r.y + row as f32 * row_h, cw, row_h);
-        ui.c.line(Point::new(cell.x, cell.y + 0.5), Point::new(cell.right(), cell.y + 0.5), Color::white(0.08), 1.0);
-        ui.c.text(label, Rect::new(cell.x, cell.y + 3.0, cell.w, 13.0), &label_st);
-        ui.c.text(value, Rect::new(cell.x, cell.y + 15.0, cell.w, 15.0), &value_st);
+        let cell = Rect::new(
+            r.x + col as f32 * (cw + gap),
+            r.y + row as f32 * row_h,
+            cw,
+            row_h,
+        );
+        ui.c.line(
+            Point::new(cell.x, cell.y + 0.5),
+            Point::new(cell.right(), cell.y + 0.5),
+            Color::white(0.08),
+            1.0,
+        );
+        ui.c.text(
+            label,
+            Rect::new(cell.x, cell.y + 3.0, cell.w, 13.0),
+            &label_st,
+        );
+        ui.c.text(
+            value,
+            Rect::new(cell.x, cell.y + 15.0, cell.w, 15.0),
+            &value_st,
+        );
     }
 }
 
@@ -886,7 +1276,14 @@ fn stats(ui: &mut Ui, q: &Quote, r: Rect) {
 /// stopped; true when it's a warning.
 fn status_line(st: &AppState, board: Option<&Board>) -> (String, bool) {
     match (board, st.stocks.trouble) {
-        (Some(b), Some(t)) => (format!("{} \u{b7} prices from {}", trouble_word(t), stocks::wib_clock(b.t)), true),
+        (Some(b), Some(t)) => (
+            format!(
+                "{} \u{b7} prices from {}",
+                trouble_word(t),
+                stocks::wib_clock(b.t)
+            ),
+            true,
+        ),
         (Some(b), None) => (b.status(st.unix), b.stale),
         (None, _) => (String::new(), false),
     }
@@ -903,7 +1300,9 @@ fn trouble_word(t: Trouble) -> &'static str {
 fn trouble_text(t: Trouble) -> &'static str {
     match t {
         Trouble::Offline => "Can't reach oyenza.trade. The prices come once you're back online.",
-        Trouble::Paused => "oyenza.trade has its live prices paused for now. Trying again in a few minutes.",
+        Trouble::Paused => {
+            "oyenza.trade has its live prices paused for now. Trying again in a few minutes."
+        }
         Trouble::Server => "oyenza.trade didn't answer properly. Trying again soon.",
     }
 }
@@ -937,14 +1336,26 @@ impl Line {
     fn ends(&self) -> (String, String) {
         match (self.days.first(), self.days.last()) {
             (Some(a), Some(b)) => (stocks::date_label(*a), stocks::date_label(*b)),
-            _ => (stocks::minute_label(self.span.0), stocks::minute_label(self.span.1)),
+            _ => (
+                stocks::minute_label(self.span.0),
+                stocks::minute_label(self.span.1),
+            ),
         }
     }
 }
 
 fn chart_line(st: &AppState, q: &Quote, span: (u16, u16), range: Range) -> Line {
     let tag = st.stocks.board.as_ref().map_or("", |b| b.tag.as_str());
-    let mut line = Line { key: String::new(), pts: Vec::new(), values: Vec::new(), minutes: Vec::new(), days: Vec::new(), base: None, color: trend_color(q.trend()), span };
+    let mut line = Line {
+        key: String::new(),
+        pts: Vec::new(),
+        values: Vec::new(),
+        minutes: Vec::new(),
+        days: Vec::new(),
+        base: None,
+        color: trend_color(q.trend()),
+        span,
+    };
     match range {
         Range::Day => {
             line.key = format!("{}/1d/{tag}", q.code);
@@ -952,21 +1363,34 @@ fn chart_line(st: &AppState, q: &Quote, span: (u16, u16), range: Range) -> Line 
             line.minutes = q.spark.iter().map(|p| p.0).collect();
             if let Some((lo, hi)) = stocks::bounds(line.values.iter().copied(), Some(q.prev)) {
                 let y = |v: f64| ((v - lo) / (hi - lo)) as f32;
-                line.pts = q.spark.iter().map(|p| (stocks::day_x(p.0, span), y(p.1))).collect();
+                line.pts = q
+                    .spark
+                    .iter()
+                    .map(|p| (stocks::day_x(p.0, span), y(p.1)))
+                    .collect();
                 line.base = Some(y(q.prev));
             }
         }
         _ => {
             let year = st.stocks.years.get(&q.code);
             // A new answer moves its last point: the key moves with it.
-            line.key = format!("{}/{}/{}/{tag}", q.code, range.label(), year.map_or(0, |h| h.days.len()));
+            line.key = format!(
+                "{}/{}/{}/{tag}",
+                q.code,
+                range.label(),
+                year.map_or(0, |h| h.days.len())
+            );
             if let Some(h) = year {
                 let (days, closes) = h.window(range);
                 line.days = days.to_vec();
                 line.values = closes.to_vec();
                 // The year ends at the build's last close: today's price takes
                 // that day's place, or comes after it.
-                let today = st.stocks.board.as_ref().and_then(|b| stocks::day_of(&b.day));
+                let today = st
+                    .stocks
+                    .board
+                    .as_ref()
+                    .and_then(|b| stocks::day_of(&b.day));
                 match (today, line.days.last().copied()) {
                     (Some(t), Some(last)) if t == last => {
                         if let Some(v) = line.values.last_mut() {
@@ -980,9 +1404,17 @@ fn chart_line(st: &AppState, q: &Quote, span: (u16, u16), range: Range) -> Line 
                     _ => {}
                 }
                 let vals = &line.values;
-                if let (Some((lo, hi)), Some(first), Some(last)) = (stocks::bounds(vals.iter().copied(), None), vals.first(), vals.last()) {
+                if let (Some((lo, hi)), Some(first), Some(last)) = (
+                    stocks::bounds(vals.iter().copied(), None),
+                    vals.first(),
+                    vals.last(),
+                ) {
                     let n = (vals.len() - 1).max(1) as f32;
-                    line.pts = vals.iter().enumerate().map(|(i, c)| (i as f32 / n, ((c - lo) / (hi - lo)) as f32)).collect();
+                    line.pts = vals
+                        .iter()
+                        .enumerate()
+                        .map(|(i, c)| (i as f32 / n, ((c - lo) / (hi - lo)) as f32))
+                        .collect();
                     line.color = trend_color(stocks::trend_of(*last, *first));
                 }
             }
@@ -999,7 +1431,10 @@ fn lerp_pts(a: &[(f32, f32)], b: &[(f32, f32)], t: f32) -> Vec<(f32, f32)> {
     if a.len() != b.len() {
         return b.to_vec();
     }
-    a.iter().zip(b).map(|(p, q)| (lerp(p.0, q.0, t), lerp(p.1, q.1, t))).collect()
+    a.iter()
+        .zip(b)
+        .map(|(p, q)| (lerp(p.0, q.0, t), lerp(p.1, q.1, t)))
+        .collect()
 }
 
 fn lerp_base(a: Option<f32>, b: Option<f32>, t: f32) -> Option<f32> {

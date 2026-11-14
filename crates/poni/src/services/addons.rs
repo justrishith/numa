@@ -41,7 +41,11 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::time::{Duration, Instant, UNIX_EPOCH};
 
-const USER_AGENT: &str = concat!("OyenzaStudio/", env!("CARGO_PKG_VERSION"), " (+https://github.com/lucacadalora/oyenza-studio)");
+const USER_AGENT: &str = concat!(
+    "OyenzaStudio/",
+    env!("CARGO_PKG_VERSION"),
+    " (+https://github.com/lucacadalora/oyenza-studio)"
+);
 /// Budget for a small file: slow connections still bring 2 MB in this time.
 /// A bigger one gets more ([`file_timeout`]).
 const FILE_TIMEOUT: Duration = Duration::from_secs(180);
@@ -67,8 +71,19 @@ pub type Job = Box<dyn FnOnce(Result<&Client, &str>) + Send>;
 impl AddonService {
     /// `on`: the add-ons switched on in settings.
     pub fn start(sink: EventSink, on: Vec<&'static str>) -> io::Result<Self> {
-        let want = addons::ALL.iter().map(|a| (a.id, on.contains(&a.id))).collect();
-        let shared = Arc::new(Shared { q: Mutex::new(Queue { want, pro: false, jobs: Vec::new(), shutdown: false }), cv: Condvar::new() });
+        let want = addons::ALL
+            .iter()
+            .map(|a| (a.id, on.contains(&a.id)))
+            .collect();
+        let shared = Arc::new(Shared {
+            q: Mutex::new(Queue {
+                want,
+                pro: false,
+                jobs: Vec::new(),
+                shutdown: false,
+            }),
+            cv: Condvar::new(),
+        });
         let worker = shared.clone();
         std::thread::Builder::new()
             .name("poni-addons".into())
@@ -156,12 +171,18 @@ enum Have {
 fn worker_main(shared: Arc<Shared>, sink: EventSink, dir: PathBuf) {
     let _com = MtaGuard::new();
     let mut client: Option<Client> = None;
-    let mut have: BTreeMap<&'static str, Have> = addons::ALL.iter().map(|a| (a.id, Have::Unknown)).collect();
+    let mut have: BTreeMap<&'static str, Have> =
+        addons::ALL.iter().map(|a| (a.id, Have::Unknown)).collect();
     let mut was_on: BTreeMap<&'static str, bool> = BTreeMap::new();
     loop {
         let (want, pro, jobs, shutdown) = {
             let mut q = shared.lock();
-            (q.want.clone(), q.pro, std::mem::take(&mut q.jobs), q.shutdown)
+            (
+                q.want.clone(),
+                q.pro,
+                std::mem::take(&mut q.jobs),
+                q.shutdown,
+            )
         };
         if shutdown {
             return;
@@ -173,15 +194,27 @@ fn worker_main(shared: Arc<Shared>, sink: EventSink, dir: PathBuf) {
                 continue;
             }
             // A Pro add-on's files wait for Pro.
-            let Some(on) = wanted(addon, want.get(addon.id).copied().unwrap_or(false), pro) else { continue };
+            let Some(on) = wanted(addon, want.get(addon.id).copied().unwrap_or(false), pro) else {
+                continue;
+            };
             let h = have.get(addon.id).copied().unwrap_or(Have::Unknown);
             // Switched on again after a failure: a fresh start.
-            let h = if on && !was_on.get(addon.id).copied().unwrap_or(false) && matches!(h, Have::Failed | Have::Removed) { Have::Unknown } else { h };
+            let h = if on
+                && !was_on.get(addon.id).copied().unwrap_or(false)
+                && matches!(h, Have::Failed | Have::Removed)
+            {
+                Have::Unknown
+            } else {
+                h
+            };
             was_on.insert(addon.id, on);
             let now_have = if !on {
                 if h != Have::Removed {
                     remove(&dir, addon);
-                    sink.send(AppEvent::Addon { id: addon.id, status: Status::Off });
+                    sink.send(AppEvent::Addon {
+                        id: addon.id,
+                        status: Status::Off,
+                    });
                 }
                 Have::Removed
             } else {
@@ -189,7 +222,11 @@ fn worker_main(shared: Arc<Shared>, sink: EventSink, dir: PathBuf) {
                     Have::Complete | Have::Failed => h,
                     Have::RetryAt(at, _) if Instant::now() < at => h,
                     _ => {
-                        let backoff = if let Have::RetryAt(_, d) = h { d } else { FIRST_RETRY };
+                        let backoff = if let Have::RetryAt(_, d) = h {
+                            d
+                        } else {
+                            FIRST_RETRY
+                        };
                         if client.is_none() {
                             match Client::new(USER_AGENT) {
                                 Ok(c) => client = Some(c),
@@ -197,7 +234,9 @@ fn worker_main(shared: Arc<Shared>, sink: EventSink, dir: PathBuf) {
                             }
                         }
                         match &client {
-                            Some(c) => ensure(&shared, c, &sink, &dir, addon, h == Have::Unknown, backoff),
+                            Some(c) => {
+                                ensure(&shared, c, &sink, &dir, addon, h == Have::Unknown, backoff)
+                            }
                             None => wait_retry(&sink, addon, backoff, "no HTTP client"),
                         }
                     }
@@ -225,7 +264,11 @@ fn worker_main(shared: Arc<Shared>, sink: EventSink, dir: PathBuf) {
         let q = shared.lock();
         if q.want == want && q.pro == pro && q.jobs.is_empty() && !q.shutdown {
             let _q = match next_wake {
-                Some(at) => shared.cv.wait_timeout(q, at.saturating_duration_since(Instant::now())).map(|r| r.0).unwrap_or_else(|p| p.into_inner().0),
+                Some(at) => shared
+                    .cv
+                    .wait_timeout(q, at.saturating_duration_since(Instant::now()))
+                    .map(|r| r.0)
+                    .unwrap_or_else(|p| p.into_inner().0),
                 None => shared.cv.wait(q).unwrap_or_else(|p| p.into_inner()),
             };
         }
@@ -270,10 +313,13 @@ fn file_timeout(size: u64) -> Duration {
 /// write). Only a change that sets the time back on purpose gets by, and
 /// whatever does that could as well change the app itself.
 fn present(path: &Path, file: &AddonFile, stamp: &str, lines: &mut Vec<String>) -> bool {
-    let Some(m) = fs::metadata(path).ok().filter(|m| m.len() == file.size) else { return false };
+    let Some(m) = fs::metadata(path).ok().filter(|m| m.len() == file.size) else {
+        return false;
+    };
     // Taken before the bytes are read: a write during the read moves the time past it.
     let line = stamp_line(file, &m);
-    let right = line.as_ref().is_some_and(|l| stamp.lines().any(|s| s == l)) || fs::File::open(path).is_ok_and(|f| file.matches_read(f));
+    let right = line.as_ref().is_some_and(|l| stamp.lines().any(|s| s == l))
+        || fs::File::open(path).is_ok_and(|f| file.matches_read(f));
     if right {
         lines.extend(line);
     }
@@ -285,7 +331,14 @@ fn present(path: &Path, file: &AddonFile, stamp: &str, lines: &mut Vec<String>) 
 /// such time: that file is read in full every time.
 fn stamp_line(file: &AddonFile, m: &fs::Metadata) -> Option<String> {
     let t = m.modified().ok()?.duration_since(UNIX_EPOCH).ok()?;
-    Some(format!("{} {} {} {} {}", env!("CARGO_PKG_VERSION"), file.sha256, m.len(), t.as_nanos(), file.name))
+    Some(format!(
+        "{} {} {} {} {}",
+        env!("CARGO_PKG_VERSION"),
+        file.sha256,
+        m.len(),
+        t.as_nanos(),
+        file.name
+    ))
 }
 
 /// Keep `lines` ([`present`]) as the stamp in `folder`, which held `stamp`,
@@ -297,7 +350,10 @@ fn save_stamp(folder: &Path, stamp: &str, lines: &mut [String]) -> String {
     let text: String = lines.iter().map(|l| format!("{l}\n")).collect();
     if text != stamp {
         if let Err(e) = fs::write(folder.join(STAMP), &text) {
-            crate::pinfo!("add-ons: no stamp in {} ({e}); its files are read in full next time", folder.display());
+            crate::pinfo!(
+                "add-ons: no stamp in {} ({e}); its files are read in full next time",
+                folder.display()
+            );
         }
     }
     text
@@ -306,40 +362,79 @@ fn save_stamp(folder: &Path, stamp: &str, lines: &mut [String]) -> String {
 /// Make every file of `addon` present: check the ones on disk, download the
 /// rest. Reports `Checking`, `Downloading`, `Waiting`, `Ready` or `Failed`,
 /// or `Unpinned` for one this build can't get.
-fn ensure(shared: &Shared, client: &Client, sink: &EventSink, dir: &Path, addon: &'static Addon, first: bool, backoff: Duration) -> Have {
+fn ensure(
+    shared: &Shared,
+    client: &Client,
+    sink: &EventSink,
+    dir: &Path,
+    addon: &'static Addon,
+    first: bool,
+    backoff: Duration,
+) -> Have {
     // A build made while one of its files is a placeholder: nothing it could
     // check, so nothing is fetched, however the switch came on (the Add-ons
     // page keeps it off). Off and on again gets the same answer.
     if !addon.pinned() {
-        crate::pwarn!("add-ons: {}: this build doesn't pin all of its files; nothing downloaded", addon.id);
-        sink.send(AppEvent::Addon { id: addon.id, status: Status::Unpinned });
+        crate::pwarn!(
+            "add-ons: {}: this build doesn't pin all of its files; nothing downloaded",
+            addon.id
+        );
+        sink.send(AppEvent::Addon {
+            id: addon.id,
+            status: Status::Unpinned,
+        });
         return Have::Failed;
     }
     if first {
-        sink.send(AppEvent::Addon { id: addon.id, status: Status::Checking });
+        sink.send(AppEvent::Addon {
+            id: addon.id,
+            status: Status::Checking,
+        });
     }
     let folder = version_dir(dir, addon);
     let total = addon.size();
     let stamp = fs::read_to_string(folder.join(STAMP)).unwrap_or_default();
     let mut lines = Vec::new();
-    let missing: Vec<&AddonFile> = addon.files.iter().filter(|f| !present(&folder.join(f.name), f, &stamp, &mut lines)).collect();
+    let missing: Vec<&AddonFile> = addon
+        .files
+        .iter()
+        .filter(|f| !present(&folder.join(f.name), f, &stamp, &mut lines))
+        .collect();
     // Kept now, so tries while the rest can't come don't read these again.
     let stamp = save_stamp(&folder, &stamp, &mut lines);
     // A Mac runs the Downloader's tools only with their execute bit, which
     // each gets as it is saved (below); one that lost it gets it back.
-    for f in addon.files.iter().filter(|f| runs(addon, f) && !missing.contains(f)) {
+    for f in addon
+        .files
+        .iter()
+        .filter(|f| runs(addon, f) && !missing.contains(f))
+    {
         if let Err(e) = make_runnable(&folder.join(f.name)) {
-            crate::pwarn!("add-ons: {}: {} can't be made runnable ({e})", addon.id, f.name);
+            crate::pwarn!(
+                "add-ons: {}: {} can't be made runnable ({e})",
+                addon.id,
+                f.name
+            );
         }
     }
     let mut done = total - missing.iter().map(|f| f.size).sum::<u64>();
     if !missing.is_empty() {
         if let Err(e) = fs::create_dir_all(&folder) {
-            crate::pwarn!("add-ons: {}: could not make {} ({e})", addon.id, folder.display());
-            sink.send(AppEvent::Addon { id: addon.id, status: Status::Failed });
+            crate::pwarn!(
+                "add-ons: {}: could not make {} ({e})",
+                addon.id,
+                folder.display()
+            );
+            sink.send(AppEvent::Addon {
+                id: addon.id,
+                status: Status::Failed,
+            });
             return Have::Failed;
         }
-        sink.send(AppEvent::Addon { id: addon.id, status: Status::Downloading { done, total } });
+        sink.send(AppEvent::Addon {
+            id: addon.id,
+            status: Status::Downloading { done, total },
+        });
     }
     for file in missing {
         // Switched off meanwhile, or Pro went: stop here (the caller deletes
@@ -357,48 +452,106 @@ fn ensure(shared: &Shared, client: &Client, sink: &EventSink, dir: &Path, addon:
         let mut last = Instant::now();
         let id = addon.id;
         let started = Instant::now();
-        let got = client.get_bytes(&url, file_timeout(file.size), file.size + 64 * 1024, move |n| {
-            if last.elapsed() >= PROGRESS_EVERY {
-                last = Instant::now();
-                progress_sink.send(AppEvent::Addon { id, status: Status::Downloading { done: base + n.min(file.size), total } });
-            }
-        });
+        let got = client.get_bytes(
+            &url,
+            file_timeout(file.size),
+            file.size + 64 * 1024,
+            move |n| {
+                if last.elapsed() >= PROGRESS_EVERY {
+                    last = Instant::now();
+                    progress_sink.send(AppEvent::Addon {
+                        id,
+                        status: Status::Downloading {
+                            done: base + n.min(file.size),
+                            total,
+                        },
+                    });
+                }
+            },
+        );
         match got {
             Ok((200, bytes)) if file.matches(&bytes) => {
                 let path = folder.join(file.name);
                 let part = folder.join(format!("{}.part", file.name));
-                let saved = fs::write(&part, &bytes).and_then(|_| if runs(addon, file) { make_runnable(&part) } else { Ok(()) }).and_then(|_| fs::rename(&part, &path));
+                let saved = fs::write(&part, &bytes)
+                    .and_then(|_| {
+                        if runs(addon, file) {
+                            make_runnable(&part)
+                        } else {
+                            Ok(())
+                        }
+                    })
+                    .and_then(|_| fs::rename(&part, &path));
                 if let Err(e) = saved {
                     let _ = fs::remove_file(&part);
                     crate::pwarn!("add-ons: {}: could not save {} ({e})", addon.id, file.name);
-                    sink.send(AppEvent::Addon { id: addon.id, status: Status::Failed });
+                    sink.send(AppEvent::Addon {
+                        id: addon.id,
+                        status: Status::Failed,
+                    });
                     return Have::Failed;
                 }
                 // Checked once more as saved (just written, so from the
                 // system's cache): the stamp only vouches for a file on disk
                 // that was read in full.
                 if !present(&path, file, "", &mut lines) {
-                    crate::pwarn!("add-ons: {}: {} isn't the same once saved", addon.id, file.name);
-                    sink.send(AppEvent::Addon { id: addon.id, status: Status::Failed });
+                    crate::pwarn!(
+                        "add-ons: {}: {} isn't the same once saved",
+                        addon.id,
+                        file.name
+                    );
+                    sink.send(AppEvent::Addon {
+                        id: addon.id,
+                        status: Status::Failed,
+                    });
                     return Have::Failed;
                 }
                 done += file.size;
-                crate::pinfo!("add-ons: {}: {} downloaded ({} bytes, {} ms)", addon.id, file.name, file.size, started.elapsed().as_millis());
-                sink.send(AppEvent::Addon { id: addon.id, status: Status::Downloading { done, total } });
+                crate::pinfo!(
+                    "add-ons: {}: {} downloaded ({} bytes, {} ms)",
+                    addon.id,
+                    file.name,
+                    file.size,
+                    started.elapsed().as_millis()
+                );
+                sink.send(AppEvent::Addon {
+                    id: addon.id,
+                    status: Status::Downloading { done, total },
+                });
             }
             Ok((200, bytes)) => {
-                crate::pwarn!("add-ons: {}: {} came back different ({} bytes, expected {}); not saved", addon.id, file.name, bytes.len(), file.size);
-                sink.send(AppEvent::Addon { id: addon.id, status: Status::Failed });
+                crate::pwarn!(
+                    "add-ons: {}: {} came back different ({} bytes, expected {}); not saved",
+                    addon.id,
+                    file.name,
+                    bytes.len(),
+                    file.size
+                );
+                sink.send(AppEvent::Addon {
+                    id: addon.id,
+                    status: Status::Failed,
+                });
                 return Have::Failed;
             }
             // GitHub busy or limiting: like no internet, try again later.
-            Ok((status, _)) if status >= 500 || status == 429 || status == 408 => return wait_retry(sink, addon, backoff, &format!("HTTP {status}")),
+            Ok((status, _)) if status >= 500 || status == 429 || status == 408 => {
+                return wait_retry(sink, addon, backoff, &format!("HTTP {status}"))
+            }
             Ok((status, _)) => {
-                crate::pwarn!("add-ons: {}: {} answered HTTP {status}", addon.id, file.name);
-                sink.send(AppEvent::Addon { id: addon.id, status: Status::Failed });
+                crate::pwarn!(
+                    "add-ons: {}: {} answered HTTP {status}",
+                    addon.id,
+                    file.name
+                );
+                sink.send(AppEvent::Addon {
+                    id: addon.id,
+                    status: Status::Failed,
+                });
                 return Have::Failed;
             }
-            Err(e @ (FetchError::Network(_) | FetchError::Timeout)) => return wait_retry(sink, addon, backoff, &e.to_string()),
+            Err(e @ (FetchError::Network(_) | FetchError::Timeout)) => {
+                return wait_retry(sink, addon, backoff, &e.to_string())
+            }
             Err(e) => {
                 crate::pwarn!("add-ons: {}: {} failed ({e})", addon.id, file.name);
                 return wait_retry(sink, addon, backoff, &e.to_string());
@@ -408,7 +561,10 @@ fn ensure(shared: &Shared, client: &Client, sink: &EventSink, dir: &Path, addon:
     save_stamp(&folder, &stamp, &mut lines);
     clear_old_versions(dir, addon);
     crate::pinfo!("add-ons: {}: ready", addon.id);
-    sink.send(AppEvent::Addon { id: addon.id, status: Status::Ready });
+    sink.send(AppEvent::Addon {
+        id: addon.id,
+        status: Status::Ready,
+    });
     Have::Complete
 }
 
@@ -437,14 +593,23 @@ pub fn make_runnable(_: &Path) -> io::Result<()> {
 }
 
 fn wait_retry(sink: &EventSink, addon: &Addon, backoff: Duration, why: &str) -> Have {
-    crate::pinfo!("add-ons: {}: waiting ({why}); trying again in {} s", addon.id, backoff.as_secs());
-    sink.send(AppEvent::Addon { id: addon.id, status: Status::Waiting });
+    crate::pinfo!(
+        "add-ons: {}: waiting ({why}); trying again in {} s",
+        addon.id,
+        backoff.as_secs()
+    );
+    sink.send(AppEvent::Addon {
+        id: addon.id,
+        status: Status::Waiting,
+    });
     Have::RetryAt(Instant::now() + backoff, (backoff * 2).min(LAST_RETRY))
 }
 
 /// Delete every version but this one (a newer release replaced them).
 fn clear_old_versions(dir: &Path, addon: &Addon) {
-    let Ok(entries) = fs::read_dir(dir.join(addon.id)) else { return };
+    let Ok(entries) = fs::read_dir(dir.join(addon.id)) else {
+        return;
+    };
     for e in entries.flatten() {
         if e.file_name() != addon.tag {
             let _ = fs::remove_dir_all(e.path());
@@ -465,7 +630,13 @@ fn remove(dir: &Path, addon: &Addon) {
         match fs::remove_dir_all(&folder) {
             Ok(()) => return crate::pinfo!("add-ons: {}: switched off, files deleted", addon.id),
             Err(_) if tries < 10 => std::thread::sleep(Duration::from_millis(200)),
-            Err(e) => return crate::pwarn!("add-ons: {}: could not delete {} ({e})", addon.id, folder.display()),
+            Err(e) => {
+                return crate::pwarn!(
+                    "add-ons: {}: could not delete {} ({e})",
+                    addon.id,
+                    folder.display()
+                )
+            }
         }
     }
 }
@@ -485,19 +656,48 @@ pub fn fetch_for_selftest(addon: &'static Addon, dir: &Path) -> (bool, String) {
         return (false, format!("could not make {}: {e}", folder.display()));
     }
     for file in addon.files.iter().filter(|f| f.pinned()) {
-        match client.get_bytes(&addon.url(file), file_timeout(file.size), file.size + 64 * 1024, |_| {}) {
+        match client.get_bytes(
+            &addon.url(file),
+            file_timeout(file.size),
+            file.size + 64 * 1024,
+            |_| {},
+        ) {
             Ok((200, bytes)) if file.matches(&bytes) => {
                 if let Err(e) = fs::write(folder.join(file.name), &bytes) {
                     return (false, format!("{}: could not save ({e})", file.name));
                 }
             }
-            Ok((status, bytes)) => return (false, format!("{}: HTTP {status}, {} bytes, not the expected file", file.name, bytes.len())),
+            Ok((status, bytes)) => {
+                return (
+                    false,
+                    format!(
+                        "{}: HTTP {status}, {} bytes, not the expected file",
+                        file.name,
+                        bytes.len()
+                    ),
+                )
+            }
             Err(e) => return (false, format!("{}: {e}", file.name)),
         }
     }
-    let unpinned: Vec<&str> = addon.files.iter().filter(|f| !f.pinned()).map(|f| f.name).collect();
-    let ok = unpinned.is_empty() && addon.files.iter().all(|f| present(&folder.join(f.name), f, "", &mut Vec::new()));
-    let mut said = format!("{} files, {} bytes from {} in {} ms", addon.files.len(), addon.size(), addon.tag, started.elapsed().as_millis());
+    let unpinned: Vec<&str> = addon
+        .files
+        .iter()
+        .filter(|f| !f.pinned())
+        .map(|f| f.name)
+        .collect();
+    let ok = unpinned.is_empty()
+        && addon
+            .files
+            .iter()
+            .all(|f| present(&folder.join(f.name), f, "", &mut Vec::new()));
+    let mut said = format!(
+        "{} files, {} bytes from {} in {} ms",
+        addon.files.len(),
+        addon.size(),
+        addon.tag,
+        started.elapsed().as_millis()
+    );
     if !unpinned.is_empty() {
         said += &format!("; not pinned in this build: {}", unpinned.join(", "));
     }
@@ -526,8 +726,16 @@ mod tests {
 
     #[test]
     fn a_big_file_gets_more_time() {
-        assert_eq!(file_timeout(869), FILE_TIMEOUT, "a small file: three minutes, as before");
-        assert_eq!(file_timeout(23_575_744), Duration::from_secs(539), "yt-dlp: 9 minutes");
+        assert_eq!(
+            file_timeout(869),
+            FILE_TIMEOUT,
+            "a small file: three minutes, as before"
+        );
+        assert_eq!(
+            file_timeout(23_575_744),
+            Duration::from_secs(539),
+            "yt-dlp: 9 minutes"
+        );
         assert_eq!(file_timeout(10_000_000_000), LONGEST_FILE);
     }
 
@@ -539,13 +747,22 @@ mod tests {
         let path = dir.join(file.name);
         fs::create_dir_all(&dir).unwrap();
         fs::write(&path, bytes).unwrap();
-        let set_time = |t| fs::File::options().write(true).open(&path).and_then(|f| f.set_modified(t)).unwrap();
+        let set_time = |t| {
+            fs::File::options()
+                .write(true)
+                .open(&path)
+                .and_then(|f| f.set_modified(t))
+                .unwrap()
+        };
         // No stamp yet: read in full, then stamped.
         let mut lines = Vec::new();
         assert!(present(&path, &file, "", &mut lines));
         let stamp = save_stamp(&dir, "", &mut lines);
         assert_eq!(fs::read_to_string(dir.join(STAMP)).unwrap(), stamp);
-        assert!(stamp.contains(file.sha256) && stamp.ends_with(" NOTICE.txt\n"), "{stamp}");
+        assert!(
+            stamp.contains(file.sha256) && stamp.ends_with(" NOTICE.txt\n"),
+            "{stamp}"
+        );
         // The next start takes the stamp's word, and has nothing to write.
         let mut again = Vec::new();
         assert!(present(&path, &file, &stamp, &mut again));
@@ -563,7 +780,10 @@ mod tests {
         set_time(t);
         assert!(present(&path, &file, &stamp, &mut Vec::new()));
         // A line made for another pin matches nothing.
-        let other = AddonFile { sha256: JAPANESE_READINGS.files[0].sha256, ..file };
+        let other = AddonFile {
+            sha256: JAPANESE_READINGS.files[0].sha256,
+            ..file
+        };
         assert!(!present(&path, &other, &stamp, &mut Vec::new()));
         let _ = fs::remove_dir_all(&dir);
     }

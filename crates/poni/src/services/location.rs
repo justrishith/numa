@@ -29,19 +29,21 @@ pub enum Located {
 
 /// Ask once, off the UI thread; the answer comes back as `AppEvent::Located`.
 pub fn locate(sink: EventSink) {
-    let spawned = std::thread::Builder::new().name("poni-location".into()).spawn(move || {
-        let _com = MtaGuard::new();
-        let found = ask();
-        crate::pinfo!(
-            "location: {}",
-            match found {
-                Located::At(..) => "found",
-                Located::Denied => "not allowed",
-                Located::Unknown => "unknown",
-            }
-        );
-        sink.send(AppEvent::Located(found));
-    });
+    let spawned = std::thread::Builder::new()
+        .name("poni-location".into())
+        .spawn(move || {
+            let _com = MtaGuard::new();
+            let found = ask();
+            crate::pinfo!(
+                "location: {}",
+                match found {
+                    Located::At(..) => "found",
+                    Located::Denied => "not allowed",
+                    Located::Unknown => "unknown",
+                }
+            );
+            sink.send(AppEvent::Located(found));
+        });
     if let Err(e) = spawned {
         crate::pwarn!("location: could not start a thread ({e})");
     }
@@ -51,7 +53,10 @@ pub fn locate(sink: EventSink) {
 const ACCESS_DENIED: i32 = 0x8007_0005_u32 as i32;
 
 fn ask() -> Located {
-    match Geolocator::RequestAccessAsync().map_err(|e| e.code().0).and_then(|op| wait(&op)) {
+    match Geolocator::RequestAccessAsync()
+        .map_err(|e| e.code().0)
+        .and_then(|op| wait(&op))
+    {
         Ok(GeolocationAccessStatus::Denied) | Err(ACCESS_DENIED) => return Located::Denied,
         Ok(_) => {}
         Err(code) => {
@@ -59,15 +64,27 @@ fn ask() -> Located {
             return Located::Unknown;
         }
     }
-    let Ok(geo) = Geolocator::new() else { return Located::Unknown };
+    let Ok(geo) = Geolocator::new() else {
+        return Located::Unknown;
+    };
     let _ = geo.SetDesiredAccuracy(PositionAccuracy::Default);
-    let pos = match geo.GetGeopositionAsync().map_err(|e| e.code().0).and_then(|op| wait(&op)) {
+    let pos = match geo
+        .GetGeopositionAsync()
+        .map_err(|e| e.code().0)
+        .and_then(|op| wait(&op))
+    {
         Ok(p) => p,
         Err(ACCESS_DENIED) => return Located::Denied,
         Err(_) => return Located::Unknown,
     };
-    match pos.Coordinate().and_then(|c| c.Point()).and_then(|p| p.Position()) {
-        Ok(b) if b.Latitude.is_finite() && b.Longitude.is_finite() => Located::At(b.Latitude, b.Longitude),
+    match pos
+        .Coordinate()
+        .and_then(|c| c.Point())
+        .and_then(|p| p.Position())
+    {
+        Ok(b) if b.Latitude.is_finite() && b.Longitude.is_finite() => {
+            Located::At(b.Latitude, b.Longitude)
+        }
         _ => Located::Unknown,
     }
 }

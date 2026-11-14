@@ -19,13 +19,29 @@ try {
   Add-Type -AssemblyName System.Speech
   $r = New-Object System.Speech.Recognition.SpeechRecognitionEngine
   $r.SetInputToDefaultAudioDevice()
-  $g = New-Object System.Speech.Recognition.DictationGrammar
-  $r.LoadGrammar($g)
+  # Do not run dictation while idle. Dictation turns background noise into
+  # arbitrary text, which is not a reliable wake-word detector.
+  $wakeChoices = New-Object System.Speech.Recognition.Choices
+  foreach ($phrase in @(
+    "hey numa", "hey numah", "hey nooma", "hey new ma", "hey n numa",
+    "he pneuma", "hey pneuma", "he now", "hey now"
+  )) { $wakeChoices.Add($phrase) }
+  $wakeBuilder = New-Object System.Speech.Recognition.GrammarBuilder
+  $wakeBuilder.Append($wakeChoices)
+  $wakeGrammar = New-Object System.Speech.Recognition.Grammar($wakeBuilder)
+  $r.LoadGrammar($wakeGrammar)
+  [Console]::Out.WriteLine("__NUMA_WAKE_READY__")
+  [Console]::Out.Flush()
   while ($true) {
     $x = $r.Recognize()
     if ($x -and $x.Text) {
       [Console]::Out.WriteLine($x.Text)
       [Console]::Out.Flush()
+      # Poni records and sends the follow-up command to Deepgram. Do not run
+      # SAPI dictation here: it produces unreliable background transcriptions.
+      $r.UnloadGrammar($wakeGrammar)
+      Start-Sleep -Seconds 2
+      $r.LoadGrammar($wakeGrammar)
     }
   }
 } catch {
@@ -37,12 +53,12 @@ try {
 /// How long a bare "hey numa" keeps listening for a command. The recognizer
 /// only reports a phrase after the speaker pauses, so "…hey numa" and the
 /// command that follows it almost always arrive as two separate lines.
-pub const FOLLOW_UP: Duration = Duration::from_secs(8);
+pub const FOLLOW_UP: Duration = Duration::from_secs(2);
 /// The same window in seconds, for the UI's own expiry.
-pub const FOLLOW_UP_SECS: f64 = 8.0;
+pub const FOLLOW_UP_SECS: f64 = 2.0;
 
 /// Pronunciation variants the local recognizer returns for "Numa".
-const WAKE_PHRASES: [&str; 7] = [
+const WAKE_PHRASES: [&str; 9] = [
     "hey numa",
     "hey numah",
     "hey nooma",
@@ -51,6 +67,9 @@ const WAKE_PHRASES: [&str; 7] = [
     // This user's enrollment recording is consistently heard as "he pneuma".
     "he pneuma",
     "hey pneuma",
+    // SAPI heard the live microphone as these variants during verification.
+    "he now",
+    "hey now",
 ];
 
 /// One line from the recognizer, already resolved against the wake word.
@@ -133,11 +152,16 @@ pub fn start(sink: EventSink) -> Result<WakeListener, String> {
     let thread = std::thread::Builder::new()
         .name("numa-wake".into())
         .spawn(move || {
+            // A machine with no microphone makes the recognizer exit at once.
+            // Retrying once a second then floods the log and burns CPU, so a
+            // listener that dies young backs off instead.
+            let mut backoff = Duration::from_secs(1);
             while !thread_stop.load(Ordering::Relaxed) {
                 if thread_muted.load(Ordering::Relaxed) {
                     std::thread::sleep(std::time::Duration::from_millis(200));
                     continue;
                 }
+                let started_at = Instant::now();
                 let spawned = Command::new("powershell.exe")
                     .args([
                         "-NoProfile",
@@ -184,10 +208,17 @@ pub fn start(sink: EventSink) -> Result<WakeListener, String> {
                         sink.send(AppEvent::Log(format!("NUMA wake listener error: {error}")));
                         break;
                     }
+                    if text.trim() == "__NUMA_WAKE_READY__" {
+                        sink.send(AppEvent::Log(
+                            "NUMA wake listener ready; microphone attached".into(),
+                        ));
+                        continue;
+                    }
                     let normalized = normalize(&text);
                     if normalized.is_empty() {
                         continue;
                     }
+                    sink.send(AppEvent::Log(format!("NUMA wake recognized: {text}")));
                     if thread_muted.load(Ordering::Relaxed) {
                         continue;
                     }
@@ -218,8 +249,19 @@ pub fn start(sink: EventSink) -> Result<WakeListener, String> {
                     }
                 }
                 if !thread_stop.load(Ordering::Relaxed) && !thread_muted.load(Ordering::Relaxed) {
-                    sink.send(AppEvent::Log("NUMA wake listener restarted".into()));
-                    std::thread::sleep(std::time::Duration::from_millis(500));
+                    let lived = started_at.elapsed();
+                    if lived < Duration::from_secs(5) {
+                        sink.send(AppEvent::Log(format!(
+                            "NUMA wake listener: no microphone available; retrying in {}s",
+                            backoff.as_secs()
+                        )));
+                        backoff =
+                            (backoff * 2).clamp(Duration::from_secs(1), Duration::from_secs(30));
+                    } else {
+                        sink.send(AppEvent::Log("NUMA wake listener restarted".into()));
+                        backoff = Duration::from_secs(1);
+                    }
+                    std::thread::sleep(backoff);
                 }
             }
         })
@@ -293,6 +335,11 @@ mod tests {
             hear("he pneuma play music", false),
             Line::Wake(Some("play music".into()))
         );
+        assert_eq!(hear("he now", false), Line::Wake(None));
+        assert_eq!(
+            hear("he now open spotify", false),
+            Line::Wake(Some("open spotify".into()))
+        );
     }
 
     #[test]
@@ -329,6 +376,6 @@ mod tests {
     #[test]
     fn the_window_is_seconds_not_minutes() {
         assert_eq!(FOLLOW_UP_SECS, FOLLOW_UP.as_secs_f64());
-        assert!((5.0..=15.0).contains(&FOLLOW_UP_SECS));
+        assert!((1.0..=5.0).contains(&FOLLOW_UP_SECS));
     }
 }

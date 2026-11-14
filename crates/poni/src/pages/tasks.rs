@@ -118,11 +118,21 @@ pub fn draw(ui: &mut Ui, st: &mut AppState, area: Rect) {
     }
     // "Undo" lapses after UNDO_SECS, but never under a press that is about to click it.
     let undo_id = wid("tasks.undo");
-    let undo_held = ui.input.pressed_id == Some(undo_id) || ui.input.clicked.is_some_and(|(id, _)| id == undo_id);
-    if anim.undo.as_ref().is_some_and(|(_, t0)| now - t0 >= UNDO_SECS) && !undo_held {
+    let undo_held = ui.input.pressed_id == Some(undo_id)
+        || ui.input.clicked.is_some_and(|(id, _)| id == undo_id);
+    if anim
+        .undo
+        .as_ref()
+        .is_some_and(|(_, t0)| now - t0 >= UNDO_SECS)
+        && !undo_held
+    {
         anim.undo = None;
     }
-    let dt = if stale { 0.0 } else { (now - anim.last_draw).clamp(0.0, 0.05) as f32 };
+    let dt = if stale {
+        0.0
+    } else {
+        (now - anim.last_draw).clamp(0.0, 0.05) as f32
+    };
     let mut moving = false;
     let day_start = st.day_start_unix();
     if st.store.tasks.tasks.len() >= MAX_TASKS {
@@ -132,9 +142,21 @@ pub fn draw(ui: &mut Ui, st: &mut AppState, area: Rect) {
 
     // ---- Input: the list's first row, sharing its checkbox and text columns.
     let input_r = Rect::new(area.x, area.y, area.w, INPUT_H);
-    let placeholder = if full { "Task list is full" } else { "Add a task, Enter to save" };
+    let placeholder = if full {
+        "Task list is full"
+    } else {
+        "Add a task, Enter to save"
+    };
     let accent = st.accent;
-    let resp = ui.text_input_row(wid("tasks.input"), input_r, &mut st.ui.task_input, placeholder, MAX_TASK_LEN, accent, Some(Icon::Plus));
+    let resp = ui.text_input_row(
+        wid("tasks.input"),
+        input_r,
+        &mut st.ui.task_input,
+        placeholder,
+        MAX_TASK_LEN,
+        accent,
+        Some(Icon::Plus),
+    );
     if resp.submitted {
         submit(ui, st, &mut anim, day_start);
     }
@@ -142,10 +164,20 @@ pub fn draw(ui: &mut Ui, st: &mut AppState, area: Rect) {
     // ---- List.
     let view = Rect::new(area.x, area.y + LIST_TOP, area.w, LIST_H);
     let footer_r = Rect::new(area.x, area.y + HEIGHT - FOOTER_H, area.w, FOOTER_H);
-    let mut items: Vec<(u64, (bool, String))> = st.store.tasks.display_order(day_start).into_iter().map(|t| (t.id, (t.done, t.text.clone()))).collect();
+    let mut items: Vec<(u64, (bool, String))> = st
+        .store
+        .tasks
+        .display_order(day_start)
+        .into_iter()
+        .map(|t| (t.id, (t.done, t.text.clone())))
+        .collect();
     // Keep the order of the last toggle while the pointer is still over the list.
     let over_list = ui.hovered(view);
-    if !anim.frozen.as_ref().is_some_and(|(_, t0)| over_list && now - t0 < FREEZE_S) {
+    if !anim
+        .frozen
+        .as_ref()
+        .is_some_and(|(_, t0)| over_list && now - t0 < FREEZE_S)
+    {
         anim.frozen = None;
     }
     if let Some((order, _)) = &anim.frozen {
@@ -154,7 +186,13 @@ pub fn draw(ui: &mut Ui, st: &mut AppState, area: Rect) {
 
     if items.is_empty() {
         let hint_area = Rect::new(area.x, view.y, area.w, HEIGHT - LIST_TOP);
-        super::empty_state(ui, hint_area, Icon::ListChecks, "Nothing on your list", "Done tasks clear at the end of the day");
+        super::empty_state(
+            ui,
+            hint_area,
+            Icon::ListChecks,
+            "Nothing on your list",
+            "Done tasks clear at the end of the day",
+        );
         st.ui.task_scroll = 0.0;
         anim.scroll = 0.0;
         anim.rows.clear();
@@ -168,7 +206,11 @@ pub fn draw(ui: &mut Ui, st: &mut AppState, area: Rect) {
             st.ui.task_scroll -= notches * WHEEL_STEP;
         }
         st.ui.task_scroll = st.ui.task_scroll.clamp(0.0, max_scroll);
-        let (scroll, m) = if stale { (st.ui.task_scroll, false) } else { glide(anim.scroll, st.ui.task_scroll, dt) };
+        let (scroll, m) = if stale {
+            (st.ui.task_scroll, false)
+        } else {
+            glide(anim.scroll, st.ui.task_scroll, dt)
+        };
         anim.scroll = scroll.clamp(0.0, max_scroll);
         moving |= m;
         let scrolling = m;
@@ -185,12 +227,23 @@ pub fn draw(ui: &mut Ui, st: &mut AppState, area: Rect) {
             };
             moving |= m;
             rows.insert(*id, y);
-            let appear = anim.appeared.get(id).map(|&t0| ((now - t0) / APPEAR_S).clamp(0.0, 1.0) as f32).unwrap_or(1.0);
+            let appear = anim
+                .appeared
+                .get(id)
+                .map(|&t0| ((now - t0) / APPEAR_S).clamp(0.0, 1.0) as f32)
+                .unwrap_or(1.0);
             if appear < 1.0 {
                 moving = true;
             }
-            let row = Rect::new(area.x, view.y + y - anim.scroll + 6.0 * (1.0 - ease_out_cubic(appear)), area.w, ROW_H);
-            let Some(hit) = intersect(row, view) else { continue };
+            let row = Rect::new(
+                area.x,
+                view.y + y - anim.scroll + 6.0 * (1.0 - ease_out_cubic(appear)),
+                area.w,
+                ROW_H,
+            );
+            let Some(hit) = intersect(row, view) else {
+                continue;
+            };
             let pop = match anim.toggled {
                 Some((tid, t0)) if tid == *id => {
                     let t = ((now - t0) / POP_S).clamp(0.0, 1.0) as f32;
@@ -219,7 +272,11 @@ pub fn draw(ui: &mut Ui, st: &mut AppState, area: Rect) {
             fade(ui, Rect::new(view.x, view.y, view.w, FADE), true);
         }
         if anim.scroll < max_scroll - 0.5 {
-            fade(ui, Rect::new(view.x, view.bottom() - FADE, view.w, FADE), false);
+            fade(
+                ui,
+                Rect::new(view.x, view.bottom() - FADE, view.w, FADE),
+                false,
+            );
         }
         ui.c.unclip();
         anim.rows = rows;
@@ -264,14 +321,22 @@ fn submit(ui: &mut Ui, st: &mut AppState, anim: &mut ListAnim, day_start: i64) {
         ui.input.caret = 0;
         return;
     }
-    let Some(id) = st.store.tasks.add(&st.ui.task_input, st.unix) else { return };
+    let Some(id) = st.store.tasks.add(&st.ui.task_input, st.unix) else {
+        return;
+    };
     st.ui.task_input.clear();
     ui.input.caret = 0;
     st.save();
     anim.appeared.insert(id, st.now);
     // The new row goes to its sorted place, so stop holding the old order.
     anim.frozen = None;
-    if let Some(idx) = st.store.tasks.display_order(day_start).iter().position(|t| t.id == id) {
+    if let Some(idx) = st
+        .store
+        .tasks
+        .display_order(day_start)
+        .iter()
+        .position(|t| t.id == id)
+    {
         let y = idx as f32 * ROW_H;
         if y + ROW_H > st.ui.task_scroll + LIST_H {
             st.ui.task_scroll = y + ROW_H - LIST_H;
@@ -298,7 +363,9 @@ fn offer_undo(anim: &mut ListAnim, removed: Vec<Task>, now: f64) {
 
 /// Put the snapshot back (open tasks first should the list have filled up since).
 fn restore(st: &mut AppState, anim: &mut ListAnim) {
-    let Some((mut tasks, _)) = anim.undo.take() else { return };
+    let Some((mut tasks, _)) = anim.undo.take() else {
+        return;
+    };
     tasks.sort_by_key(|t| (t.done, std::cmp::Reverse(t.done_unix)));
     let mut restored = false;
     for t in tasks {
@@ -323,7 +390,10 @@ fn restore(st: &mut AppState, anim: &mut ListAnim) {
 /// those hidden ones so the user isn't blocked by tasks they cannot see.
 fn make_room(st: &mut AppState, day_start: i64) {
     let before = st.store.tasks.tasks.len();
-    st.store.tasks.tasks.retain(|t| !t.done || t.done_unix.is_some_and(|d| d >= day_start));
+    st.store
+        .tasks
+        .tasks
+        .retain(|t| !t.done || t.done_unix.is_some_and(|d| d >= day_start));
     let removed = before - st.store.tasks.tasks.len();
     if removed > 0 {
         crate::pinfo!("tasks: list was full, removed {removed} done tasks from earlier days");
@@ -339,7 +409,16 @@ enum RowAction {
 
 /// One task row. `hit` is the part of `row` inside the list viewport `view`.
 #[allow(clippy::too_many_arguments)]
-fn draw_row(ui: &mut Ui, row: Rect, hit: Rect, view: Rect, id: u64, done: bool, text: &str, pop: Option<f32>) -> RowAction {
+fn draw_row(
+    ui: &mut Ui,
+    row: Rect,
+    hit: Rect,
+    view: Rect,
+    id: u64,
+    done: bool,
+    text: &str,
+    pop: Option<f32>,
+) -> RowAction {
     let mut action = RowAction::None;
     let resp = ui.button(wid_n("tasks.row", id), hit);
     if resp.pressed {
@@ -353,7 +432,9 @@ fn draw_row(ui: &mut Ui, row: Rect, hit: Rect, view: Rect, id: u64, done: bool, 
     let cy = row.center().y;
 
     // Checkbox (pops when toggled).
-    let scale = pop.map(|t| 1.0 + 0.22 * (t * std::f32::consts::PI).sin()).unwrap_or(1.0);
+    let scale = pop
+        .map(|t| 1.0 + 0.22 * (t * std::f32::consts::PI).sin())
+        .unwrap_or(1.0);
     let c = Point::new(row.x + MARK_X, cy);
     let size = 18.0 * scale;
     let icon_r = Rect::from_center(c, size, size);
@@ -361,28 +442,52 @@ fn draw_row(ui: &mut Ui, row: Rect, hit: Rect, view: Rect, id: u64, done: bool, 
         ui.c.fill_circle(c, size * 9.0 / 24.0, palette::GREEN.with_alpha(0.16));
         ui.c.icon(Icon::CheckCircle, icon_r, palette::GREEN);
     } else {
-        ui.c.icon(Icon::Circle, icon_r, if resp.hovered { palette::TEXT_DIM } else { palette::TEXT_FAINT });
+        ui.c.icon(
+            Icon::Circle,
+            icon_r,
+            if resp.hovered {
+                palette::TEXT_DIM
+            } else {
+                palette::TEXT_FAINT
+            },
+        );
     }
 
     // Text, struck through when done (the line sweeps in right after checking).
     let tx = row.x + TEXT_X;
     let tw = (row.w - TEXT_X - 40.0).max(0.0);
-    let style = TextStyle::body().color(if done { palette::TEXT_FAINT } else { palette::TEXT });
+    let style = TextStyle::body().color(if done {
+        palette::TEXT_FAINT
+    } else {
+        palette::TEXT
+    });
     ui.c.text(text, Rect::new(tx, row.y, tw, row.h), &style);
     if done && tw > 0.0 {
         let w = ui.c.measure(text, &style, tw).0.min(tw);
         let sweep = pop.map(ease_out_cubic).unwrap_or(1.0);
         if sweep > 0.0 {
             let y = cy + 1.0;
-            ui.c.line(Point::new(tx - 1.0, y), Point::new(tx - 1.0 + (w + 2.0) * sweep, y), palette::TEXT_FAINT, 1.2);
+            ui.c.line(
+                Point::new(tx - 1.0, y),
+                Point::new(tx - 1.0 + (w + 2.0) * sweep, y),
+                palette::TEXT_FAINT,
+                1.2,
+            );
         }
     }
 
     // Delete, only while hovering a fully visible row.
     let del = Rect::new(row.right() - 32.0, cy - 13.0, 26.0, 26.0);
     if resp.hovered && del.y >= view.y && del.bottom() <= view.bottom() {
-        let color = if ui.hovered(del) { palette::RED } else { palette::TEXT_DIM };
-        if ui.icon_button(wid_n("tasks.del", id), del, Icon::Trash, color, 14.0).clicked {
+        let color = if ui.hovered(del) {
+            palette::RED
+        } else {
+            palette::TEXT_DIM
+        };
+        if ui
+            .icon_button(wid_n("tasks.del", id), del, Icon::Trash, color, 14.0)
+            .clicked
+        {
             action = RowAction::Delete;
         }
     }
@@ -400,7 +505,11 @@ pub(crate) fn fade(ui: &mut Ui, r: Rect, top: bool) {
     for k in 0..FADE_STEPS {
         // k = 0 is the strip at the edge.
         let a = 0.92 * (1.0 - (k as f32 + 0.5) / FADE_STEPS as f32).powf(1.4);
-        let y = if top { r.y + k as f32 * step } else { r.bottom() - (k as f32 + 1.0) * step };
+        let y = if top {
+            r.y + k as f32 * step
+        } else {
+            r.bottom() - (k as f32 + 1.0) * step
+        };
         ui.c.fill_rect(Rect::new(r.x, y, r.w, step), palette::ISLAND.with_alpha(a));
     }
 }
@@ -411,7 +520,15 @@ fn undo_pill(ui: &mut Ui, st: &mut AppState, anim: &mut ListAnim, id: WidgetId, 
     let accent = st.accent;
     let w = ui.pill_width("Undo", true, true);
     let r = Rect::new(row.right() - w, row.y, w, row.h);
-    let clicked = ui.pill(id, r, "Undo", Some(Icon::Undo), PillStyle::UtilityAccent(accent)).clicked;
+    let clicked = ui
+        .pill(
+            id,
+            r,
+            "Undo",
+            Some(Icon::Undo),
+            PillStyle::UtilityAccent(accent),
+        )
+        .clicked;
     if clicked {
         restore(st, anim);
     }
@@ -420,11 +537,30 @@ fn undo_pill(ui: &mut Ui, st: &mut AppState, anim: &mut ListAnim, id: WidgetId, 
 
 /// "1/3 done today" with a small ring, then "Clear done" when anything is
 /// done, or "Undo" for a few seconds after a removal.
-fn draw_footer(ui: &mut Ui, st: &mut AppState, r: Rect, day_start: i64, full: bool, anim: &mut ListAnim, undo_id: WidgetId) {
+fn draw_footer(
+    ui: &mut Ui,
+    st: &mut AppState,
+    r: Rect,
+    day_start: i64,
+    full: bool,
+    anim: &mut ListAnim,
+    undo_id: WidgetId,
+) {
     let (done, total) = st.store.tasks.today_progress(day_start);
     let cy = r.center().y;
-    let frac = if total > 0 { done as f32 / total as f32 } else { 0.0 };
-    ui.c.ring(Point::new(r.x + MARK_X, cy), 6.0, 2.2, frac, RING_TRACK, palette::GREEN);
+    let frac = if total > 0 {
+        done as f32 / total as f32
+    } else {
+        0.0
+    };
+    ui.c.ring(
+        Point::new(r.x + MARK_X, cy),
+        6.0,
+        2.2,
+        frac,
+        RING_TRACK,
+        palette::GREEN,
+    );
 
     let show_clear = done > 0;
     let mut text_right = r.right();
@@ -434,8 +570,24 @@ fn draw_footer(ui: &mut Ui, st: &mut AppState, r: Rect, day_start: i64, full: bo
         let w = ui.pill_width("Clear done", false, true);
         let pr = Rect::new(r.right() - w, r.y, w, r.h);
         text_right = pr.x - 12.0;
-        if ui.pill(wid("tasks.clear"), pr, "Clear done", None, PillStyle::Utility).clicked {
-            let removed: Vec<Task> = st.store.tasks.tasks.iter().filter(|t| t.done).cloned().collect();
+        if ui
+            .pill(
+                wid("tasks.clear"),
+                pr,
+                "Clear done",
+                None,
+                PillStyle::Utility,
+            )
+            .clicked
+        {
+            let removed: Vec<Task> = st
+                .store
+                .tasks
+                .tasks
+                .iter()
+                .filter(|t| t.done)
+                .cloned()
+                .collect();
             if st.store.tasks.clear_done() > 0 {
                 // The scroll offset is clamped to the shorter list on the next frame.
                 st.save();
@@ -449,7 +601,10 @@ fn draw_footer(ui: &mut Ui, st: &mut AppState, r: Rect, day_start: i64, full: bo
     let tx = r.x + TEXT_X;
     let text_r = Rect::new(tx, r.y, (text_right - tx).max(0.0), r.h);
     let (text, color) = if full && show_clear {
-        ("List is full — clear done tasks to add more".to_string(), palette::ORANGE)
+        (
+            "List is full — clear done tasks to add more".to_string(),
+            palette::ORANGE,
+        )
     } else if full {
         (format!("List is full ({MAX_TASKS} tasks)"), palette::ORANGE)
     } else if total > 0 && done == total {
@@ -467,7 +622,10 @@ mod tests {
     #[test]
     fn rect_intersection() {
         let a = Rect::new(0.0, 0.0, 10.0, 10.0);
-        assert_eq!(intersect(a, Rect::new(5.0, 5.0, 10.0, 10.0)), Some(Rect::new(5.0, 5.0, 5.0, 5.0)));
+        assert_eq!(
+            intersect(a, Rect::new(5.0, 5.0, 10.0, 10.0)),
+            Some(Rect::new(5.0, 5.0, 5.0, 5.0))
+        );
         assert_eq!(intersect(a, Rect::new(10.0, 0.0, 5.0, 5.0)), None);
     }
 
@@ -495,7 +653,13 @@ mod tests {
 
     #[test]
     fn undo_snapshots_accumulate() {
-        let task = |id: u64| Task { id, text: format!("t{id}"), done: false, created_unix: 0, done_unix: None };
+        let task = |id: u64| Task {
+            id,
+            text: format!("t{id}"),
+            done: false,
+            created_unix: 0,
+            done_unix: None,
+        };
         let mut anim = ListAnim::default();
         offer_undo(&mut anim, vec![task(1)], 1.0);
         offer_undo(&mut anim, vec![task(2)], 3.0);

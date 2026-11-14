@@ -30,7 +30,11 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{mpsc, Arc};
 use std::time::{Duration, Instant};
 
-const USER_AGENT: &str = concat!("OyenzaStudio/", env!("CARGO_PKG_VERSION"), " (+https://github.com/lucacadalora/oyenza-studio)");
+const USER_AGENT: &str = concat!(
+    "OyenzaStudio/",
+    env!("CARGO_PKG_VERSION"),
+    " (+https://github.com/lucacadalora/oyenza-studio)"
+);
 const ME_TIMEOUT: Duration = Duration::from_secs(10);
 /// A new session's first turn is voiced before it comes back.
 const START_TIMEOUT: Duration = Duration::from_secs(30);
@@ -72,13 +76,21 @@ impl Kit {
         });
         if !sent {
             self.worker = None;
-            sink.send(AppEvent::Ielts(Box::new(Reply::Failed { call: kind, problem: Problem::Server, say: Vec::new() })));
+            sink.send(AppEvent::Ielts(Box::new(Reply::Failed {
+                call: kind,
+                problem: Problem::Server,
+                say: Vec::new(),
+            })));
         }
     }
 
     /// The page is closed: the worker ends once nothing is in flight.
     pub fn rest(&mut self) {
-        if self.worker.as_ref().is_some_and(|w| w.busy.load(Ordering::SeqCst) == 0) {
+        if self
+            .worker
+            .as_ref()
+            .is_some_and(|w| w.busy.load(Ordering::SeqCst) == 0)
+        {
             self.worker = None;
         }
     }
@@ -124,7 +136,10 @@ impl Kit {
     pub fn stop_record(&mut self) -> Result<(PathBuf, f32), MicIssue> {
         if self.recording_stand_in.take().is_some() {
             let path = self.stand_in.clone().unwrap_or_default();
-            let secs = std::fs::read(&path).ok().and_then(|b| ielts::wav_info(&b)).map_or(0.0, |i| i.secs);
+            let secs = std::fs::read(&path)
+                .ok()
+                .and_then(|b| ielts::wav_info(&b))
+                .map_or(0.0, |i| i.secs);
             return Ok((path, secs));
         }
         match self.mic.take().map(Mic::stop) {
@@ -224,23 +239,40 @@ impl Worker {
         let (tx, rx) = mpsc::channel::<Call>();
         let busy = Arc::new(AtomicUsize::new(0));
         let left = busy.clone();
-        let spawned = std::thread::Builder::new().name("poni-ielts".into()).spawn(move || {
-            let _com = MtaGuard::new();
-            let base = api.as_ref().map_or(ielts::BASE.to_string(), |a| a.0.clone());
-            let fixed = api.is_some();
-            // The ladder changes with every session: never from Windows' cache.
-            let mut w = Client::uncached(USER_AGENT)
-                .map(|client| Calls { client, base, key: api.map(|a| a.1), fixed, turns: 0 })
-                .map_err(|e| crate::pwarn!("ielts: no HTTP client ({e})"));
-            // Ends once the page lets the worker go (its sender drops). Every
-            // call gets an answer, even without a client.
-            for call in rx {
-                let kind = call.kind();
-                let reply = w.as_mut().map_or(Reply::Failed { call: kind, problem: Problem::Offline, say: Vec::new() }, |w| w.run(call));
-                left.fetch_sub(1, Ordering::SeqCst);
-                sink.send(AppEvent::Ielts(Box::new(reply)));
-            }
-        });
+        let spawned = std::thread::Builder::new()
+            .name("poni-ielts".into())
+            .spawn(move || {
+                let _com = MtaGuard::new();
+                let base = api
+                    .as_ref()
+                    .map_or(ielts::BASE.to_string(), |a| a.0.clone());
+                let fixed = api.is_some();
+                // The ladder changes with every session: never from Windows' cache.
+                let mut w = Client::uncached(USER_AGENT)
+                    .map(|client| Calls {
+                        client,
+                        base,
+                        key: api.map(|a| a.1),
+                        fixed,
+                        turns: 0,
+                    })
+                    .map_err(|e| crate::pwarn!("ielts: no HTTP client ({e})"));
+                // Ends once the page lets the worker go (its sender drops). Every
+                // call gets an answer, even without a client.
+                for call in rx {
+                    let kind = call.kind();
+                    let reply = w.as_mut().map_or(
+                        Reply::Failed {
+                            call: kind,
+                            problem: Problem::Offline,
+                            say: Vec::new(),
+                        },
+                        |w| w.run(call),
+                    );
+                    left.fetch_sub(1, Ordering::SeqCst);
+                    sink.send(AppEvent::Ielts(Box::new(reply)));
+                }
+            });
         match spawned {
             Ok(_) => Some(Worker { tx, busy }),
             Err(e) => {
@@ -265,10 +297,18 @@ impl Calls {
     fn run(&mut self, call: Call) -> Reply {
         let kind = call.kind();
         let started = Instant::now();
-        let reply = self.answer(call).unwrap_or_else(|(problem, say)| Reply::Failed { call: kind, problem, say });
+        let reply = self
+            .answer(call)
+            .unwrap_or_else(|(problem, say)| Reply::Failed {
+                call: kind,
+                problem,
+                say,
+            });
         let ms = started.elapsed().as_millis();
         match &reply {
-            Reply::Failed { problem, .. } => crate::pwarn!("ielts: {kind:?} didn't go through ({problem:?}) after {ms} ms"),
+            Reply::Failed { problem, .. } => {
+                crate::pwarn!("ielts: {kind:?} didn't go through ({problem:?}) after {ms} ms")
+            }
             _ => crate::pinfo!("ielts: {kind:?} answered in {ms} ms"),
         }
         reply
@@ -276,14 +316,29 @@ impl Calls {
 
     fn answer(&mut self, call: Call) -> Result<Reply, (Problem, Vec<ielts::Say>)> {
         let plain = |p: Problem| (p, Vec::new());
-        let tz = oyenza::tz_param(oyenza::offset_minutes(&crate::clock::local_now(), crate::clock::unix_now()));
+        let tz = oyenza::tz_param(oyenza::offset_minutes(
+            &crate::clock::local_now(),
+            crate::clock::unix_now(),
+        ));
         match call {
             Call::Me => {
-                let body = self.send(Method::Get, &ielts::me_url(&self.base, &tz), None, ME_TIMEOUT)?;
-                ielts::parse_me(&body).map(Reply::Me).ok_or(plain(Problem::Server))
+                let body = self.send(
+                    Method::Get,
+                    &ielts::me_url(&self.base, &tz),
+                    None,
+                    ME_TIMEOUT,
+                )?;
+                ielts::parse_me(&body)
+                    .map(Reply::Me)
+                    .ok_or(plain(Problem::Server))
             }
             Call::Start { level, spice } => {
-                let body = self.send(Method::Post, &ielts::session_url(&self.base), Some(&ielts::session_body(level, spice, &tz)), START_TIMEOUT)?;
+                let body = self.send(
+                    Method::Post,
+                    &ielts::session_url(&self.base),
+                    Some(&ielts::session_body(level, spice, &tz)),
+                    START_TIMEOUT,
+                )?;
                 let mut s = ielts::parse_started(&body).ok_or(plain(Problem::Server))?;
                 self.save(&mut s.turn, None);
                 // Oyen's thinking lines, kept for the session's waits.
@@ -291,8 +346,15 @@ impl Calls {
                 for (i, f) in s.fillers.iter_mut().enumerate() {
                     f.save_clip(&dir, &format!("f{i}"));
                 }
-                crate::pinfo!("ielts: a session at level {level} began ({} thinking lines)", s.fillers.len());
-                Ok(Reply::Started { id: s.id, turn: s.turn, fillers: s.fillers })
+                crate::pinfo!(
+                    "ielts: a session at level {level} began ({} thinking lines)",
+                    s.fillers.len()
+                );
+                Ok(Reply::Started {
+                    id: s.id,
+                    turn: s.turn,
+                    fillers: s.fillers,
+                })
             }
             Call::Answer { id, wav, secs } => {
                 let raw = std::fs::read(&wav).map_err(|_| plain(Problem::Server))?;
@@ -303,23 +365,50 @@ impl Calls {
                 }
                 let json = ielts::answer_body(&bytes, secs);
                 drop(bytes);
-                crate::pinfo!("ielts: sending a {secs:.1} s answer ({} KB)", json.len() / 1024);
-                let body = self.send(Method::Post, &ielts::answer_url(&self.base, &id), Some(&json), ANSWER_TIMEOUT)?;
+                crate::pinfo!(
+                    "ielts: sending a {secs:.1} s answer ({} KB)",
+                    json.len() / 1024
+                );
+                let body = self.send(
+                    Method::Post,
+                    &ielts::answer_url(&self.base, &id),
+                    Some(&json),
+                    ANSWER_TIMEOUT,
+                )?;
                 drop(json);
                 let mut a = ielts::parse_answered(&body).ok_or(plain(Problem::Server))?;
                 self.save_reply(&mut a);
-                Ok(Reply::Answered { heard: a.heard, turn: a.turn, done: a.done, result: a.result })
+                Ok(Reply::Answered {
+                    heard: a.heard,
+                    turn: a.turn,
+                    done: a.done,
+                    result: a.result,
+                })
             }
             Call::Skip { id } => {
-                let body = self.send(Method::Post, &ielts::skip_url(&self.base, &id), Some("{}"), START_TIMEOUT)?;
+                let body = self.send(
+                    Method::Post,
+                    &ielts::skip_url(&self.base, &id),
+                    Some("{}"),
+                    START_TIMEOUT,
+                )?;
                 // The next question, or (skipping the last) the verdict.
                 let mut a = ielts::parse_skipped(&body).ok_or(plain(Problem::Server))?;
                 self.save_reply(&mut a);
-                Ok(Reply::Skipped { turn: a.turn, done: a.done, result: a.result })
+                Ok(Reply::Skipped {
+                    turn: a.turn,
+                    done: a.done,
+                    result: a.result,
+                })
             }
             Call::End { id } => {
                 // Ended on this PC whatever the server says: it forgets idle sessions anyway.
-                let _ = self.send(Method::Delete, &ielts::end_url(&self.base, &id), None, END_TIMEOUT);
+                let _ = self.send(
+                    Method::Delete,
+                    &ielts::end_url(&self.base, &id),
+                    None,
+                    END_TIMEOUT,
+                );
                 Ok(Reply::Ended)
             }
         }
@@ -354,17 +443,28 @@ impl Calls {
     /// The key: the self-test's, or this PC's sign-in (read when first needed).
     fn key(&mut self) -> Option<String> {
         if self.key.is_none() {
-            self.key = crate::services::secret::load(&crate::paths::oyenza_link_path()).and_then(|s| oyenza::parse_link(&s)).map(|l| l.key);
+            self.key = crate::services::secret::load(&crate::paths::oyenza_link_path())
+                .and_then(|s| oyenza::parse_link(&s))
+                .map(|l| l.key);
         }
         self.key.clone()
     }
 
     /// The answer's body, or what went wrong with Oyen's own line about it
     /// when the server sent one (a capped day, a locked level).
-    fn send(&mut self, method: Method, url: &str, json: Option<&str>, timeout: Duration) -> Result<String, (Problem, Vec<ielts::Say>)> {
+    fn send(
+        &mut self,
+        method: Method,
+        url: &str,
+        json: Option<&str>,
+        timeout: Duration,
+    ) -> Result<String, (Problem, Vec<ielts::Say>)> {
         let key = self.key().ok_or((Problem::SignedOut, Vec::new()))?;
         let auth = format!("Bearer {key}");
-        match self.client.send(method, url, &[("Authorization", &auth)], json, timeout) {
+        match self
+            .client
+            .send(method, url, &[("Authorization", &auth)], json, timeout)
+        {
             Ok(r) if r.status == 200 => Ok(r.body),
             Ok(r) => {
                 if r.status == 401 && !self.fixed {

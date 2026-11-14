@@ -93,7 +93,14 @@ pub fn fit(m: &Mode, st: &AppState) -> Fit {
     match m {
         // The status bar look is the Pill theme's; the other themes show the
         // clock for it. The eyes peek out beside the camera (`draw_peek`).
-        Mode::Idle if matches!(st.settings.idle_style, IdleStyle::Clock | IdleStyle::Status | IdleStyle::Eyes) => Fit::Ears,
+        Mode::Idle
+            if matches!(
+                st.settings.idle_style,
+                IdleStyle::Clock | IdleStyle::Status | IdleStyle::Eyes
+            ) =>
+        {
+            Fit::Ears
+        }
         // Windows only (`AppState::aside`): a Mac never steps aside.
         Mode::Idle | Mode::Aside => Fit::Inside,
         // The music pill sings the current line (every theme), which needs
@@ -237,7 +244,15 @@ pub fn detached_segments(body: Rect, radius: f32, shoulder: f32, detach: f32) ->
     segs.push(Seg::LineTo(x0, (y1 - rb).max(y0 + s.max(rt))));
     segs.push(Seg::ArcTo(rb, rb, 0.0, false, false, x0 + rb, y1));
     segs.push(Seg::LineTo(x1 - rb, y1));
-    segs.push(Seg::ArcTo(rb, rb, 0.0, false, false, x1, (y1 - rb).max(y0 + s.max(rt))));
+    segs.push(Seg::ArcTo(
+        rb,
+        rb,
+        0.0,
+        false,
+        false,
+        x1,
+        (y1 - rb).max(y0 + s.max(rt)),
+    ));
     if s > 0.0 {
         segs.push(Seg::LineTo(x1, y0 + s));
         segs.push(Seg::ArcTo(s, s, 0.0, false, true, x1 + s, y0));
@@ -266,7 +281,15 @@ pub fn pill_outline(body: Rect, radius: f32, shoulder: f32, detach: f32) -> Vec<
 /// second half of the way out (it would pop in at the end), and the
 /// hairline waits until the shoulders are gone (Classic's never runs along
 /// the screen edge either).
-pub fn draw_pill_body(c: &mut Canvas, body: Rect, radius: f32, shoulder: f32, detach: f32, fill: Color, border: Option<Color>) {
+pub fn draw_pill_body(
+    c: &mut Canvas,
+    body: Rect,
+    radius: f32,
+    shoulder: f32,
+    detach: f32,
+    fill: Color,
+    border: Option<Color>,
+) {
     if detach >= 1.0 {
         pill::shape::draw_body(c, body, radius, fill, border);
         return;
@@ -275,11 +298,24 @@ pub fn draw_pill_body(c: &mut Canvas, body: Rect, radius: f32, shoulder: f32, de
     if fade > 0.0 && c.on_gpu() {
         let b = pill::shape::snap(body, c.scale());
         let r = radius.min(b.h / 2.0).min(b.w / 2.0).max(0.0);
-        c.rrect_shadow(b.offset(0.0, pill::shape::SHADOW_DROP), r, Color::black(fade), &pill::shape::SHADOW_RAMP);
+        c.rrect_shadow(
+            b.offset(0.0, pill::shape::SHADOW_DROP),
+            r,
+            Color::black(fade),
+            &pill::shape::SHADOW_RAMP,
+        );
     }
-    c.path(&detached_segments(body, radius, shoulder, detach), Some(fill), None);
+    c.path(
+        &detached_segments(body, radius, shoulder, detach),
+        Some(fill),
+        None,
+    );
     if let Some(b) = border.filter(|_| detach >= 0.5) {
-        c.path(&detached_segments(body.inset(0.5, 0.5), (radius - 0.5).max(0.0), 0.0, detach), None, Some((b, 1.0)));
+        c.path(
+            &detached_segments(body.inset(0.5, 0.5), (radius - 0.5).max(0.0), 0.0, detach),
+            None,
+            Some((b, 1.0)),
+        );
     }
 }
 
@@ -297,15 +333,28 @@ pub fn draw_ears(ui: &mut Ui, st: &mut AppState, m: &Mode, body: Rect, n: Notch)
         Mode::Idle => {
             if oyen::on(st.settings.theme) {
                 // Oyen rests in the left ear and watches the cursor.
-                let look = ui.input.mouse.map(|p| (p.x - body.center().x) / (body.w / 2.0));
+                let look = ui
+                    .input
+                    .mouse
+                    .map(|p| (p.x - body.center().x) / (body.w / 2.0));
                 let (frame, moving) = oyen::rest(st.now, st.local.hour < 5, look);
                 if moving {
                     ui.request_anim();
                 }
-                oyen::peek(ui.c, &frame, left.center().x + 4.0, body.bottom() - 5.0, 22.0, body.y + 1.0);
+                oyen::peek(
+                    ui.c,
+                    &frame,
+                    left.center().x + 4.0,
+                    body.bottom() - 5.0,
+                    22.0,
+                    body.y + 1.0,
+                );
             }
             let time = fmt_clock(&st.local, st.settings.use_24h);
-            let ts = TextStyle::body().weight(Weight::Semibold).tabular().center();
+            let ts = TextStyle::body()
+                .weight(Weight::Semibold)
+                .tabular()
+                .center();
             ui.c.text(&time, right.inset(4.0, 0.0), &ts);
             true
         }
@@ -325,25 +374,55 @@ pub fn draw_ears(ui: &mut Ui, st: &mut AppState, m: &Mode, body: Rect, n: Notch)
                 ui.c.icon(Icon::Coffee, glyph, col);
             }
             let text = fmt_countdown(p.remaining(st.now));
-            let ts = TextStyle::body().weight(Weight::Semibold).tabular().color(if paused { palette::TEXT_DIM } else { col }).center();
-            ui.c.text(&text, Rect::new(right.x, body.y, right.w - 6.0, body.h), &ts);
+            let ts = TextStyle::body()
+                .weight(Weight::Semibold)
+                .tabular()
+                .color(if paused { palette::TEXT_DIM } else { col })
+                .center();
+            ui.c.text(
+                &text,
+                Rect::new(right.x, body.y, right.w - 6.0, body.h),
+                &ts,
+            );
             true
         }
         // The moon left and the minutes right: the prayer's name would sit
         // under the camera (the open island and the notice at the time say it).
         Mode::Activity(Activity::Prayer) => {
-            let Some((_, mins)) = activities::prayer_countdown(st) else { return true };
+            let Some((_, mins)) = activities::prayer_countdown(st) else {
+                return true;
+            };
             let col = st.accent;
-            ui.c.icon(Icon::Moon, Rect::from_center(Point::new(left.center().x + 6.0, body.center().y), 16.0, 16.0), col);
-            let ts = TextStyle::body().weight(Weight::Semibold).tabular().color(col).center();
-            ui.c.text(&format!("{mins} min"), Rect::new(right.x, body.y, right.w - 6.0, body.h), &ts);
+            ui.c.icon(
+                Icon::Moon,
+                Rect::from_center(
+                    Point::new(left.center().x + 6.0, body.center().y),
+                    16.0,
+                    16.0,
+                ),
+                col,
+            );
+            let ts = TextStyle::body()
+                .weight(Weight::Semibold)
+                .tabular()
+                .color(col)
+                .center();
+            ui.c.text(
+                &format!("{mins} min"),
+                Rect::new(right.x, body.y, right.w - 6.0, body.h),
+                &ts,
+            );
             true
         }
         // A screen recording: its dot left of the camera, its time right.
         Mode::Activity(Activity::Recording) => {
             activities::recording_mark(ui, st, Point::new(left.center().x + 6.0, body.center().y));
             let (text, ts) = activities::recording_time(st);
-            ui.c.text(&text, Rect::new(right.x, body.y, right.w - 6.0, body.h), &ts.center());
+            ui.c.text(
+                &text,
+                Rect::new(right.x, body.y, right.w - 6.0, body.h),
+                &ts.center(),
+            );
             true
         }
         // Meeting notes: Oyen listening (or writing) in the left ear, the
@@ -352,18 +431,50 @@ pub fn draw_ears(ui: &mut Ui, st: &mut AppState, m: &Mode, body: Rect, n: Notch)
         Mode::Activity(Activity::Notes) => {
             let cy = body.center().y;
             let listening = st.notes.listening();
-            let what = if listening { crate::oyen::Coach::Listen { level: st.notes.mic.max(st.notes.pc) } } else { crate::oyen::Coach::Write };
-            crate::oyen::coach(ui.c, Point::new(left.center().x + 6.0, cy - 1.0), 22.0, ui.now, what);
+            let what = if listening {
+                crate::oyen::Coach::Listen {
+                    level: st.notes.mic.max(st.notes.pc),
+                }
+            } else {
+                crate::oyen::Coach::Write
+            };
+            crate::oyen::coach(
+                ui.c,
+                Point::new(left.center().x + 6.0, cy - 1.0),
+                22.0,
+                ui.now,
+                what,
+            );
             // The head follows the voices, and the pencil its line.
             ui.request_live();
             if listening {
                 ui.c.fill_circle(Point::new(right.x + 10.0, cy), 4.0, palette::RED);
-                let ts = TextStyle::body().weight(Weight::Semibold).tabular().color(palette::TEXT).right();
+                let ts = TextStyle::body()
+                    .weight(Weight::Semibold)
+                    .tabular()
+                    .color(palette::TEXT)
+                    .right();
                 let text = poni_core::notes::fmt_length(st.notes.elapsed(st.now));
-                ui.c.text(&text, Rect::new(right.x + 18.0, body.y, (right.w - 18.0 - 8.0).max(0.0), body.h), &ts);
+                ui.c.text(
+                    &text,
+                    Rect::new(
+                        right.x + 18.0,
+                        body.y,
+                        (right.w - 18.0 - 8.0).max(0.0),
+                        body.h,
+                    ),
+                    &ts,
+                );
             } else {
-                let ts = TextStyle::footnote().weight(Weight::Semibold).color(palette::TEXT_DIM).center();
-                ui.c.text("Writing\u{2026}", Rect::new(right.x, body.y, (right.w - 6.0).max(0.0), body.h), &ts);
+                let ts = TextStyle::footnote()
+                    .weight(Weight::Semibold)
+                    .color(palette::TEXT_DIM)
+                    .center();
+                ui.c.text(
+                    "Writing\u{2026}",
+                    Rect::new(right.x, body.y, (right.w - 6.0).max(0.0), body.h),
+                    &ts,
+                );
             }
             true
         }
@@ -395,7 +506,14 @@ fn draw_peek(ui: &mut Ui, st: &mut AppState, body: Rect, n: Notch) {
         if moving {
             ui.request_anim();
         }
-        oyen::peek(ui.c, &frame, x, body.bottom() - 5.0, PEEK_OYEN_W, body.y + 1.0);
+        oyen::peek(
+            ui.c,
+            &frame,
+            x,
+            body.bottom() - 5.0,
+            PEEK_OYEN_W,
+            body.y + 1.0,
+        );
     } else {
         let (gx, gy) = look.unwrap_or((0.0, 0.0));
         activities::draw_eyes(ui, st, x, body.center().y + gy * LOOK.1, gx * LOOK.0);
@@ -405,9 +523,16 @@ fn draw_peek(ui: &mut Ui, st: &mut AppState, body: Rect, n: Notch) {
 /// Where the peeking eyes (Oyen, in his theme) are at `now`, from the
 /// island's top centre, and whether they are on their way across.
 fn peek_spot(st: &AppState, n: Notch, now: f64) -> (Point, bool) {
-    let w = if oyen::on(st.settings.theme) { PEEK_OYEN_W } else { EYES_W };
+    let w = if oyen::on(st.settings.theme) {
+        PEEK_OYEN_W
+    } else {
+        EYES_W
+    };
     let (along, moving) = st.ui.peek.along(now);
-    (Point::new(along * (n.w / 2.0 + PEEK_GAP + w / 2.0), n.h / 2.0), moving)
+    (
+        Point::new(along * (n.w / 2.0 + PEEK_GAP + w / 2.0), n.h / 2.0),
+        moving,
+    )
 }
 
 /// Where the eyes at `spot` look at `now` (-1 to 1 each way): at the

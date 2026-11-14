@@ -348,7 +348,10 @@ function launchYouTubeMusic(url = "https://music.youtube.com") {
   ];
   const executable = candidates.find((candidate) => existsSync(candidate));
   if (executable) {
-    spawnDetached(executable, [url]);
+    // YouTube Music Desktop does not reliably accept a URL argument; it can
+    // start and immediately exit. Launch the app normally for the default
+    // command and let the browser fallback handle URL searches.
+    spawnDetached(executable);
     return true;
   }
   if (url === "https://music.youtube.com") {
@@ -758,6 +761,9 @@ export async function ytmMedia(action, fetchImpl = fetch) {
 
 async function localAction(text, fetchImpl = fetch) {
   const value = text.trim().toLowerCase().replace(/[.!?]+$/, "");
+  if (/^(?:please\s+)?(?:close|hide)\s+(?:yourself|the notch|your notch)$/.test(value)) {
+    return { text: "Closing.", action: "collapse" };
+  }
   const compact = value
     .replace(/^(please\s+)?(can you\s+)?/i, "")
     .replace(/\b(the|my|music|media|song|track)\b/g, " ")
@@ -798,15 +804,26 @@ async function localAction(text, fetchImpl = fetch) {
   if (defaultPlay && !/^music$/i.test(defaultPlay[1].trim()) &&
       !/\s+(?:on|in)\s+(?:spotify|youtube music|yt music)$/i.test(value)) {
     const query = defaultPlay[1].trim();
-    const song = await ytmPlay(query, fetchImpl).catch(() => null);
+    let song = await ytmPlay(query, fetchImpl).catch(() => null);
+    if (!song) {
+      // Start the desktop app when its local API is not running, then give it
+      // a short bounded window to become ready before falling back.
+      const launched = launchYouTubeMusic();
+      if (launched) {
+        ytmDownUntil = 0;
+        for (let attempt = 0; attempt < 10 && !song; attempt += 1) {
+          await new Promise((resolve) => setTimeout(resolve, 500));
+          song = await ytmPlay(query, fetchImpl).catch(() => null);
+        }
+      }
+    }
     if (song?.title) {
       return { text: `Playing ${song.title}${song.artist ? ` by ${song.artist}` : ""}.` };
     }
-    // The app isn't running: open its search page instead of guessing.
+    // Do not claim playback when the app/API did not confirm it.
     const url = `https://music.youtube.com/search?q=${encodeURIComponent(query)}`;
-    const app = launchYouTubeMusic(url);
-    if (!app) spawnDetached("explorer.exe", [url]);
-    return { text: "Opening YouTube Music search now. Search request finished." };
+    spawnDetached("explorer.exe", [url]);
+    return { text: "YouTube Music opened, but playback could not be confirmed. I opened the search instead." };
   }
   const spotifySearch = value.match(/^(?:play|search)\s+(.+?)\s+(?:on|in)\s+spotify$/i);
   if (spotifySearch) {

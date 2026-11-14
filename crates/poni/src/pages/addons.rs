@@ -76,7 +76,10 @@ fn rows(st: &AppState) -> Vec<&'static Addon> {
         .copied()
         .filter(|a| a.id != addons::SCREEN_RECORDER.id || st.recorder_ready())
         .filter(|a| a.id != addons::NOTIFICATIONS.id || cfg!(windows))
-        .filter(|a| a.id != addons::DOWNLOADER.id || (st.downloader_offered && st.studio_pro() == Some(true)))
+        .filter(|a| {
+            a.id != addons::DOWNLOADER.id
+                || (st.downloader_offered && st.studio_pro() == Some(true))
+        })
         .filter(|a| a.id != addons::IELTS.id || st.studio_pro() == Some(true))
         .collect()
 }
@@ -136,8 +139,13 @@ fn icon(a: &Addon) -> Icon {
 }
 
 pub fn draw(ui: &mut Ui, st: &mut AppState, area: Rect) {
-    let intro = "Each one stays off until you switch it on, and switching off deletes any download.";
-    ui.c.text(intro, Rect::new(area.x, area.y, area.w, INTRO_H), &TextStyle::footnote().color(palette::TEXT_DIM));
+    let intro =
+        "Each one stays off until you switch it on, and switching off deletes any download.";
+    ui.c.text(
+        intro,
+        Rect::new(area.x, area.y, area.w, INTRO_H),
+        &TextStyle::footnote().color(palette::TEXT_DIM),
+    );
     // The last row's hover wash meets the Pill card's rounded corners.
     let card = super::card::pill_card(st, area);
     let rows = rows(st);
@@ -158,13 +166,26 @@ pub fn draw(ui: &mut Ui, st: &mut AppState, area: Rect) {
 }
 
 /// Returns true when the row was clicked. `card`: the Pill card (`card::pill_card`).
-fn addon_row(ui: &mut Ui, st: &AppState, r: Rect, i: usize, a: &Addon, card: Option<(Rect, f32)>) -> bool {
+fn addon_row(
+    ui: &mut Ui,
+    st: &AppState,
+    r: Rect,
+    i: usize,
+    a: &Addon,
+    card: Option<(Rect, f32)>,
+) -> bool {
     let status = status(st, a);
     let accent = st.accent;
     let hit = Rect::new(r.x - ROW_BLEED, r.y + 2.0, r.w + 2.0 * ROW_BLEED, r.h - 4.0);
     let resp = ui.button(wid_n("addons.row", i as u64), hit);
     if resp.hovered || resp.pressed {
-        super::card::fill_box(ui, card, hit, 10.0, Color::white(if resp.pressed { 0.10 } else { 0.06 }));
+        super::card::fill_box(
+            ui,
+            card,
+            hit,
+            10.0,
+            Color::white(if resp.pressed { 0.10 } else { 0.06 }),
+        );
     }
     let cy = r.center().y;
     // Six rows sit closer: a smaller badge, the text centred in the row;
@@ -178,17 +199,47 @@ fn addon_row(ui: &mut Ui, st: &AppState, r: Rect, i: usize, a: &Addon, card: Opt
     } else {
         (BADGE, 0.0)
     };
-    ui.c.fill_circle(Point::new(r.x + BADGE / 2.0, cy), badge / 2.0, accent.with_alpha(0.18));
-    let glyph = if one_line { 14.0f32.min(r.h - 8.0) } else { 18.0 };
-    ui.c.icon(icon(a), Rect::from_center(Point::new(r.x + BADGE / 2.0, cy), glyph, glyph), accent);
+    ui.c.fill_circle(
+        Point::new(r.x + BADGE / 2.0, cy),
+        badge / 2.0,
+        accent.with_alpha(0.18),
+    );
+    let glyph = if one_line {
+        14.0f32.min(r.h - 8.0)
+    } else {
+        18.0
+    };
+    ui.c.icon(
+        icon(a),
+        Rect::from_center(Point::new(r.x + BADGE / 2.0, cy), glyph, glyph),
+        accent,
+    );
 
-    let sw = Rect::new(r.right() - SWITCH_W, cy - SWITCH_H / 2.0, SWITCH_W, SWITCH_H);
+    let sw = Rect::new(
+        r.right() - SWITCH_W,
+        cy - SWITCH_H / 2.0,
+        SWITCH_W,
+        SWITCH_H,
+    );
     crate::pages::settings::draw_switch(ui.c, sw, status.is_on(), accent);
     // The size, while there is a choice to make.
     let mut text_right = sw.x - 16.0;
     if status == Status::Off {
-        let size = if a.pro { "Pro".to_string() } else if a.downloads() { fmt_bytes(a.size()) } else { "Built in".to_string() };
-        let style = if a.pro { TextStyle::footnote().weight(Weight::Semibold).color(crate::oyen::ORANGE).right() } else { TextStyle::footnote().color(palette::TEXT_DIM).right() };
+        let size = if a.pro {
+            "Pro".to_string()
+        } else if a.downloads() {
+            fmt_bytes(a.size())
+        } else {
+            "Built in".to_string()
+        };
+        let style = if a.pro {
+            TextStyle::footnote()
+                .weight(Weight::Semibold)
+                .color(crate::oyen::ORANGE)
+                .right()
+        } else {
+            TextStyle::footnote().color(palette::TEXT_DIM).right()
+        };
         let w = ui.c.measure(&size, &style, 200.0).0.ceil();
         ui.c.text(&size, Rect::new(sw.x - 10.0 - w, r.y, w, r.h), &style);
         text_right = sw.x - 10.0 - w - 16.0;
@@ -196,7 +247,11 @@ fn addon_row(ui: &mut Ui, st: &AppState, r: Rect, i: usize, a: &Addon, card: Opt
 
     let x = r.x + TEXT_X;
     let w = (text_right - x).max(0.0);
-    let line_color = if status == Status::Failed { palette::ORANGE } else { palette::TEXT_DIM };
+    let line_color = if status == Status::Failed {
+        palette::ORANGE
+    } else {
+        palette::TEXT_DIM
+    };
     // Screen recorder came on with the recorder, not by a click here: say so.
     let line = if a.id == addons::SCREEN_RECORDER.id && status == Status::Ready {
         "On, since Oyenza Studio Recorder is installed".to_string()
@@ -205,23 +260,47 @@ fn addon_row(ui: &mut Ui, st: &AppState, r: Rect, i: usize, a: &Addon, card: Opt
     };
     let bar_y = if one_line {
         // The name, then the line after it while there is room.
-        let title_w = ui.c.measure(a.title, &TextStyle::headline(), w.max(1.0)).0.ceil().min(w);
-        ui.c.text(a.title, Rect::new(x, r.y, title_w + 1.0, r.h), &TextStyle::headline());
+        let title_w =
+            ui.c.measure(a.title, &TextStyle::headline(), w.max(1.0))
+                .0
+                .ceil()
+                .min(w);
+        ui.c.text(
+            a.title,
+            Rect::new(x, r.y, title_w + 1.0, r.h),
+            &TextStyle::headline(),
+        );
         let lx = x + title_w + LINE_GAP;
         if text_right > lx {
-            ui.c.text(&line, Rect::new(lx, r.y, text_right - lx, r.h), &TextStyle::footnote().color(line_color));
+            ui.c.text(
+                &line,
+                Rect::new(lx, r.y, text_right - lx, r.h),
+                &TextStyle::footnote().color(line_color),
+            );
         }
         r.bottom() - BAR_H - 1.0
     } else {
-        ui.c.text(a.title, Rect::new(x, r.y + 3.0 + dy, w, 20.0), &TextStyle::headline());
-        ui.c.text(&line, Rect::new(x, r.y + 22.0 + dy, w, 17.0), &TextStyle::footnote().color(line_color));
+        ui.c.text(
+            a.title,
+            Rect::new(x, r.y + 3.0 + dy, w, 20.0),
+            &TextStyle::headline(),
+        );
+        ui.c.text(
+            &line,
+            Rect::new(x, r.y + 22.0 + dy, w, 17.0),
+            &TextStyle::footnote().color(line_color),
+        );
         r.y + 40.0 + dy
     };
     if let Some(p) = status.progress() {
         let bar = Rect::new(x, bar_y, w, BAR_H);
         ui.c.fill_rrect(bar, BAR_H / 2.0, palette::TRACK);
         if p > 0.0 {
-            ui.c.fill_rrect(Rect::new(bar.x, bar.y, (bar.w * p).max(BAR_H), BAR_H), BAR_H / 2.0, accent);
+            ui.c.fill_rrect(
+                Rect::new(bar.x, bar.y, (bar.w * p).max(BAR_H), BAR_H),
+                BAR_H / 2.0,
+                accent,
+            );
         }
     }
     resp.clicked
@@ -230,9 +309,9 @@ fn addon_row(ui: &mut Ui, st: &AppState, r: Rect, i: usize, a: &Addon, card: Opt
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::state::OyenzaLink;
     use poni_core::settings::Settings;
     use poni_core::store::Store;
-    use crate::state::OyenzaLink;
 
     #[test]
     fn every_row_offered_fits_the_page() {
@@ -243,13 +322,18 @@ mod tests {
         st.recorder = true;
         st.store.recorder_island = true;
         st.downloader_offered = true;
-        st.oyenza.link = OyenzaLink::Connected { account: "a•••@example.com".into() };
+        st.oyenza.link = OyenzaLink::Connected {
+            account: "a•••@example.com".into(),
+        };
         st.oyenza.pro = Some(true);
         assert_eq!(rows(&st).len(), without + 3);
         assert!(height(&st) <= MAX_H, "the window never grows for this page");
         let h = row_h(rows(&st).len());
         assert!(h < TWO_LINES, "that many rows are a line each");
-        assert!(BADGE_ONE_LINE.min(h - 2.0) + 2.0 <= h, "{h} DIPs: the badges keep apart");
+        assert!(
+            BADGE_ONE_LINE.min(h - 2.0) + 2.0 <= h,
+            "{h} DIPs: the badges keep apart"
+        );
     }
 
     #[test]
@@ -263,7 +347,21 @@ mod tests {
         st.addons.insert(DOWNLOADER.id, Status::Ready);
         assert!(pro_wanted(&st), "asked at sign-in, though not listed yet");
         let listed = |st: &AppState| rows(st).iter().any(|a| a.id == DOWNLOADER.id);
-        for (link, pro) in [(OyenzaLink::Off, None), (OyenzaLink::Connected { account: "a•••@example.com".into() }, None), (OyenzaLink::Connected { account: "a•••@example.com".into() }, Some(false))] {
+        for (link, pro) in [
+            (OyenzaLink::Off, None),
+            (
+                OyenzaLink::Connected {
+                    account: "a•••@example.com".into(),
+                },
+                None,
+            ),
+            (
+                OyenzaLink::Connected {
+                    account: "a•••@example.com".into(),
+                },
+                Some(false),
+            ),
+        ] {
             st.oyenza.link = link;
             st.oyenza.pro = pro;
             assert!(!listed(&st), "not listed without Pro ({pro:?})");
@@ -280,6 +378,9 @@ mod tests {
         st.settings.set_addon(NOTIFICATIONS.id, true);
         st.addons.insert(NOTIFICATIONS.id, Status::Ready);
         assert_eq!(status(&st, &NOTIFICATIONS), Status::Ready);
-        assert_eq!(rows(&st).iter().any(|a| a.id == NOTIFICATIONS.id), cfg!(windows));
+        assert_eq!(
+            rows(&st).iter().any(|a| a.id == NOTIFICATIONS.id),
+            cfg!(windows)
+        );
     }
 }

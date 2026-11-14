@@ -60,7 +60,10 @@ fn subtitle_style() -> TextStyle {
 /// beside them. Never the hidden sum (`reveal`), so the pill's size gives
 /// nothing away before Show.
 fn key(n: &Notice) -> u64 {
-    wid(&n.title) ^ wid(&n.title_dim).rotate_left(42) ^ wid(&n.subtitle).rotate_left(21) ^ n.inline.map_or(0, |a| a as u64 + 1)
+    wid(&n.title)
+        ^ wid(&n.title_dim).rotate_left(42)
+        ^ wid(&n.subtitle).rotate_left(21)
+        ^ n.inline.map_or(0, |a| a as u64 + 1)
 }
 
 /// Whole even DIPs, so the centred body's edges stay on whole DIPs.
@@ -86,8 +89,13 @@ pub fn geom(st: &AppState) -> Option<Geom> {
 /// The width before the words have been measured (a new notice's first
 /// frame; the next frame has the measured one while the morph runs).
 fn guess_width(n: &Notice) -> f32 {
-    let words = guess(&format!("{} {}", n.title, n.title_dim), 13.0 * 1.05).max(guess(&n.subtitle, 12.0));
-    let tail = if n.inline.is_some() { ACT_GAP + ACT_MIN_W + ACT_INSET } else { TEXT_END };
+    let words =
+        guess(&format!("{} {}", n.title, n.title_dim), 13.0 * 1.05).max(guess(&n.subtitle, 12.0));
+    let tail = if n.inline.is_some() {
+        ACT_GAP + ACT_MIN_W + ACT_INSET
+    } else {
+        TEXT_END
+    };
     fit(TEXT_X + words + tail)
 }
 
@@ -97,7 +105,8 @@ pub(crate) fn guess(s: &str, size: f32) -> f32 {
     let em: f32 = s
         .chars()
         .map(|c| match c {
-            ' ' | '.' | ',' | ':' | ';' | '\'' | '!' | '|' | '\u{b7}' | 'i' | 'j' | 'l' | 'I' | 'f' | 't' | 'r' => 0.30,
+            ' ' | '.' | ',' | ':' | ';' | '\'' | '!' | '|' | '\u{b7}' | 'i' | 'j' | 'l' | 'I'
+            | 'f' | 't' | 'r' => 0.30,
             'm' | 'w' | 'M' | 'W' | '%' | '@' | '\u{2014}' => 0.85,
             'A'..='Z' => 0.64,
             c if c as u32 >= 0x2E80 => 1.0,
@@ -158,7 +167,14 @@ pub fn draw(ui: &mut Ui, st: &mut AppState, body: Rect) -> bool {
 fn draw_notice(ui: &mut Ui, st: &AppState, n: &Notice, body: Rect) {
     let act = n.inline.map(|a| {
         let (label, icon, color) = crate::activities::inline_look(st, n, a);
-        (a, label, icon, color, ui.pill_width(label, icon.is_some(), true).max(if icon.is_some() { ACT_MIN_W } else { 0.0 }))
+        (
+            a,
+            label,
+            icon,
+            color,
+            ui.pill_width(label, icon.is_some(), true)
+                .max(if icon.is_some() { ACT_MIN_W } else { 0.0 }),
+        )
     });
 
     // New words: measure them once for `geom` (a DIP of slack so they never
@@ -168,8 +184,11 @@ fn draw_notice(ui: &mut Ui, st: &AppState, n: &Notice, body: Rect) {
     let k = key(n);
     let (fk, mut fw) = FIT.with(|f| f.get());
     if fk != k {
-        let words = crate::activities::notice_title_width(ui, n, &title_st).max(ui.c.measure(&n.subtitle, &sub_st, 2000.0).0);
-        let tail = act.as_ref().map_or(TEXT_END, |&(.., w)| ACT_GAP + w + ACT_INSET);
+        let words = crate::activities::notice_title_width(ui, n, &title_st)
+            .max(ui.c.measure(&n.subtitle, &sub_st, 2000.0).0);
+        let tail = act
+            .as_ref()
+            .map_or(TEXT_END, |&(.., w)| ACT_GAP + w + ACT_INSET);
         fw = fit(TEXT_X + words.ceil() + 1.0 + tail);
         FIT.with(|f| f.set((k, fw)));
         ui.request_repaint();
@@ -188,9 +207,24 @@ fn draw_notice(ui: &mut Ui, st: &AppState, n: &Notice, body: Rect) {
     ui.c.icon(n.icon, Rect::from_center(c, GLYPH, GLYPH), ink_on(n.color));
 
     let inset = h / 2.0 - PILL_SMALL / 2.0;
-    let act = act.map(|(a, label, icon, color, w)| (a, label, icon, color, Rect::new(lay.right() - inset - w, cy - PILL_SMALL / 2.0, w, PILL_SMALL)));
+    let act = act.map(|(a, label, icon, color, w)| {
+        (
+            a,
+            label,
+            icon,
+            color,
+            Rect::new(
+                lay.right() - inset - w,
+                cy - PILL_SMALL / 2.0,
+                w,
+                PILL_SMALL,
+            ),
+        )
+    });
     let tx = lay.x + TEXT_X;
-    let text_right = act.as_ref().map_or(lay.right() - TEXT_END, |(.., r)| r.x - ACT_GAP);
+    let text_right = act
+        .as_ref()
+        .map_or(lay.right() - TEXT_END, |(.., r)| r.x - ACT_GAP);
     let tw = (text_right - tx).max(0.0);
     // Baselines about 22 and 37 DIP down the 48, as the spec has them.
     crate::activities::notice_title(ui, n, Rect::new(tx, cy - 17.0, tw, 20.0), title_st);
@@ -202,9 +236,17 @@ fn draw_notice(ui: &mut Ui, st: &AppState, n: &Notice, body: Rect) {
     if let Some((a, label, icon, color, r)) = act {
         if inline_done(st, n, a) {
             ui.c.fill_rrect(r, r.h / 2.0, color.with_alpha(0.20));
-            ui.c.icon(Icon::Check, Rect::from_center(r.center(), 14.0, 14.0), color);
+            ui.c.icon(
+                Icon::Check,
+                Rect::from_center(r.center(), 14.0, 14.0),
+                color,
+            );
         } else {
-            let style = if icon.is_some() { PillStyle::Primary(color) } else { PillStyle::Utility };
+            let style = if icon.is_some() {
+                PillStyle::Primary(color)
+            } else {
+                PillStyle::Utility
+            };
             ui.pill(wid("notice.act"), r, label, icon, style);
         }
     }
@@ -238,17 +280,28 @@ mod tests {
 
     #[test]
     fn a_hidden_sum_never_sizes_the_pill() {
-        let long = money("Amount and sender hidden", Some("Rp 1.250.000 \u{b7} Gaji Oktober"));
+        let long = money(
+            "Amount and sender hidden",
+            Some("Rp 1.250.000 \u{b7} Gaji Oktober"),
+        );
         let short = money("Amount and sender hidden", Some("Rp 9"));
         assert_eq!(key(&long), key(&short));
         assert_eq!(guess_width(&long), guess_width(&short));
         // Once shown, the words are new and the width follows them.
-        assert_ne!(key(&long), key(&money("Rp 1.250.000 \u{b7} Gaji Oktober", None)));
+        assert_ne!(
+            key(&long),
+            key(&money("Rp 1.250.000 \u{b7} Gaji Oktober", None))
+        );
     }
 
     #[test]
     fn glyphs_read_on_their_disc() {
-        for c in [palette::GREEN, palette::ORANGE, palette::BLUE, palette::TEXT_DIM] {
+        for c in [
+            palette::GREEN,
+            palette::ORANGE,
+            palette::BLUE,
+            palette::TEXT_DIM,
+        ] {
             assert_eq!(ink_on(c), palette::ON_ACCENT, "{c:?}");
         }
         for c in [palette::TEXT, palette::YELLOW] {

@@ -1,5 +1,8 @@
 /target
 /dist
+/numa-ui/dist
+/.playwright-mcp
+node_modules/
 *.log
 .DS_Store
 /selftest-out

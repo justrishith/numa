@@ -63,7 +63,11 @@ const PAIRING: bool = cfg!(windows);
 /// What the phone panel calls this computer.
 const THIS_COMPUTER: &str = if cfg!(windows) { "this PC" } else { "this Mac" };
 /// What to allow if the system asks about Phone drop's incoming connections.
-const ALLOW_HINT: &str = if cfg!(windows) { "If Windows asks, allow Oyenza Studio on private networks." } else { "If macOS asks, allow incoming connections for Oyenza Studio." };
+const ALLOW_HINT: &str = if cfg!(windows) {
+    "If Windows asks, allow Oyenza Studio on private networks."
+} else {
+    "If macOS asks, allow incoming connections for Oyenza Studio."
+};
 /// How long a phone result ("3 files from iPhone…") stays in the panel.
 pub const PHONE_OUTCOME_S: f64 = 8.0;
 
@@ -160,7 +164,15 @@ fn draw_page(ui: &mut Ui, st: &mut AppState, area: Rect, l: &mut Local) {
     let card = super::card::pill_card(st, area);
     // With Phone drop open the shelf keeps its height and the panel sits below.
     let (main, phone_r) = match &st.phone {
-        Some(_) => (Rect::new(area.x, area.y, area.w, PAGE_H), Some(Rect::new(area.x, area.y + PAGE_H + PHONE_GAP, area.w, PHONE_H))),
+        Some(_) => (
+            Rect::new(area.x, area.y, area.w, PAGE_H),
+            Some(Rect::new(
+                area.x,
+                area.y + PAGE_H + PHONE_GAP,
+                area.w,
+                PHONE_H,
+            )),
+        ),
         None => (area, None),
     };
     if items.is_empty() {
@@ -190,9 +202,14 @@ fn sync(st: &mut AppState, l: &mut Local, items: &[ShelfItem], now: f64, shown: 
     }
     let undo_items: &[ShelfItem] = l.undo.as_ref().map(|(v, _)| v.as_slice()).unwrap_or(&[]);
     if st.shelf_thumbs.len() > items.len() + undo_items.len() {
-        st.shelf_thumbs.retain(|p, _| items.iter().chain(undo_items).any(|i| &i.path == p));
+        st.shelf_thumbs
+            .retain(|p, _| items.iter().chain(undo_items).any(|i| &i.path == p));
     }
-    let keep: Vec<String> = items.iter().chain(undo_items).map(|i| key(&i.path)).collect();
+    let keep: Vec<String> = items
+        .iter()
+        .chain(undo_items)
+        .map(|i| key(&i.path))
+        .collect();
     if l.seen.len() > keep.len() {
         l.seen.retain(|k, _| keep.contains(k));
     }
@@ -259,7 +276,9 @@ fn apply(st: &mut AppState, l: &mut Local, items: &[ShelfItem], actions: Vec<Act
         match a {
             Action::PhoneOpen => st.cmd(Command::Phone(PhoneCmd::Open)),
             Action::PhoneClose => st.cmd(Command::Phone(PhoneCmd::Close)),
-            Action::PhoneAnswer(id, accept) => st.cmd(Command::Phone(PhoneCmd::Answer { id, accept })),
+            Action::PhoneAnswer(id, accept) => {
+                st.cmd(Command::Phone(PhoneCmd::Answer { id, accept }))
+            }
             Action::Pair(c) => st.cmd(Command::Pair(c)),
             Action::Open(p) => st.cmd(Command::OpenPath(p)),
             Action::Reveal(p) => st.cmd(Command::RevealPath(p)),
@@ -384,25 +403,48 @@ fn draw_items(
         match &img {
             Some(im) => ui.c.image(im, thumb, THUMB_R),
             None => {
-                let folder = kind == Some(PathKind::Folder) || (kind.is_none() && extension(&it.path).is_empty());
+                let folder = kind == Some(PathKind::Folder)
+                    || (kind.is_none() && extension(&it.path).is_empty());
                 let icon = if folder { Icon::Folder } else { Icon::File };
-                ui.c.icon(icon, Rect::from_center(thumb.center(), 24.0, 24.0), palette::TEXT_DIM);
+                ui.c.icon(
+                    icon,
+                    Rect::from_center(thumb.center(), 24.0, 24.0),
+                    palette::TEXT_DIM,
+                );
             }
         }
         let name_r = Rect::new(tile.x + 6.0, thumb.bottom() + 8.0, TILE_W - 12.0, 16.0);
-        ui.c.text(&display_name(&it.path), name_r, &TextStyle::footnote().weight(Weight::Medium).center());
+        ui.c.text(
+            &display_name(&it.path),
+            name_r,
+            &TextStyle::footnote().weight(Weight::Medium).center(),
+        );
         ui.c.set_alpha(tile_a);
         let cap_r = Rect::new(name_r.x, name_r.bottom(), name_r.w, 14.0);
         if missing {
-            ui.c.text("Missing", cap_r, &TextStyle::caption().weight(Weight::Medium).color(palette::TEXT_DIM).center());
+            ui.c.text(
+                "Missing",
+                cap_r,
+                &TextStyle::caption()
+                    .weight(Weight::Medium)
+                    .color(palette::TEXT_DIM)
+                    .center(),
+            );
         } else {
-            ui.c.text(&caption(&it.path, kind), cap_r, &TextStyle::caption().color(palette::TEXT_FAINT).center());
+            ui.c.text(
+                &caption(&it.path, kind),
+                cap_r,
+                &TextStyle::caption().color(palette::TEXT_FAINT).center(),
+            );
         }
 
         // Remove button on hover, tucked onto the thumbnail's corner.
         if hot {
             let c = Point::new(thumb.right() - 2.0, thumb.y + 2.0);
-            let cr = ui.button(wid_n("shelf.remove", wid(&k)), intersect(Rect::from_center(c, 22.0, 22.0), row));
+            let cr = ui.button(
+                wid_n("shelf.remove", wid(&k)),
+                intersect(Rect::from_center(c, 22.0, 22.0), row),
+            );
             let fill = if cr.pressed {
                 Color::white(0.42)
             } else if cr.hovered {
@@ -420,10 +462,18 @@ fn draw_items(
         ui.c.set_alpha(base);
 
         if resp.clicked {
-            actions.push(if missing { Action::Recheck(it.path.clone()) } else { Action::Open(it.path.clone()) });
+            actions.push(if missing {
+                Action::Recheck(it.path.clone())
+            } else {
+                Action::Open(it.path.clone())
+            });
         }
         if resp.rclicked {
-            actions.push(if missing { Action::Recheck(it.path.clone()) } else { Action::Reveal(it.path.clone()) });
+            actions.push(if missing {
+                Action::Recheck(it.path.clone())
+            } else {
+                Action::Reveal(it.path.clone())
+            });
         }
         if resp.pressed && !missing && !l.drag_started {
             if let Some((dx, dy)) = resp.drag {
@@ -441,7 +491,11 @@ fn draw_items(
         fade_edge(ui, fade_h, true);
     }
     if scroll < max_scroll - 0.5 {
-        fade_edge(ui, Rect::new(row.right() - FADE_W, fade_h.y, FADE_W, fade_h.h), false);
+        fade_edge(
+            ui,
+            Rect::new(row.right() - FADE_W, fade_h.y, FADE_W, fade_h.h),
+            false,
+        );
     }
     ui.c.unclip();
 
@@ -462,24 +516,52 @@ fn draw_items(
     draw_header(ui, st, l, head, items, hovered.map(|(_, i)| i), actions);
 }
 
-fn draw_header(ui: &mut Ui, st: &AppState, l: &Local, head: Rect, items: &[ShelfItem], hovered: Option<usize>, actions: &mut Vec<Action>) {
+fn draw_header(
+    ui: &mut Ui,
+    st: &AppState,
+    l: &Local,
+    head: Rect,
+    items: &[ShelfItem],
+    hovered: Option<usize>,
+    actions: &mut Vec<Action>,
+) {
     let n = items.len();
     let count = format!("{n} {}", if n == 1 { "item" } else { "items" });
-    let cs = TextStyle::body().weight(Weight::Semibold).color(palette::TEXT_DIM);
+    let cs = TextStyle::body()
+        .weight(Weight::Semibold)
+        .color(palette::TEXT_DIM);
     let cw = ui.c.measure(&count, &cs, 200.0).0;
     ui.c.text(&count, Rect::new(head.x, head.y, cw + 4.0, head.h), &cs);
 
     // Small utility pills on the right: Clear, plus Undo for a while after a removal.
     let clear_w = ui.pill_width("Clear", true, true);
     let clear_r = Rect::new(head.right() - clear_w, head.y, clear_w, PILL_SMALL);
-    if ui.pill(wid("shelf.clear"), clear_r, "Clear", Some(Icon::Trash), PillStyle::Utility).clicked {
+    if ui
+        .pill(
+            wid("shelf.clear"),
+            clear_r,
+            "Clear",
+            Some(Icon::Trash),
+            PillStyle::Utility,
+        )
+        .clicked
+    {
         actions.push(Action::Clear);
     }
     let mut right = clear_r.x;
     if l.undo.as_ref().is_some_and(|(_, t)| st.now - t < UNDO_SECS) {
         let undo_w = ui.pill_width("Undo", true, true);
         let undo_r = Rect::new(clear_r.x - PILL_GAP - undo_w, head.y, undo_w, PILL_SMALL);
-        if ui.pill(wid("shelf.undo"), undo_r, "Undo", Some(Icon::Undo), PillStyle::UtilityAccent(st.accent)).clicked {
+        if ui
+            .pill(
+                wid("shelf.undo"),
+                undo_r,
+                "Undo",
+                Some(Icon::Undo),
+                PillStyle::UtilityAccent(st.accent),
+            )
+            .clicked
+        {
             actions.push(Action::Undo);
         }
         right = undo_r.x;
@@ -488,7 +570,16 @@ fn draw_header(ui: &mut Ui, st: &AppState, l: &Local, head: Rect, items: &[Shelf
     if st.phone.is_none() {
         let phone_w = ui.pill_width("Phone", true, true);
         let phone_r = Rect::new(right - PILL_GAP - phone_w, head.y, phone_w, PILL_SMALL);
-        if ui.pill(wid("shelf.phone"), phone_r, "Phone", Some(Icon::Phone), PillStyle::Utility).clicked {
+        if ui
+            .pill(
+                wid("shelf.phone"),
+                phone_r,
+                "Phone",
+                Some(Icon::Phone),
+                PillStyle::Utility,
+            )
+            .clicked
+        {
             actions.push(Action::PhoneOpen);
         }
         right = phone_r.x;
@@ -497,17 +588,25 @@ fn draw_header(ui: &mut Ui, st: &AppState, l: &Local, head: Rect, items: &[Shelf
     // No instructions by default: the row only describes the hovered tile
     // (where it lives) or a full shelf.
     let hint = match hovered.and_then(|i| items.get(i)) {
-        Some(it) if imaging::path_kind(&it.path) == Some(PathKind::Missing) => {
-            Some((format!("Moved or deleted · was in {}", parent_dir(&it.path)), palette::TEXT_DIM))
-        }
+        Some(it) if imaging::path_kind(&it.path) == Some(PathKind::Missing) => Some((
+            format!("Moved or deleted · was in {}", parent_dir(&it.path)),
+            palette::TEXT_DIM,
+        )),
         Some(it) => Some((parent_dir(&it.path), palette::TEXT_DIM)),
-        None if n >= MAX_SHELF_ITEMS => Some(("Full · new files replace the oldest".to_string(), palette::TEXT_FAINT)),
+        None if n >= MAX_SHELF_ITEMS => Some((
+            "Full · new files replace the oldest".to_string(),
+            palette::TEXT_FAINT,
+        )),
         None => None,
     };
     if let Some((hint, color)) = hint {
         let hx = head.x + cw;
         let hint_r = Rect::new(hx, head.y, (right - 12.0 - hx).max(0.0), head.h);
-        ui.c.text(&format!(" · {hint}"), hint_r, &TextStyle::footnote().color(color));
+        ui.c.text(
+            &format!(" · {hint}"),
+            hint_r,
+            &TextStyle::footnote().color(color),
+        );
     }
 }
 
@@ -545,21 +644,43 @@ fn parent_dir(path: &str) -> String {
 fn draw_drop_overlay(ui: &mut Ui, st: &AppState, zone: Rect, glow: f32, card: Option<(Rect, f32)>) {
     let base = ui.c.alpha();
     ui.c.set_alpha(base * glow);
-    drop_zone(ui, card, zone, 16.0, st.accent.with_alpha(0.10), st.accent.with_alpha(0.9));
+    drop_zone(
+        ui,
+        card,
+        zone,
+        16.0,
+        st.accent.with_alpha(0.10),
+        st.accent.with_alpha(0.9),
+    );
     // One centred group: Plus + label.
     let ls = TextStyle::body().weight(Weight::Semibold);
     let tw = ui.c.measure(DROP_LABEL, &ls, zone.w).0;
     let (isz, gap) = (16.0, 6.0);
     let c = zone.center();
     let x = c.x - (isz + gap + tw) / 2.0;
-    ui.c.icon(Icon::Plus, Rect::new(x, c.y - isz / 2.0, isz, isz), st.accent);
-    ui.c.text(DROP_LABEL, Rect::new(x + isz + gap, c.y - 10.0, tw + 2.0, 20.0), &ls);
+    ui.c.icon(
+        Icon::Plus,
+        Rect::new(x, c.y - isz / 2.0, isz, isz),
+        st.accent,
+    );
+    ui.c.text(
+        DROP_LABEL,
+        Rect::new(x + isz + gap, c.y - 10.0, tw + 2.0, 20.0),
+        &ls,
+    );
     ui.c.set_alpha(base);
 }
 
 // ---------------------------------------------------------------- empty state
 
-fn draw_empty(ui: &mut Ui, st: &AppState, l: &Local, area: Rect, card: Option<(Rect, f32)>, actions: &mut Vec<Action>) {
+fn draw_empty(
+    ui: &mut Ui,
+    st: &AppState,
+    l: &Local,
+    area: Rect,
+    card: Option<(Rect, f32)>,
+    actions: &mut Vec<Action>,
+) {
     let g = l.glow;
     let accent = st.accent;
     // Same bottom edge as the drop overlay over a filled shelf.
@@ -570,7 +691,12 @@ fn draw_empty(ui: &mut Ui, st: &AppState, l: &Local, area: Rect, card: Option<(R
         if draw_phone_tile(ui, tile, 1.0 - g, card) {
             actions.push(Action::PhoneOpen);
         }
-        Rect::new(full.x, full.y, (full.w - PHONE_TILE_W - PILL_GAP).max(0.0), full.h)
+        Rect::new(
+            full.x,
+            full.y,
+            (full.w - PHONE_TILE_W - PILL_GAP).max(0.0),
+            full.h,
+        )
     } else {
         full
     };
@@ -580,25 +706,54 @@ fn draw_empty(ui: &mut Ui, st: &AppState, l: &Local, area: Rect, card: Option<(R
 
     let undo_live = g < 0.5 && l.undo.as_ref().is_some_and(|(_, t)| st.now - t < UNDO_SECS);
     let (icon, title, hint) = if g >= 0.5 {
-        (Icon::Plus, DROP_LABEL, "Oyenza Studio keeps a link — the files stay where they are")
+        (
+            Icon::Plus,
+            DROP_LABEL,
+            "Oyenza Studio keeps a link — the files stay where they are",
+        )
     } else if undo_live {
         (Icon::Tray, "Shelf cleared", "")
     } else {
-        (Icon::Tray, "Drop files here", "Drag files or folders onto the island to keep them close")
+        (
+            Icon::Tray,
+            "Drop files here",
+            "Drag files or folders onto the island to keep them close",
+        )
     };
     // Icon, title and hint (or the Undo pill) stacked around the zone centre.
     let c = zone.center();
     let icon_col = Color::lerp(Color::white(0.38), accent, g);
-    ui.c.icon(icon, Rect::from_center(Point::new(c.x, c.y - 22.0), 26.0, 26.0), icon_col);
-    ui.c.text(title, Rect::new(zone.x, c.y - 4.0, zone.w, 20.0), &TextStyle::headline().center());
+    ui.c.icon(
+        icon,
+        Rect::from_center(Point::new(c.x, c.y - 22.0), 26.0, 26.0),
+        icon_col,
+    );
+    ui.c.text(
+        title,
+        Rect::new(zone.x, c.y - 4.0, zone.w, 20.0),
+        &TextStyle::headline().center(),
+    );
     if undo_live {
         let w = ui.pill_width("Undo", true, true);
         let r = Rect::new(c.x - w / 2.0, c.y + 18.0, w, PILL_SMALL);
-        if ui.pill(wid("shelf.undo"), r, "Undo", Some(Icon::Undo), PillStyle::UtilityAccent(accent)).clicked {
+        if ui
+            .pill(
+                wid("shelf.undo"),
+                r,
+                "Undo",
+                Some(Icon::Undo),
+                PillStyle::UtilityAccent(accent),
+            )
+            .clicked
+        {
             actions.push(Action::Undo);
         }
     } else {
-        ui.c.text(hint, Rect::new(zone.x + 16.0, c.y + 16.0, zone.w - 32.0, 18.0), &TextStyle::footnote().color(palette::TEXT_DIM).center());
+        ui.c.text(
+            hint,
+            Rect::new(zone.x + 16.0, c.y + 16.0, zone.w - 32.0, 18.0),
+            &TextStyle::footnote().color(palette::TEXT_DIM).center(),
+        );
     }
 }
 
@@ -633,7 +788,11 @@ fn fade_edge(ui: &mut Ui, r: Rect, from_left: bool) {
         // composite over band j equals alpha(j).
         let b = 1.0 - (1.0 - alpha(j)) / (1.0 - alpha(j + 1));
         let w = r.w * (j + 1) as f32 / BANDS as f32;
-        let band = if from_left { Rect::new(r.x, r.y, w, r.h) } else { Rect::new(r.right() - w, r.y, w, r.h) };
+        let band = if from_left {
+            Rect::new(r.x, r.y, w, r.h)
+        } else {
+            Rect::new(r.right() - w, r.y, w, r.h)
+        };
         ui.c.fill_rect(band, Color::black(b.clamp(0.0, 1.0)));
     }
 }
@@ -641,7 +800,14 @@ fn fade_edge(ui: &mut Ui, r: Rect, from_left: bool) {
 /// Drop zone: a fill plus one solid hairline whose outer edge follows the
 /// fill's corners exactly (no fill peeking past the stroke). On the Pill card
 /// (`card`) its corners in the card's rounded corners follow those.
-fn drop_zone(ui: &mut Ui, card: Option<(Rect, f32)>, zone: Rect, radius: f32, fill: Color, stroke: Color) {
+fn drop_zone(
+    ui: &mut Ui,
+    card: Option<(Rect, f32)>,
+    zone: Rect,
+    radius: f32,
+    fill: Color,
+    stroke: Color,
+) {
     super::card::fill_box(ui, card, zone, radius, fill);
     super::card::stroke_box(ui, card, zone, radius, stroke, ZONE_STROKE);
 }
@@ -650,13 +816,25 @@ fn drop_zone(ui: &mut Ui, card: Option<(Rect, f32)>, zone: Rect, radius: f32, fi
 /// needs a frame then), whichever comes first.
 pub fn next_wake(st: &AppState) -> Option<f64> {
     let undo = LOCAL.with(|l| l.borrow().undo.as_ref().map(|(_, t)| t + UNDO_SECS));
-    let outcome = st.phone.as_ref().and_then(|p| p.outcome.as_ref()).map(|o| o.2).filter(|t| *t > st.now);
+    let outcome = st
+        .phone
+        .as_ref()
+        .and_then(|p| p.outcome.as_ref())
+        .map(|o| o.2)
+        .filter(|t| *t > st.now);
     // A pairing code shows its minutes left, then goes away.
     let pairing = match st.phone.as_ref().map(|p| &p.view) {
-        Some(PhoneView::Pairing { until, .. }) => Some(if *until > st.now { st.now + (until - st.now).rem_euclid(60.0) + 0.05 } else { st.now }),
+        Some(PhoneView::Pairing { until, .. }) => Some(if *until > st.now {
+            st.now + (until - st.now).rem_euclid(60.0) + 0.05
+        } else {
+            st.now
+        }),
         _ => None,
     };
-    [undo, outcome, pairing].into_iter().flatten().reduce(f64::min)
+    [undo, outcome, pairing]
+        .into_iter()
+        .flatten()
+        .reduce(f64::min)
 }
 
 // ---------------------------------------------------------------- phone drop
@@ -676,9 +854,21 @@ fn draw_phone_tile(ui: &mut Ui, tile: Rect, alpha: f32, card: Option<(Rect, f32)
     drop_zone(ui, card, tile, 18.0, fill, Color::white(0.12));
     let c = tile.center();
     ui.c.fill_circle(Point::new(c.x, c.y - 24.0), 18.0, Color::white(0.10));
-    ui.c.icon(Icon::Phone, Rect::from_center(Point::new(c.x, c.y - 24.0), 20.0, 20.0), palette::TEXT);
-    ui.c.text("Phone drop", Rect::new(tile.x, c.y + 2.0, tile.w, 20.0), &TextStyle::headline().center());
-    ui.c.text("Send from or save to a phone", Rect::new(tile.x + 10.0, c.y + 22.0, tile.w - 20.0, 18.0), &TextStyle::footnote().color(palette::TEXT_DIM).center());
+    ui.c.icon(
+        Icon::Phone,
+        Rect::from_center(Point::new(c.x, c.y - 24.0), 20.0, 20.0),
+        palette::TEXT,
+    );
+    ui.c.text(
+        "Phone drop",
+        Rect::new(tile.x, c.y + 2.0, tile.w, 20.0),
+        &TextStyle::headline().center(),
+    );
+    ui.c.text(
+        "Send from or save to a phone",
+        Rect::new(tile.x + 10.0, c.y + 22.0, tile.w - 20.0, 18.0),
+        &TextStyle::footnote().color(palette::TEXT_DIM).center(),
+    );
     ui.c.set_alpha(base);
     resp.clicked
 }
@@ -705,7 +895,15 @@ fn link_host(url: &str) -> &str {
 
 /// The panel under the shelf while Phone drop is open: a QR code on the
 /// left (the same-Wi-Fi link, or a pairing link), what's happening on the right.
-fn draw_phone(ui: &mut Ui, st: &AppState, l: &mut Local, pd: &PhoneDrop, r: Rect, card: Option<(Rect, f32)>, actions: &mut Vec<Action>) {
+fn draw_phone(
+    ui: &mut Ui,
+    st: &AppState,
+    l: &mut Local,
+    pd: &PhoneDrop,
+    r: Rect,
+    card: Option<(Rect, f32)>,
+    actions: &mut Vec<Action>,
+) {
     drop_zone(ui, card, r, PHONE_R, Color::white(0.03), Color::white(0.12));
     let inset = (r.h - QR_BOX) / 2.0;
     let qr_r = Rect::new(r.x + inset, r.y + inset, QR_BOX, QR_BOX);
@@ -713,20 +911,38 @@ fn draw_phone(ui: &mut Ui, st: &AppState, l: &mut Local, pd: &PhoneDrop, r: Rect
     let busy = pd.error.is_some() || pd.ask.is_some() || pd.transfer.is_some();
     let view = if busy { &PhoneView::Lan } else { &pd.view };
     match view {
-        PhoneView::Pairing { url, qr: Some(qr), .. } => draw_qr(ui, l, qr, url, qr_r),
+        PhoneView::Pairing {
+            url, qr: Some(qr), ..
+        } => draw_qr(ui, l, qr, url, qr_r),
         PhoneView::Paired => {
             ui.c.fill_rrect(qr_r, 12.0, Color::white(0.06));
             let c = qr_r.center();
-            ui.c.icon(Icon::Phone, Rect::from_center(Point::new(c.x, c.y - 14.0), 26.0, 26.0), palette::TEXT_DIM);
+            ui.c.icon(
+                Icon::Phone,
+                Rect::from_center(Point::new(c.x, c.y - 14.0), 26.0, 26.0),
+                palette::TEXT_DIM,
+            );
             let n = st.paired.len();
-            ui.c.text(&format!("{n} paired"), Rect::new(qr_r.x, c.y + 10.0, qr_r.w, 20.0), &TextStyle::headline().center());
+            ui.c.text(
+                &format!("{n} paired"),
+                Rect::new(qr_r.x, c.y + 10.0, qr_r.w, 20.0),
+                &TextStyle::headline().center(),
+            );
         }
         _ => match &pd.qr {
             Some(qr) => draw_qr(ui, l, qr, &pd.url, qr_r),
             None => {
                 ui.c.fill_rrect(qr_r, 12.0, Color::white(0.06));
-                let icon = if pd.error.is_some() { Icon::Close } else { Icon::Phone };
-                ui.c.icon(icon, Rect::from_center(qr_r.center(), 28.0, 28.0), palette::TEXT_FAINT);
+                let icon = if pd.error.is_some() {
+                    Icon::Close
+                } else {
+                    Icon::Phone
+                };
+                ui.c.icon(
+                    icon,
+                    Rect::from_center(qr_r.center(), 28.0, 28.0),
+                    palette::TEXT_FAINT,
+                );
             }
         },
     }
@@ -756,14 +972,28 @@ fn draw_phone(ui: &mut Ui, st: &AppState, l: &mut Local, pd: &PhoneDrop, r: Rect
     };
     // Room left of a row of pills for a caption (so the two never overlap).
     let caption_w = |ui: &mut Ui, labels: &[(&str, bool)]| -> f32 {
-        let pills: f32 = labels.iter().map(|(label, icon)| ui.pill_width(label, *icon, true).max(72.0) + PILL_GAP).sum();
+        let pills: f32 = labels
+            .iter()
+            .map(|(label, icon)| ui.pill_width(label, *icon, true).max(72.0) + PILL_GAP)
+            .sum();
         (r.right() - 16.0 - pills - 12.0 - x).max(0.0)
     };
 
     if let Some(err) = &pd.error {
         ui.c.text("Phone drop couldn't start", title_r, &TextStyle::headline());
         ui.c.text(err, line(0.0), &dim);
-        match pills(ui, &[("Close", None, PillStyle::Utility, "shelf.phone.close"), ("Try again", None, PillStyle::Primary(st.accent), "shelf.phone.retry")]) {
+        match pills(
+            ui,
+            &[
+                ("Close", None, PillStyle::Utility, "shelf.phone.close"),
+                (
+                    "Try again",
+                    None,
+                    PillStyle::Primary(st.accent),
+                    "shelf.phone.retry",
+                ),
+            ],
+        ) {
             Some(0) => actions.push(Action::PhoneClose),
             Some(1) => actions.push(Action::PhoneOpen),
             _ => {}
@@ -773,10 +1003,25 @@ fn draw_phone(ui: &mut Ui, st: &AppState, l: &mut Local, pd: &PhoneDrop, r: Rect
 
     if let Some(ask) = &pd.ask {
         let n = ask.files.len();
-        ui.c.text(&format!("{} wants to send {}", ask.from, plural(n, "file", "files")), title_r, &TextStyle::headline());
+        ui.c.text(
+            &format!("{} wants to send {}", ask.from, plural(n, "file", "files")),
+            title_r,
+            &TextStyle::headline(),
+        );
         ui.c.text(&names_line(&ask.files), line(0.0), &dim);
         ui.c.text(&fmt_bytes(ask.total), line(1.0), &dim);
-        match pills(ui, &[("Accept", Some(Icon::Check), PillStyle::Primary(palette::GREEN), "shelf.phone.accept"), ("Decline", None, PillStyle::Utility, "shelf.phone.decline")]) {
+        match pills(
+            ui,
+            &[
+                (
+                    "Accept",
+                    Some(Icon::Check),
+                    PillStyle::Primary(palette::GREEN),
+                    "shelf.phone.accept",
+                ),
+                ("Decline", None, PillStyle::Utility, "shelf.phone.decline"),
+            ],
+        ) {
             Some(0) => actions.push(Action::PhoneAnswer(ask.id, true)),
             Some(1) => actions.push(Action::PhoneAnswer(ask.id, false)),
             _ => {}
@@ -785,16 +1030,40 @@ fn draw_phone(ui: &mut Ui, st: &AppState, l: &mut Local, pd: &PhoneDrop, r: Rect
     }
 
     if let Some(t) = &pd.transfer {
-        ui.c.text(&format!("Receiving from {}", t.from), title_r, &TextStyle::headline());
+        ui.c.text(
+            &format!("Receiving from {}", t.from),
+            title_r,
+            &TextStyle::headline(),
+        );
         let detail = if t.files > 1 {
-            format!("File {} of {} · {} of {}", (t.file + 1).min(t.files), t.files, fmt_bytes(t.done), fmt_bytes(t.total))
+            format!(
+                "File {} of {} · {} of {}",
+                (t.file + 1).min(t.files),
+                t.files,
+                fmt_bytes(t.done),
+                fmt_bytes(t.total)
+            )
         } else {
             format!("{} of {}", fmt_bytes(t.done), fmt_bytes(t.total))
         };
         ui.c.text(&detail, line(0.0), &dim);
-        let frac = if t.total > 0 { (t.done as f64 / t.total as f64) as f32 } else { 1.0 };
-        ui.progress_bar(wid("shelf.phone.progress"), Rect::new(x, line(1.0).y + 8.0, w, 4.0), frac, palette::GREEN, false);
-        if pills(ui, &[("Stop", None, PillStyle::Utility, "shelf.phone.stop")]) == Some(0) {
+        let frac = if t.total > 0 {
+            (t.done as f64 / t.total as f64) as f32
+        } else {
+            1.0
+        };
+        ui.progress_bar(
+            wid("shelf.phone.progress"),
+            Rect::new(x, line(1.0).y + 8.0, w, 4.0),
+            frac,
+            palette::GREEN,
+            false,
+        );
+        if pills(
+            ui,
+            &[("Stop", None, PillStyle::Utility, "shelf.phone.stop")],
+        ) == Some(0)
+        {
             actions.push(Action::PhoneClose);
         }
         return;
@@ -807,17 +1076,38 @@ fn draw_phone(ui: &mut Ui, st: &AppState, l: &mut Local, pd: &PhoneDrop, r: Rect
                 return;
             }
             ui.c.text("Scan to pair a phone", title_r, &TextStyle::headline());
-            ui.c.text(&format!("Then it can send to {THIS_COMPUTER} from any network."), line(0.0), &dim);
+            ui.c.text(
+                &format!("Then it can send to {THIS_COMPUTER} from any network."),
+                line(0.0),
+                &dim,
+            );
             let second = if st.pair_server == Some(false) {
-                format!("Can't reach {} right now. Check the internet.", pairing_host())
+                format!(
+                    "Can't reach {} right now. Check the internet.",
+                    pairing_host()
+                )
             } else {
                 let mins = ((until - now) / 60.0).ceil().max(1.0) as u32;
-                format!("Use the camera. The code works for {} more {}.", mins, if mins == 1 { "minute" } else { "minutes" })
+                format!(
+                    "Use the camera. The code works for {} more {}.",
+                    mins,
+                    if mins == 1 { "minute" } else { "minutes" }
+                )
             };
             ui.c.text(&second, line(1.0), &dim);
             let cw = caption_w(ui, &[("Done", false), ("Back", false)]);
-            ui.c.text(&format!("Pairing link · {}", pairing_host()), Rect::new(x, pills_y + 7.0, cw, 16.0), &small);
-            match pills(ui, &[("Done", None, PillStyle::Utility, "shelf.pair.done"), ("Back", None, PillStyle::Utility, "shelf.pair.back")]) {
+            ui.c.text(
+                &format!("Pairing link · {}", pairing_host()),
+                Rect::new(x, pills_y + 7.0, cw, 16.0),
+                &small,
+            );
+            match pills(
+                ui,
+                &[
+                    ("Done", None, PillStyle::Utility, "shelf.pair.done"),
+                    ("Back", None, PillStyle::Utility, "shelf.pair.back"),
+                ],
+            ) {
                 Some(0) => actions.push(Action::PhoneClose),
                 Some(1) => actions.push(Action::Pair(PairCmd::Back)),
                 _ => {}
@@ -825,8 +1115,20 @@ fn draw_phone(ui: &mut Ui, st: &AppState, l: &mut Local, pd: &PhoneDrop, r: Rect
             return;
         }
         PhoneView::Paired => {
-            let list = [("Done", None, PillStyle::Utility, "shelf.pair.done"), ("Back", None, PillStyle::Utility, "shelf.pair.back"), ("Pair a phone", Some(Icon::Phone), PillStyle::Utility, "shelf.pair.another")];
-            let cw = caption_w(ui, &[("Done", false), ("Back", false), ("Pair a phone", true)]);
+            let list = [
+                ("Done", None, PillStyle::Utility, "shelf.pair.done"),
+                ("Back", None, PillStyle::Utility, "shelf.pair.back"),
+                (
+                    "Pair a phone",
+                    Some(Icon::Phone),
+                    PillStyle::Utility,
+                    "shelf.pair.another",
+                ),
+            ];
+            let cw = caption_w(
+                ui,
+                &[("Done", false), ("Back", false), ("Pair a phone", true)],
+            );
             draw_paired_list(ui, st, x, w, r, pills_y, cw, actions);
             match pills(ui, &list) {
                 Some(0) => actions.push(Action::PhoneClose),
@@ -843,12 +1145,20 @@ fn draw_phone(ui: &mut Ui, st: &AppState, l: &mut Local, pd: &PhoneDrop, r: Rect
         Some((text, good, _)) => {
             let color = if *good { palette::GREEN } else { palette::TEXT };
             let ix = if *good {
-                ui.c.icon(Icon::CheckCircle, Rect::new(x, title_r.y + 1.0, 18.0, 18.0), palette::GREEN);
+                ui.c.icon(
+                    Icon::CheckCircle,
+                    Rect::new(x, title_r.y + 1.0, 18.0, 18.0),
+                    palette::GREEN,
+                );
                 24.0
             } else {
                 0.0
             };
-            ui.c.text(text, Rect::new(x + ix, title_r.y, w - ix, title_r.h), &TextStyle::headline().color(color));
+            ui.c.text(
+                text,
+                Rect::new(x + ix, title_r.y, w - ix, title_r.h),
+                &TextStyle::headline().color(color),
+            );
             let next = match (&pd.outcome_line, &pd.visitor) {
                 (Some(line), _) => line.clone(),
                 (None, Some(v)) => format!("{v} can send more from the same page."),
@@ -858,27 +1168,64 @@ fn draw_phone(ui: &mut Ui, st: &AppState, l: &mut Local, pd: &PhoneDrop, r: Rect
         }
         None => match &pd.visitor {
             Some(v) => {
-                ui.c.text(&format!("{v} is connected"), title_r, &TextStyle::headline());
-                ui.c.text("Pick photos or files on the phone and tap Send.", line(0.0), &dim);
-                ui.c.text("Files on the Shelf can be saved from the phone.", line(1.0), &dim);
+                ui.c.text(
+                    &format!("{v} is connected"),
+                    title_r,
+                    &TextStyle::headline(),
+                );
+                ui.c.text(
+                    "Pick photos or files on the phone and tap Send.",
+                    line(0.0),
+                    &dim,
+                );
+                ui.c.text(
+                    "Files on the Shelf can be saved from the phone.",
+                    line(1.0),
+                    &dim,
+                );
             }
             None => {
-                ui.c.text("Scan with your phone's camera", title_r, &TextStyle::headline());
-                ui.c.text(&format!("Your phone needs the same Wi-Fi as {THIS_COMPUTER}."), line(0.0), &dim);
+                ui.c.text(
+                    "Scan with your phone's camera",
+                    title_r,
+                    &TextStyle::headline(),
+                );
+                ui.c.text(
+                    &format!("Your phone needs the same Wi-Fi as {THIS_COMPUTER}."),
+                    line(0.0),
+                    &dim,
+                );
                 ui.c.text(ALLOW_HINT, line(1.0), &dim);
             }
         },
     }
     // One pill per meaning: pair the first phone, or see the paired ones
     // (that list has its own Pair a phone).
-    let (pair_label, pair_icon, pair_cmd) = if st.paired.is_empty() { ("Pair a phone", Some(Icon::Phone), PairCmd::Begin) } else { ("Paired phones", None, PairCmd::List) };
+    let (pair_label, pair_icon, pair_cmd) = if st.paired.is_empty() {
+        ("Pair a phone", Some(Icon::Phone), PairCmd::Begin)
+    } else {
+        ("Paired phones", None, PairCmd::List)
+    };
     let n = if PAIRING { 2 } else { 1 };
     let host = link_host(&pd.url);
     if !host.is_empty() {
-        let cw = caption_w(ui, &[("Done", false), (pair_label, pair_icon.is_some())][..n]);
-        ui.c.text(&format!("This session's link · {host}"), Rect::new(x, pills_y + 7.0, cw, 16.0), &small);
+        let cw = caption_w(
+            ui,
+            &[("Done", false), (pair_label, pair_icon.is_some())][..n],
+        );
+        ui.c.text(
+            &format!("This session's link · {host}"),
+            Rect::new(x, pills_y + 7.0, cw, 16.0),
+            &small,
+        );
     }
-    match pills(ui, &[("Done", None, PillStyle::Utility, "shelf.phone.done"), (pair_label, pair_icon, PillStyle::Utility, "shelf.pair.open")][..n]) {
+    match pills(
+        ui,
+        &[
+            ("Done", None, PillStyle::Utility, "shelf.phone.done"),
+            (pair_label, pair_icon, PillStyle::Utility, "shelf.pair.open"),
+        ][..n],
+    ) {
         Some(0) => actions.push(Action::PhoneClose),
         Some(1) => actions.push(Action::Pair(pair_cmd)),
         _ => {}
@@ -887,8 +1234,16 @@ fn draw_phone(ui: &mut Ui, st: &AppState, l: &mut Local, pd: &PhoneDrop, r: Rect
 
 /// Where pairing links point (the meeting server's host name).
 fn pairing_host() -> String {
-    let server = std::env::var("PONI_DROP_SERVER").ok().filter(|s| s.starts_with("http")).unwrap_or_else(|| poni_core::pairdrop::DEFAULT_SERVER.to_string());
-    server.split("://").nth(1).unwrap_or(&server).trim_end_matches('/').to_string()
+    let server = std::env::var("PONI_DROP_SERVER")
+        .ok()
+        .filter(|s| s.starts_with("http"))
+        .unwrap_or_else(|| poni_core::pairdrop::DEFAULT_SERVER.to_string());
+    server
+        .split("://")
+        .nth(1)
+        .unwrap_or(&server)
+        .trim_end_matches('/')
+        .to_string()
 }
 
 /// Most phones the list shows (the panel is 152 DIP tall).
@@ -897,31 +1252,70 @@ const ROW_H: f32 = 30.0;
 
 /// The paired phones, most recently used first, each with Remove.
 #[allow(clippy::too_many_arguments)]
-fn draw_paired_list(ui: &mut Ui, st: &AppState, x: f32, w: f32, r: Rect, pills_y: f32, caption_w: f32, actions: &mut Vec<Action>) {
+fn draw_paired_list(
+    ui: &mut Ui,
+    st: &AppState,
+    x: f32,
+    w: f32,
+    r: Rect,
+    pills_y: f32,
+    caption_w: f32,
+    actions: &mut Vec<Action>,
+) {
     let dim = TextStyle::footnote().color(palette::TEXT_DIM);
     if st.paired.is_empty() {
-        ui.c.text("No phone is paired", Rect::new(x, r.y + 18.0, w, 20.0), &TextStyle::headline());
-        ui.c.text(&format!("Pair a phone, and it can send to {THIS_COMPUTER} from any network."), Rect::new(x, r.y + 44.0, w, 18.0), &dim);
+        ui.c.text(
+            "No phone is paired",
+            Rect::new(x, r.y + 18.0, w, 20.0),
+            &TextStyle::headline(),
+        );
+        ui.c.text(
+            &format!("Pair a phone, and it can send to {THIS_COMPUTER} from any network."),
+            Rect::new(x, r.y + 44.0, w, 18.0),
+            &dim,
+        );
         return;
     }
     let unix = st.unix;
     for (i, p) in st.paired.iter().take(LIST_ROWS).enumerate() {
         let y = r.y + 12.0 + i as f32 * ROW_H;
         let remove_w = ui.pill_width("Remove", false, true).max(72.0);
-        let remove_r = Rect::new(x + w - remove_w, y + (ROW_H - PILL_SMALL) / 2.0 - 2.0, remove_w, PILL_SMALL);
-        if ui.pill(wid(&format!("shelf.pair.remove.{}", short(&p.room))), remove_r, "Remove", None, PillStyle::Utility).clicked {
+        let remove_r = Rect::new(
+            x + w - remove_w,
+            y + (ROW_H - PILL_SMALL) / 2.0 - 2.0,
+            remove_w,
+            PILL_SMALL,
+        );
+        if ui
+            .pill(
+                wid(&format!("shelf.pair.remove.{}", short(&p.room))),
+                remove_r,
+                "Remove",
+                None,
+                PillStyle::Utility,
+            )
+            .clicked
+        {
             actions.push(Action::Pair(PairCmd::Remove(p.room.clone())));
         }
         let seen = last_seen(unix, p);
         let sw = ui.c.measure(&seen, &dim, 200.0).0 + 4.0;
         let seen_r = Rect::new(remove_r.x - 12.0 - sw, y + 4.0, sw, 20.0);
         ui.c.text(&seen, seen_r, &dim);
-        ui.c.text(&p.name, Rect::new(x, y + 3.0, (seen_r.x - 10.0 - x).max(0.0), 20.0), &TextStyle::body().weight(Weight::Semibold));
+        ui.c.text(
+            &p.name,
+            Rect::new(x, y + 3.0, (seen_r.x - 10.0 - x).max(0.0), 20.0),
+            &TextStyle::body().weight(Weight::Semibold),
+        );
     }
     let more = st.paired.len().saturating_sub(LIST_ROWS);
     if more > 0 {
         let small = TextStyle::caption().color(palette::TEXT_FAINT);
-        ui.c.text(&format!("+{more} used less recently"), Rect::new(x, pills_y + 7.0, caption_w, 16.0), &small);
+        ui.c.text(
+            &format!("+{more} used less recently"),
+            Rect::new(x, pills_y + 7.0, caption_w, 16.0),
+            &small,
+        );
     }
 }
 
@@ -958,7 +1352,12 @@ fn draw_qr(ui: &mut Ui, l: &mut Local, qr: &QrMatrix, url: &str, r: Rect) {
     // One device pixel per bitmap pixel, on the pixel grid.
     let side = box_px as f32 / scale;
     let snap = |v: f32| (v * scale).round() / scale;
-    let dst = Rect::new(snap(r.center().x - side / 2.0), snap(r.center().y - side / 2.0), side, side);
+    let dst = Rect::new(
+        snap(r.center().x - side / 2.0),
+        snap(r.center().y - side / 2.0),
+        side,
+        side,
+    );
     ui.c.image(&img, dst, 12.0);
 }
 

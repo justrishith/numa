@@ -14,7 +14,11 @@ fn home_override() -> Option<PathBuf> {
 fn env_dir(var: &str) -> PathBuf {
     std::env::var_os(var)
         .map(PathBuf::from)
-        .or_else(|| std::env::current_exe().ok().and_then(|p| p.parent().map(|d| d.to_path_buf())))
+        .or_else(|| {
+            std::env::current_exe()
+                .ok()
+                .and_then(|p| p.parent().map(|d| d.to_path_buf()))
+        })
         .unwrap_or_else(|| PathBuf::from("."))
 }
 
@@ -23,7 +27,9 @@ pub fn data_dir() -> PathBuf {
 }
 
 pub fn cache_dir() -> PathBuf {
-    home_override().map(|h| h.join("cache")).unwrap_or_else(|| env_dir("LOCALAPPDATA").join("Poni"))
+    home_override()
+        .map(|h| h.join("cache"))
+        .unwrap_or_else(|| env_dir("LOCALAPPDATA").join("Poni"))
 }
 
 pub fn settings_path() -> PathBuf {
@@ -63,7 +69,11 @@ pub fn phone_inbox_dir() -> PathBuf {
     }
     let downloads = downloads_dir().unwrap_or_else(|| env_dir("USERPROFILE").join("Downloads"));
     let before_rename = downloads.join("Oyen Poni");
-    if before_rename.is_dir() { before_rename } else { downloads.join("Oyenza Studio") }
+    if before_rename.is_dir() {
+        before_rename
+    } else {
+        downloads.join("Oyenza Studio")
+    }
 }
 
 /// Where the Downloader saves videos and sound: the user's Downloads folder
@@ -124,7 +134,8 @@ pub fn notes_dir() -> PathBuf {
     if let Some(h) = home_override() {
         return h.join("notes-saved");
     }
-    let docs = known_folder(&windows::Win32::UI::Shell::FOLDERID_Documents).unwrap_or_else(|| env_dir("USERPROFILE").join("Documents"));
+    let docs = known_folder(&windows::Win32::UI::Shell::FOLDERID_Documents)
+        .unwrap_or_else(|| env_dir("USERPROFILE").join("Documents"));
     docs.join("Oyenza Studio").join("Notes")
 }
 

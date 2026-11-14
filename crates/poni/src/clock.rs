@@ -26,12 +26,18 @@ pub fn hold(t: Option<f64>) {
 }
 
 pub fn unix_now() -> i64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0)
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
 }
 
 /// 100-ns ticks since 1601-01-01 UTC (Windows FILETIME / WinRT DateTime).
 pub fn filetime_now() -> i64 {
-    let unix_100ns = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_nanos() as i64 / 100).unwrap_or(0);
+    let unix_100ns = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos() as i64 / 100)
+        .unwrap_or(0);
     unix_100ns + 116_444_736_000_000_000
 }
 

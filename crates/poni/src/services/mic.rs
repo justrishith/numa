@@ -31,10 +31,14 @@ use std::time::Duration;
 use windows::core::{w, GUID, HRESULT};
 use windows::Win32::Foundation::E_ACCESSDENIED;
 use windows::Win32::Media::Audio::{
-    eCapture, eConsole, EDataFlow, IAudioCaptureClient, IAudioClient, IMMDeviceEnumerator, MMDeviceEnumerator, AUDCLNT_BUFFERFLAGS_SILENT,
-    AUDCLNT_E_DEVICE_INVALIDATED, AUDCLNT_SHAREMODE_SHARED, AUDCLNT_STREAMFLAGS_LOOPBACK, WAVEFORMATEX, WAVEFORMATEXTENSIBLE,
+    eCapture, eConsole, EDataFlow, IAudioCaptureClient, IAudioClient, IMMDeviceEnumerator,
+    MMDeviceEnumerator, AUDCLNT_BUFFERFLAGS_SILENT, AUDCLNT_E_DEVICE_INVALIDATED,
+    AUDCLNT_SHAREMODE_SHARED, AUDCLNT_STREAMFLAGS_LOOPBACK, WAVEFORMATEX, WAVEFORMATEXTENSIBLE,
 };
-use windows::Win32::System::Com::{CoCreateInstance, CoInitializeEx, CoTaskMemFree, CoUninitialize, CLSCTX_ALL, COINIT_MULTITHREADED};
+use windows::Win32::System::Com::{
+    CoCreateInstance, CoInitializeEx, CoTaskMemFree, CoUninitialize, CLSCTX_ALL,
+    COINIT_MULTITHREADED,
+};
 
 /// How often the thread takes what the device has. The buffer below holds
 /// 500 ms, so a wake-up that comes late loses nothing.
@@ -87,7 +91,10 @@ impl Mic {
         if privacy_denies() {
             return Err(MicError::Denied);
         }
-        let shared = Arc::new(Shared { stop: AtomicBool::new(false), level: AtomicU32::new(0) });
+        let shared = Arc::new(Shared {
+            stop: AtomicBool::new(false),
+            level: AtomicU32::new(0),
+        });
         let (ready_tx, ready_rx) = mpsc::channel();
         let (worker, path, sink) = (shared.clone(), out.to_path_buf(), sink.clone());
         let thread = std::thread::Builder::new()
@@ -95,7 +102,10 @@ impl Mic {
             .spawn(move || capture(&path, &worker, &sink, ready_tx))
             .map_err(|e| MicError::Failed(format!("no microphone thread ({e})")))?;
         match ready_rx.recv_timeout(OPEN_TIMEOUT) {
-            Ok(Ok(())) => Ok(Mic { shared, thread: Some(thread) }),
+            Ok(Ok(())) => Ok(Mic {
+                shared,
+                thread: Some(thread),
+            }),
             Ok(Err(e)) => {
                 let _ = thread.join();
                 Err(e)
@@ -118,7 +128,9 @@ impl Mic {
         self.shared.stop.store(true, Ordering::SeqCst);
         match self.thread.take().map(JoinHandle::join) {
             Some(Ok(r)) => r,
-            _ => Err(MicError::Failed("the recording stopped unexpectedly".into())),
+            _ => Err(MicError::Failed(
+                "the recording stopped unexpectedly".into(),
+            )),
         }
     }
 }
@@ -140,14 +152,26 @@ impl Drop for Mic {
 pub(crate) fn privacy_denies() -> bool {
     let base = w!("Software\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\ConsentStore\\microphone");
     let nonpackaged = w!("Software\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\ConsentStore\\microphone\\NonPackaged");
-    [base, nonpackaged].into_iter().any(|key| consent(key).is_some_and(|v| v.eq_ignore_ascii_case("Deny")))
+    [base, nonpackaged]
+        .into_iter()
+        .any(|key| consent(key).is_some_and(|v| v.eq_ignore_ascii_case("Deny")))
 }
 
 fn consent(key: windows::core::PCWSTR) -> Option<String> {
     use windows::Win32::System::Registry::{RegGetValueW, HKEY_CURRENT_USER, RRF_RT_REG_SZ};
     let mut buf = [0u16; 16];
     let mut size = (buf.len() * 2) as u32;
-    let r = unsafe { RegGetValueW(HKEY_CURRENT_USER, key, w!("Value"), RRF_RT_REG_SZ, None, Some(buf.as_mut_ptr() as *mut core::ffi::c_void), Some(&mut size)) };
+    let r = unsafe {
+        RegGetValueW(
+            HKEY_CURRENT_USER,
+            key,
+            w!("Value"),
+            RRF_RT_REG_SZ,
+            None,
+            Some(buf.as_mut_ptr() as *mut core::ffi::c_void),
+            Some(&mut size),
+        )
+    };
     if r.is_err() {
         return None;
     }
@@ -183,24 +207,59 @@ fn open() -> Result<Device, MicError> {
 pub(crate) fn open_endpoint(flow: EDataFlow, what: &str) -> Result<Device, MicError> {
     let loopback = flow != eCapture;
     unsafe {
-        let devices: IMMDeviceEnumerator = CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL).map_err(|e| mic_error("no Core Audio", &e))?;
-        let device = devices.GetDefaultAudioEndpoint(flow, eConsole).map_err(|e| mic_error(if loopback { "no playback device" } else { "no recording device" }, &e))?;
-        let client: IAudioClient = device.Activate(CLSCTX_ALL, None).map_err(|e| mic_error("can't open the microphone", &e))?;
-        let mix = client.GetMixFormat().map_err(|e| mic_error("no recording format", &e))?;
+        let devices: IMMDeviceEnumerator = CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL)
+            .map_err(|e| mic_error("no Core Audio", &e))?;
+        let device = devices
+            .GetDefaultAudioEndpoint(flow, eConsole)
+            .map_err(|e| {
+                mic_error(
+                    if loopback {
+                        "no playback device"
+                    } else {
+                        "no recording device"
+                    },
+                    &e,
+                )
+            })?;
+        let client: IAudioClient = device
+            .Activate(CLSCTX_ALL, None)
+            .map_err(|e| mic_error("can't open the microphone", &e))?;
+        let mix = client
+            .GetMixFormat()
+            .map_err(|e| mic_error("no recording format", &e))?;
         let format = sample_format(mix);
         let wf = std::ptr::read_unaligned(mix);
-        let flags = if loopback { AUDCLNT_STREAMFLAGS_LOOPBACK } else { 0 };
+        let flags = if loopback {
+            AUDCLNT_STREAMFLAGS_LOOPBACK
+        } else {
+            0
+        };
         let init = client.Initialize(AUDCLNT_SHAREMODE_SHARED, flags, BUFFER_HNS, 0, mix, None);
         CoTaskMemFree(Some(mix as *const core::ffi::c_void));
         init.map_err(|e| mic_error("can't start the microphone", &e))?;
-        let format = format.ok_or_else(|| MicError::Failed(format!("recording format {} with {} bits isn't one this app reads", { wf.wFormatTag }, { wf.wBitsPerSample })))?;
-        let capture: IAudioCaptureClient = client.GetService().map_err(|e| mic_error("can't read the microphone", &e))?;
+        let format = format.ok_or_else(|| {
+            MicError::Failed(format!(
+                "recording format {} with {} bits isn't one this app reads",
+                { wf.wFormatTag },
+                { wf.wBitsPerSample }
+            ))
+        })?;
+        let capture: IAudioCaptureClient = client
+            .GetService()
+            .map_err(|e| mic_error("can't read the microphone", &e))?;
         let (rate, channels, block) = (wf.nSamplesPerSec, wf.nChannels, wf.nBlockAlign as usize);
         if block != format.bytes() * channels as usize {
-            return Err(MicError::Failed(format!("recording frames of {block} bytes for {channels} channels")));
+            return Err(MicError::Failed(format!(
+                "recording frames of {block} bytes for {channels} channels"
+            )));
         }
         crate::pinfo!("{what} at {rate} Hz, {channels} channel(s), {format:?}");
-        Ok(Device { client, capture, downmix: Downmix::new(rate, channels, format), block })
+        Ok(Device {
+            client,
+            capture,
+            downmix: Downmix::new(rate, channels, format),
+            block,
+        })
     }
 }
 
@@ -226,12 +285,19 @@ unsafe fn sample_format(f: *const WAVEFORMATEX) -> Option<SampleFormat> {
 
 /// The `poni-mic` thread: open the device, say whether it opened, then
 /// record until told to stop.
-fn capture(path: &Path, shared: &Shared, sink: &EventSink, ready: mpsc::Sender<Result<(), MicError>>) -> Result<(PathBuf, f32), MicError> {
+fn capture(
+    path: &Path,
+    shared: &Shared,
+    sink: &EventSink,
+    ready: mpsc::Sender<Result<(), MicError>>,
+) -> Result<(PathBuf, f32), MicError> {
     let com = unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) };
     let out = (|| {
         let started = open().and_then(|d| {
-            let wav = WavWriter::create(path).map_err(|e| MicError::Failed(format!("can't write the answer ({e})")))?;
-            unsafe { d.client.Start() }.map_err(|e| mic_error("the microphone didn't start", &e))?;
+            let wav = WavWriter::create(path)
+                .map_err(|e| MicError::Failed(format!("can't write the answer ({e})")))?;
+            unsafe { d.client.Start() }
+                .map_err(|e| mic_error("the microphone didn't start", &e))?;
             Ok((d, wav))
         });
         let (mut d, mut wav) = match started {
@@ -251,7 +317,9 @@ fn capture(path: &Path, shared: &Shared, sink: &EventSink, ready: mpsc::Sender<R
         }
         shared.level.store(0, Ordering::Relaxed);
         match result {
-            Ok(()) => wav.finish().map_err(|e| MicError::Failed(format!("can't finish the answer ({e})"))),
+            Ok(()) => wav
+                .finish()
+                .map_err(|e| MicError::Failed(format!("can't finish the answer ({e})"))),
             Err(e) => {
                 crate::pwarn!("ielts: the microphone stopped mid-answer ({e})");
                 sink.send(AppEvent::MicFailed(e.to_string()));
@@ -275,12 +343,17 @@ fn record(d: &mut Device, wav: &mut WavWriter, shared: &Shared) -> Result<(), Mi
     loop {
         let last = shared.stop.load(Ordering::SeqCst);
         loop {
-            let frames = unsafe { d.capture.GetNextPacketSize() }.map_err(|e| mic_error("the microphone went away", &e))?;
+            let frames = unsafe { d.capture.GetNextPacketSize() }
+                .map_err(|e| mic_error("the microphone went away", &e))?;
             if frames == 0 {
                 break;
             }
             let (mut data, mut n, mut flags) = (std::ptr::null_mut::<u8>(), 0u32, 0u32);
-            unsafe { d.capture.GetBuffer(&mut data, &mut n, &mut flags, None, None) }.map_err(|e| mic_error("the microphone went away", &e))?;
+            unsafe {
+                d.capture
+                    .GetBuffer(&mut data, &mut n, &mut flags, None, None)
+            }
+            .map_err(|e| mic_error("the microphone went away", &e))?;
             pcm.clear();
             if flags & AUDCLNT_BUFFERFLAGS_SILENT.0 as u32 != 0 || data.is_null() {
                 d.downmix.silence(n as usize, &mut pcm);
@@ -288,10 +361,14 @@ fn record(d: &mut Device, wav: &mut WavWriter, shared: &Shared) -> Result<(), Mi
                 let bytes = unsafe { std::slice::from_raw_parts(data, n as usize * d.block) };
                 d.downmix.push(bytes, &mut pcm);
             }
-            unsafe { d.capture.ReleaseBuffer(n) }.map_err(|e| mic_error("the microphone went away", &e))?;
-            wav.write(&pcm).map_err(|e| MicError::Failed(format!("can't write the answer ({e})")))?;
+            unsafe { d.capture.ReleaseBuffer(n) }
+                .map_err(|e| mic_error("the microphone went away", &e))?;
+            wav.write(&pcm)
+                .map_err(|e| MicError::Failed(format!("can't write the answer ({e})")))?;
             meter.push_back((pcm.len(), poni_core::ielts::peak(&pcm)));
-            while meter.len() > 1 && meter.iter().skip(1).map(|m| m.0).sum::<usize>() >= METER_SAMPLES {
+            while meter.len() > 1
+                && meter.iter().skip(1).map(|m| m.0).sum::<usize>() >= METER_SAMPLES
+            {
                 meter.pop_front();
             }
             let level = meter.iter().map(|m| m.1).fold(0.0f32, f32::max);
@@ -303,4 +380,3 @@ fn record(d: &mut Device, wav: &mut WavWriter, shared: &Shared) -> Result<(), Mi
         std::thread::sleep(POLL);
     }
 }
-

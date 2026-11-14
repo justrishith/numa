@@ -14,6 +14,7 @@ use crate::activities::{self, Mode};
 use crate::clock;
 use crate::commands::{Command, MediaCmd, OyenzaCmd, PhoneCmd, Sound, UsageCmd};
 use crate::events::{AppEvent, EventSink, OyenzaEvent};
+use crate::events::{AppleMusicStatus, LyricsResult};
 use crate::gfx::{scale_about, union_rect, Canvas, Gfx, Matrix3x2};
 use crate::glass;
 use crate::icons::Icon;
@@ -27,10 +28,9 @@ use crate::pill;
 use crate::services;
 use crate::settings_host;
 use crate::settings_window::{self, Section};
-use crate::events::{AppleMusicStatus, LyricsResult};
 use crate::state::{
-    AppState, HudKind, InlineAction, Locate, LyricsState, LyricsStatus, Notice, NoticeAction, OyenzaLink, PhoneAsk, PhoneDrop, PhoneTransfer, PrayerState,
-    VolumeState,
+    AppState, HudKind, InlineAction, Locate, LyricsState, LyricsStatus, Notice, NoticeAction,
+    OyenzaLink, PhoneAsk, PhoneDrop, PhoneTransfer, PrayerState, VolumeState,
 };
 use crate::ui::{wid, CursorKind, Hit, Input, KeyInput, MouseButton, Ui};
 use crate::window::{self, ScreenInfo, ViewInput};
@@ -38,28 +38,36 @@ use block2::RcBlock;
 use objc2::rc::Retained;
 use objc2::runtime::AnyObject;
 use objc2::MainThreadMarker;
-use objc2_app_kit::{NSApplication, NSApplicationActivationPolicy, NSApplicationDidChangeScreenParametersNotification, NSCursor, NSEvent, NSEventMask, NSMenu};
+use objc2_app_kit::{
+    NSApplication, NSApplicationActivationPolicy,
+    NSApplicationDidChangeScreenParametersNotification, NSCursor, NSEvent, NSEventMask, NSMenu,
+};
 use objc2_core_foundation::{CGPoint, CGRect, CGSize};
 use objc2_core_graphics::CGContext;
-use objc2_foundation::{NSNotification, NSNotificationCenter, NSRunLoop, NSRunLoopCommonModes, NSTimer};
-use poni_core::addons::{Status as AddonStatus, DOWNLOADER, HEALTH, JAPANESE_READINGS, PRAYER_TIMES, SYSTEM};
+use objc2_foundation::{
+    NSNotification, NSNotificationCenter, NSRunLoop, NSRunLoopCommonModes, NSTimer,
+};
+use poni_core::addons::{
+    Status as AddonStatus, DOWNLOADER, HEALTH, JAPANESE_READINGS, PRAYER_TIMES, SYSTEM,
+};
 use poni_core::frametime::MotionStats;
-use poni_core::phonedrop::{Event as PhoneEvent, QrMatrix};
 use poni_core::geom::{palette, Color, Point, Rect};
 use poni_core::look::{Look, Material};
 use poni_core::oyenza;
+use poni_core::phonedrop::{Event as PhoneEvent, QrMatrix};
 use poni_core::prayer::{Due, PlaceList, Prayer, PrayerMoment};
 use poni_core::settings::{IdleStyle, PrayerSound, Settings, Theme};
 use poni_core::spot;
-use poni_core::sysmon::{CoreKind, Module};
 use poni_core::store::{load_json, parse_json, save_json_atomic, LoadOutcome, Store};
+use poni_core::sysmon::{CoreKind, Module};
 use std::cell::RefCell;
 use std::path::PathBuf;
 use std::ptr::NonNull;
 use std::sync::mpsc::{self, Receiver};
 
 /// Steps for copying the Apple Music token (README).
-const APPLE_MUSIC_HELP_URL: &str = "https://github.com/lucacadalora/oyenza-studio#apple-music-lyrics";
+const APPLE_MUSIC_HELP_URL: &str =
+    "https://github.com/lucacadalora/oyenza-studio#apple-music-lyrics";
 
 /// The grow springs overshoot by about 3 %; the window leaves 5 %.
 const OVERSHOOT: f32 = 1.05;
@@ -110,7 +118,16 @@ enum Timer {
     /// The next read of the update file (`crate::updates`).
     Update,
 }
-const TIMERS: [Timer; 8] = [Timer::Hover, Timer::Collapse, Timer::Wake, Timer::Save, Timer::Minute, Timer::Smoke, Timer::Stats, Timer::Update];
+const TIMERS: [Timer; 8] = [
+    Timer::Hover,
+    Timer::Collapse,
+    Timer::Wake,
+    Timer::Save,
+    Timer::Minute,
+    Timer::Smoke,
+    Timer::Stats,
+    Timer::Update,
+];
 
 thread_local! {
     static APP: RefCell<Option<App>> = const { RefCell::new(None) };
@@ -154,7 +171,13 @@ fn enter<R>(f: impl FnOnce(&mut App) -> R) -> Option<R> {
         Ok(mut g) => g.as_mut().map(f),
         Err(_) => None,
     });
-    let pending = APP.with(|c| c.try_borrow_mut().ok().and_then(|mut g| g.as_mut().map(|a| std::mem::take(&mut a.pending)))).unwrap_or_default();
+    let pending = APP
+        .with(|c| {
+            c.try_borrow_mut()
+                .ok()
+                .and_then(|mut g| g.as_mut().map(|a| std::mem::take(&mut a.pending)))
+        })
+        .unwrap_or_default();
     for d in pending {
         match d {
             Deferred::TakeKeyboard => window::take_keyboard(),
@@ -172,7 +195,13 @@ fn enter<R>(f: impl FnOnce(&mut App) -> R) -> Option<R> {
 
 pub fn main_entry() -> i32 {
     let args: Vec<String> = std::env::args().collect();
-    let arg_after = |flag: &str| args.iter().position(|a| a == flag).map(|i| args.get(i + 1).cloned().unwrap_or_else(|| "poni-out".into()));
+    let arg_after = |flag: &str| {
+        args.iter().position(|a| a == flag).map(|i| {
+            args.get(i + 1)
+                .cloned()
+                .unwrap_or_else(|| "poni-out".into())
+        })
+    };
     if let Some(dir) = arg_after("--render") {
         return crate::render::run(&dir, &args);
     }
@@ -190,7 +219,11 @@ pub fn main_entry() -> i32 {
         std::env::set_var("PONI_HOME", &home);
     }
     crate::plog::init(paths::log_path());
-    pinfo!("Oyenza Studio {} starting on macOS (args: {:?})", env!("CARGO_PKG_VERSION"), &args[1..]);
+    pinfo!(
+        "Oyenza Studio {} starting on macOS (args: {:?})",
+        env!("CARGO_PKG_VERSION"),
+        &args[1..]
+    );
     std::panic::set_hook(Box::new(|info| {
         perror!("panic: {info}");
     }));
@@ -236,7 +269,12 @@ fn single_instance() -> Result<Option<std::fs::File>, ()> {
     if let Some(dir) = path.parent() {
         let _ = std::fs::create_dir_all(dir);
     }
-    let Ok(f) = std::fs::OpenOptions::new().create(true).truncate(false).write(true).open(&path) else {
+    let Ok(f) = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(&path)
+    else {
         return Ok(None);
     };
     if unsafe { flock(f.as_raw_fd(), LOCK_EX | LOCK_NB) } != 0 {
@@ -264,14 +302,20 @@ fn install_monitors() {
     if let Some(m) = NSEvent::addGlobalMonitorForEventsMatchingMask_handler(mask, &global) {
         keep.push(m);
     }
-    if let Some(m) = unsafe { NSEvent::addLocalMonitorForEventsMatchingMask_handler(mask, &local) } {
+    if let Some(m) = unsafe { NSEvent::addLocalMonitorForEventsMatchingMask_handler(mask, &local) }
+    {
         keep.push(m);
     }
     let screens = RcBlock::new(|_n: NonNull<NSNotification>| {
         enter(|a| a.refresh_screen());
     });
     let observer = unsafe {
-        NSNotificationCenter::defaultCenter().addObserverForName_object_queue_usingBlock(Some(NSApplicationDidChangeScreenParametersNotification), None, None, &screens)
+        NSNotificationCenter::defaultCenter().addObserverForName_object_queue_usingBlock(
+            Some(NSApplicationDidChangeScreenParametersNotification),
+            None,
+            None,
+            &screens,
+        )
     };
     // Registered for the app's whole life.
     std::mem::forget(observer);
@@ -567,7 +611,8 @@ pub struct App {
     smoke_mic_stop: Option<(bool, String)>,
     /// Meeting notes' recording step: the recording (or why none), then
     /// what stopping it gave.
-    smoke_notes: Option<Result<(services::notes::Recording, bool, bool), poni_core::notes::CaptureIssue>>,
+    smoke_notes:
+        Option<Result<(services::notes::Recording, bool, bool), poni_core::notes::CaptureIssue>>,
     smoke_notes_stop: Option<(bool, String)>,
     /// The island floated on the last frame (Pill letting go of the notch).
     was_floating: bool,
@@ -607,8 +652,22 @@ impl App {
         }
         let (tx, rx) = mpsc::channel();
         let sink = EventSink::new(tx);
-        let screen = window::pick_screen(mtm).unwrap_or(ScreenInfo { x: 0.0, y: 0.0, w: 1440.0, h: 900.0, scale: 2.0, notch: None, cx: 720.0 });
-        pinfo!("screen {}x{} pt at {}x, notch {:?}", screen.w, screen.h, screen.scale, screen.notch);
+        let screen = window::pick_screen(mtm).unwrap_or(ScreenInfo {
+            x: 0.0,
+            y: 0.0,
+            w: 1440.0,
+            h: 900.0,
+            scale: 2.0,
+            notch: None,
+            cx: 720.0,
+        });
+        pinfo!(
+            "screen {}x{} pt at {}x, notch {:?}",
+            screen.w,
+            screen.h,
+            screen.scale,
+            screen.notch
+        );
         let gfx = Gfx::new(screen.scale);
         let mut st = AppState::new(settings, store);
         // The Downloader (Studio Pro): the Mac has it too.
@@ -724,14 +783,28 @@ impl App {
         let g = self.geom_for(&self.mode);
         self.island.snap(g);
         if self.smoke.is_none() {
-            self.updater = Some(crate::updates::Updater::start(paths::data_dir().join("update.json"), &mut self.st, crate::updates::unix_now()));
+            self.updater = Some(crate::updates::Updater::start(
+                paths::data_dir().join("update.json"),
+                &mut self.st,
+                crate::updates::unix_now(),
+            ));
         }
         let line = crate::updates::menu_line(&self.st, self.updater.is_some());
-        self.menubar = Some(MenuBar::add(self.mtm, &self.menu_settings(), self.st.pinned, services::login::status(), &self.st.oyenza.link, line));
+        self.menubar = Some(MenuBar::add(
+            self.mtm,
+            &self.menu_settings(),
+            self.st.pinned,
+            services::login::status(),
+            &self.st.oyenza.link,
+            line,
+        ));
         self.st.power = services::power::query();
         services::power::watch(self.sink.clone());
         services::audio::start(self.sink.clone());
-        self.media = Some(services::media::MediaService::start(self.mtm, self.sink.clone()));
+        self.media = Some(services::media::MediaService::start(
+            self.mtm,
+            self.sink.clone(),
+        ));
         self.lyrics = match services::lyrics::LyricsService::start(self.sink.clone()) {
             Ok(l) => Some(l),
             Err(e) => {
@@ -772,12 +845,30 @@ impl App {
             self.start_sysmon();
         }
         if self.first_run && self.smoke.is_none() {
-            let place = if self.screen.notch.is_some() { "Point at the notch to open it" } else { "Point at the island to open it" };
-            self.st.notify(Icon::CheckCircle, self.st.accent, "Oyenza Studio is on", place, 6.0, None);
+            let place = if self.screen.notch.is_some() {
+                "Point at the notch to open it"
+            } else {
+                "Point at the island to open it"
+            };
+            self.st.notify(
+                Icon::CheckCircle,
+                self.st.accent,
+                "Oyenza Studio is on",
+                place,
+                6.0,
+                None,
+            );
         }
         if self.smoke.is_none() {
             if let Some(dir) = services::trash_app_from_before_rename() {
-                self.st.notify(Icon::Trash, self.st.accent, "Oyen Poni is now Oyenza Studio", format!("The old copy in {dir} is in the Trash"), 8.0, None);
+                self.st.notify(
+                    Icon::Trash,
+                    self.st.accent,
+                    "Oyen Poni is now Oyenza Studio",
+                    format!("The old copy in {dir} is in the Trash"),
+                    8.0,
+                    None,
+                );
             }
         }
         if self.smoke.is_some() {
@@ -836,7 +927,9 @@ impl App {
 
     /// Keep one NSTimer armed for the earliest deadline.
     fn sync_timer(&mut self) {
-        let Some(next) = self.timers.iter().flatten().copied().reduce(f64::min) else { return };
+        let Some(next) = self.timers.iter().flatten().copied().reduce(f64::min) else {
+            return;
+        };
         if let Some((at, _)) = &self.ns_timer {
             if (*at - next).abs() < 0.0005 {
                 return;
@@ -877,10 +970,17 @@ impl App {
             Timer::Hover => {
                 if !self.hovering || self.expanded {
                     self.hover_arm = None;
-                } else if self.mode == Mode::Notice && self.st.notice.as_ref().is_some_and(|n| n.inline.is_some()) {
+                } else if self.mode == Mode::Notice
+                    && self.st.notice.as_ref().is_some_and(|n| n.inline.is_some())
+                {
                     // A notice with an inline pill stays put under a resting
                     // pointer so the pill can be clicked.
-                } else if self.input.mouse.and_then(|p| self.hit_at(p)).is_some_and(|h| h.id == wid(activities::PRAYER_OK_ID)) {
+                } else if self
+                    .input
+                    .mouse
+                    .and_then(|p| self.hit_at(p))
+                    .is_some_and(|h| h.id == wid(activities::PRAYER_OK_ID))
+                {
                     // So does the prayer countdown under a pointer resting on
                     // its OK (resting on the rest of it still opens).
                 } else {
@@ -888,7 +988,14 @@ impl App {
                 }
             }
             Timer::Collapse => {
-                if !self.hovering && !self.st.pinned && !self.text_focus && !self.drag_hover && !self.menu_open && self.input.pressed_id.is_none() && !self.phone_holds() {
+                if !self.hovering
+                    && !self.st.pinned
+                    && !self.text_focus
+                    && !self.drag_hover
+                    && !self.menu_open
+                    && self.input.pressed_id.is_none()
+                    && !self.phone_holds()
+                {
                     self.collapse();
                 }
             }
@@ -936,7 +1043,12 @@ impl App {
             consider(n.until);
         }
         // While a full-screen app hides the island only the phase end matters.
-        if let Some(b) = self.st.pomodoro.next_second_boundary(now).filter(|_| !hidden) {
+        if let Some(b) = self
+            .st
+            .pomodoro
+            .next_second_boundary(now)
+            .filter(|_| !hidden)
+        {
             consider(now + b + 0.005);
         }
         // A recording's time, on the closed island and its page: a frame for
@@ -1014,10 +1126,15 @@ impl App {
         }
         if !before.lyrics && self.st.settings.lyrics {
             if let Some(m) = self.st.media.clone() {
-                let stale = self.st.lyrics.track_key != m.track_key || self.st.lyrics.status == LyricsStatus::Idle;
+                let stale = self.st.lyrics.track_key != m.track_key
+                    || self.st.lyrics.status == LyricsStatus::Idle;
                 if stale && !m.title.is_empty() {
                     if let Some(l) = self.lyrics.as_ref() {
-                        self.st.lyrics = LyricsState { track_key: m.track_key.clone(), status: LyricsStatus::Loading, ..Default::default() };
+                        self.st.lyrics = LyricsState {
+                            track_key: m.track_key.clone(),
+                            status: LyricsStatus::Loading,
+                            ..Default::default()
+                        };
                         l.request(&m);
                     }
                 }
@@ -1047,7 +1164,10 @@ impl App {
         if before.prayer.place != self.st.settings.prayer.place {
             self.resolve_prayer_place();
         }
-        if !before.prayer.follow_location && self.st.settings.prayer.follow_location && self.st.prayer_on() {
+        if !before.prayer.follow_location
+            && self.st.settings.prayer.follow_location
+            && self.st.prayer_on()
+        {
             self.locate();
         }
         // The Downloader: off stops its downloads before its tools are deleted.
@@ -1069,8 +1189,21 @@ impl App {
         for a in pages::addons::OFFERED {
             let on = self.st.settings.addon_on(a.id);
             if before.addon_on(a.id) != on {
-                pinfo!("add-ons: {} switched {}", a.id, if on { "on" } else { "off" });
-                self.st.addons.insert(a.id, if !on { AddonStatus::Off } else if a.downloads() { AddonStatus::Checking } else { AddonStatus::Ready });
+                pinfo!(
+                    "add-ons: {} switched {}",
+                    a.id,
+                    if on { "on" } else { "off" }
+                );
+                self.st.addons.insert(
+                    a.id,
+                    if !on {
+                        AddonStatus::Off
+                    } else if a.downloads() {
+                        AddonStatus::Checking
+                    } else {
+                        AddonStatus::Ready
+                    },
+                );
                 addons_changed |= a.downloads();
             }
         }
@@ -1097,7 +1230,11 @@ impl App {
     /// on, it isn't started (see `AppEvent::Addon` for its end). A Studio Pro
     /// add-on's files (the Downloader's tools) wait for Pro (`pro_changed`).
     fn sync_addons(&mut self) {
-        let on: Vec<&'static str> = pages::addons::OFFERED.iter().filter(|a| a.downloads() && self.st.settings.addon_on(a.id)).map(|a| a.id).collect();
+        let on: Vec<&'static str> = pages::addons::OFFERED
+            .iter()
+            .filter(|a| a.downloads() && self.st.settings.addon_on(a.id))
+            .map(|a| a.id)
+            .collect();
         let pro = self.st.studio_pro() == Some(true);
         match &self.addons {
             Some(svc) => {
@@ -1106,13 +1243,15 @@ impl App {
                 }
                 svc.set_pro(pro);
             }
-            None if !on.is_empty() => match services::addons::AddonService::start(self.sink.clone(), on) {
-                Ok(svc) => {
-                    svc.set_pro(pro);
-                    self.addons = Some(svc);
+            None if !on.is_empty() => {
+                match services::addons::AddonService::start(self.sink.clone(), on) {
+                    Ok(svc) => {
+                        svc.set_pro(pro);
+                        self.addons = Some(svc);
+                    }
+                    Err(e) => pwarn!("add-ons: unavailable ({e})"),
                 }
-                Err(e) => pwarn!("add-ons: unavailable ({e})"),
-            },
+            }
             None => {}
         }
     }
@@ -1139,14 +1278,24 @@ impl App {
             }
             None => {
                 let scale = settings_host::create(self.mtm);
-                self.settings_ui = Some(SettingsUi { view: settings_window::View::new(section.unwrap_or(Section::General)), gfx: Gfx::new(scale), draw_ms: 0.0, draw_max_ms: 0.0, frame_t: None });
+                self.settings_ui = Some(SettingsUi {
+                    view: settings_window::View::new(section.unwrap_or(Section::General)),
+                    gfx: Gfx::new(scale),
+                    draw_ms: 0.0,
+                    draw_max_ms: 0.0,
+                    frame_t: None,
+                });
                 // Start at login's switch reads it.
                 self.st.ui.autostart = Some(services::login::status() == Login::On);
                 pinfo!("settings window: open");
             }
         }
         // Add-ons lists IELTS and Meeting notes by the account's Pro, as its tab does.
-        if self.settings_ui.as_ref().is_some_and(|s| s.view.section == Section::Addons) {
+        if self
+            .settings_ui
+            .as_ref()
+            .is_some_and(|s| s.view.section == Section::Addons)
+        {
             self.oyenza(OyenzaCmd::CheckPro);
         }
         self.pending.push(Deferred::ShowSettings);
@@ -1155,14 +1304,24 @@ impl App {
     /// Draw the Settings window (its view's drawRect), light or dark as the
     /// window shows. The commands its clicks pushed run with the next frame.
     fn draw_settings(&mut self, ctx: &CGContext) {
-        let Some(ui) = self.settings_ui.as_mut() else { return };
+        let Some(ui) = self.settings_ui.as_mut() else {
+            return;
+        };
         let light = settings_host::is_light();
         ui.gfx.set_scale(settings_host::scale());
         ui.gfx.set_look(poni_core::look::glass(light));
-        self.st.now = self.st.now.max(ui.frame_t.take().unwrap_or_else(clock::mono));
+        self.st.now = self
+            .st
+            .now
+            .max(ui.frame_t.take().unwrap_or_else(clock::mono));
         let now = self.st.now;
         let frame = settings_window::Frame {
-            card: Rect::new(0.0, 0.0, settings_host::WIDTH as f32, settings_host::HEIGHT as f32),
+            card: Rect::new(
+                0.0,
+                0.0,
+                settings_host::WIDTH as f32,
+                settings_host::HEIGHT as f32,
+            ),
             own_chrome: false,
             top: settings_host::TITLEBAR,
             still: settings_host::reduce_motion() || !settings_host::has_frames(),
@@ -1216,7 +1375,9 @@ impl App {
     /// Input in the Settings window. True for a press on an empty part:
     /// the window moves with the drag.
     fn settings_input(&mut self, input: settings_host::Input) -> bool {
-        let Some(ui) = self.settings_ui.as_mut() else { return false };
+        let Some(ui) = self.settings_ui.as_mut() else {
+            return false;
+        };
         let v = &mut ui.view;
         let redraw = match input {
             settings_host::Input::Move { x, y } => v.hover(Point::new(x, y)),
@@ -1294,7 +1455,10 @@ impl App {
             MenuCmd::ReloadSettings => {
                 // Never reset on a typo: keep the current settings and say what's wrong.
                 let path = paths::settings_path();
-                match std::fs::read_to_string(&path).map_err(|e| e.to_string()).and_then(|t| parse_json::<Settings>(&t)) {
+                match std::fs::read_to_string(&path)
+                    .map_err(|e| e.to_string())
+                    .and_then(|t| parse_json::<Settings>(&t))
+                {
                     Ok(s2) => {
                         let s2 = s2.sanitized();
                         self.st.settings = s2.clone();
@@ -1304,7 +1468,14 @@ impl App {
                     }
                     Err(e) => {
                         pwarn!("settings.json not reloaded: {e}");
-                        self.st.notify(Icon::Sliders, palette::ORANGE, "Settings not reloaded", "settings.json has an error; see poni.log", 5.0, None);
+                        self.st.notify(
+                            Icon::Sliders,
+                            palette::ORANGE,
+                            "Settings not reloaded",
+                            "settings.json has an error; see poni.log",
+                            5.0,
+                            None,
+                        );
                     }
                 }
             }
@@ -1333,7 +1504,14 @@ impl App {
         let line = crate::updates::menu_line(&self.st, self.updater.is_some());
         let s = self.menu_settings();
         if let Some(m) = self.menubar.as_mut() {
-            m.refresh(self.mtm, &s, self.st.pinned, login, &self.st.oyenza.link, line);
+            m.refresh(
+                self.mtm,
+                &s,
+                self.st.pinned,
+                login,
+                &self.st.oyenza.link,
+                line,
+            );
         }
     }
 
@@ -1361,14 +1539,28 @@ impl App {
         match result {
             Err(e) => {
                 pwarn!("start at login: {e}");
-                self.st.notify(Icon::Sliders, palette::ORANGE, "Couldn't start at login", e, 6.0, None);
+                self.st.notify(
+                    Icon::Sliders,
+                    palette::ORANGE,
+                    "Couldn't start at login",
+                    e,
+                    6.0,
+                    None,
+                );
             }
             Ok(()) => {
                 let now = services::login::status();
                 pinfo!("start at login: {now:?}");
                 if now == Login::NeedsApproval {
                     services::login::open_settings();
-                    self.st.notify(Icon::Sliders, palette::ORANGE, "Allow Oyenza Studio to start at login", "Turn it on in Login Items", 8.0, None);
+                    self.st.notify(
+                        Icon::Sliders,
+                        palette::ORANGE,
+                        "Allow Oyenza Studio to start at login",
+                        "Turn it on in Login Items",
+                        8.0,
+                        None,
+                    );
                 }
             }
         }
@@ -1379,12 +1571,26 @@ impl App {
     fn use_apple_music_token(&mut self) {
         let text = services::clipboard::read_text().unwrap_or_default();
         let Some(token) = poni_core::applemusic::clean_user_token(&text) else {
-            self.st.notify(Icon::Lyrics, palette::ORANGE, "No Apple Music token copied", "Copy media-user-token first", 6.0, None);
+            self.st.notify(
+                Icon::Lyrics,
+                palette::ORANGE,
+                "No Apple Music token copied",
+                "Copy media-user-token first",
+                6.0,
+                None,
+            );
             return;
         };
         if let Err(e) = services::secret::save(&paths::apple_music_token_path(), &token) {
             pwarn!("apple music: cannot save the token ({e})");
-            self.st.notify(Icon::Lyrics, palette::ORANGE, "Couldn't save the token", "Details in poni.log", 5.0, None);
+            self.st.notify(
+                Icon::Lyrics,
+                palette::ORANGE,
+                "Couldn't save the token",
+                "Details in poni.log",
+                5.0,
+                None,
+            );
             return;
         }
         pinfo!("apple music: token saved");
@@ -1393,13 +1599,27 @@ impl App {
             l.apple_token_changed();
         }
         self.refetch_lyrics();
-        self.st.notify(Icon::Lyrics, palette::BLUE, "Checking the Apple Music token", "One moment", 4.0, None);
+        self.st.notify(
+            Icon::Lyrics,
+            palette::BLUE,
+            "Checking the Apple Music token",
+            "One moment",
+            4.0,
+            None,
+        );
     }
 
     fn forget_apple_music_token(&mut self) {
         if let Err(e) = services::secret::delete(&paths::apple_music_token_path()) {
             pwarn!("apple music: cannot remove the token ({e})");
-            self.st.notify(Icon::Lyrics, palette::ORANGE, "Couldn't remove the token", "Details in poni.log", 5.0, None);
+            self.st.notify(
+                Icon::Lyrics,
+                palette::ORANGE,
+                "Couldn't remove the token",
+                "Details in poni.log",
+                5.0,
+                None,
+            );
             return;
         }
         pinfo!("apple music: token removed");
@@ -1407,17 +1627,41 @@ impl App {
             l.apple_token_changed();
         }
         self.refetch_lyrics();
-        self.st.notify(Icon::Lyrics, palette::BLUE, "Apple Music lyrics off", "Lyrics from LRCLIB only", 4.0, None);
+        self.st.notify(
+            Icon::Lyrics,
+            palette::BLUE,
+            "Apple Music lyrics off",
+            "Lyrics from LRCLIB only",
+            4.0,
+            None,
+        );
     }
 
     fn on_apple_music(&mut self, status: AppleMusicStatus) {
         let (color, title, subtitle) = match status {
-            AppleMusicStatus::Accepted => (palette::GREEN, "Apple Music lyrics on", "LRCLIB fills in the rest"),
-            AppleMusicStatus::Rejected => (palette::ORANGE, "Apple Music token not accepted", "Copy a fresh one from music.apple.com"),
-            AppleMusicStatus::Unreachable => (palette::ORANGE, "Can't reach Apple Music", "Token saved; trying again later"),
-            AppleMusicStatus::NoAccess => (palette::ORANGE, "No lyrics from Apple Music", "They need an Apple Music subscription"),
+            AppleMusicStatus::Accepted => (
+                palette::GREEN,
+                "Apple Music lyrics on",
+                "LRCLIB fills in the rest",
+            ),
+            AppleMusicStatus::Rejected => (
+                palette::ORANGE,
+                "Apple Music token not accepted",
+                "Copy a fresh one from music.apple.com",
+            ),
+            AppleMusicStatus::Unreachable => (
+                palette::ORANGE,
+                "Can't reach Apple Music",
+                "Token saved; trying again later",
+            ),
+            AppleMusicStatus::NoAccess => (
+                palette::ORANGE,
+                "No lyrics from Apple Music",
+                "They need an Apple Music subscription",
+            ),
         };
-        self.st.notify(Icon::Lyrics, color, title, subtitle, 6.0, None);
+        self.st
+            .notify(Icon::Lyrics, color, title, subtitle, 6.0, None);
     }
 
     /// Look up the current track's lyrics again (the sources changed).
@@ -1425,9 +1669,15 @@ impl App {
         if !self.st.settings.lyrics {
             return;
         }
-        let Some(m) = self.st.media.clone().filter(|m| !m.title.is_empty()) else { return };
+        let Some(m) = self.st.media.clone().filter(|m| !m.title.is_empty()) else {
+            return;
+        };
         if let Some(l) = self.lyrics.as_ref() {
-            self.st.lyrics = LyricsState { track_key: m.track_key.clone(), status: LyricsStatus::Loading, ..Default::default() };
+            self.st.lyrics = LyricsState {
+                track_key: m.track_key.clone(),
+                status: LyricsStatus::Loading,
+                ..Default::default()
+            };
             l.request(&m);
         }
     }
@@ -1465,7 +1715,10 @@ impl App {
     }
 
     fn start_sysmon(&mut self) {
-        match services::sysmon::SysMon::start(self.sink.clone(), self.st.settings.system_history_on()) {
+        match services::sysmon::SysMon::start(
+            self.sink.clone(),
+            self.st.settings.system_history_on(),
+        ) {
             Ok(s) => {
                 if self.away.0 || self.away.1 {
                     s.away(true);
@@ -1481,8 +1734,15 @@ impl App {
     /// Arm the update file's timer for the next read, or stop it while a
     /// read runs.
     fn schedule_update(&mut self) {
-        match self.updater.as_ref().and_then(|u| u.due_in(crate::updates::unix_now())) {
-            Some(s) => self.set_timer(Timer::Update, s.saturating_mul(1000).clamp(1000, u32::MAX as u64) as u32),
+        match self
+            .updater
+            .as_ref()
+            .and_then(|u| u.due_in(crate::updates::unix_now()))
+        {
+            Some(s) => self.set_timer(
+                Timer::Update,
+                s.saturating_mul(1000).clamp(1000, u32::MAX as u64) as u32,
+            ),
             None => self.kill_timer(Timer::Update),
         }
     }
@@ -1525,11 +1785,19 @@ impl App {
     /// comes back as `UpdateEvent::Checked`.
     fn read_update_file(&mut self, now: u64) {
         self.start_addon_thread();
-        let started = self.addons.as_ref().map(|a| a.run(services::update::check_job(self.sink.clone()))).is_some();
+        let started = self
+            .addons
+            .as_ref()
+            .map(|a| a.run(services::update::check_job(self.sink.clone())))
+            .is_some();
         if let Some(u) = self.updater.as_mut() {
             u.begin();
             if !started {
-                u.checked(&mut self.st, Err("the add-on thread isn't running".into()), now);
+                u.checked(
+                    &mut self.st,
+                    Err("the add-on thread isn't running".into()),
+                    now,
+                );
                 self.schedule_update();
             }
         }
@@ -1539,10 +1807,20 @@ impl App {
     /// which then takes its app out (after a look at the file, and at start
     /// for one already offered). Only where this copy can replace itself.
     fn fetch_setup(&mut self) {
-        let Some((d, path)) = self.updater.as_mut().and_then(|u| u.want_setup(&mut self.st)) else { return };
+        let Some((d, path)) = self
+            .updater
+            .as_mut()
+            .and_then(|u| u.want_setup(&mut self.st))
+        else {
+            return;
+        };
         self.start_addon_thread();
         let job = services::update::download_job(self.sink.clone(), d, path);
-        if self.addons.as_ref().map(|a| a.run(job)).is_none() && self.updater.as_mut().is_some_and(|u| u.fetched(&mut self.st, Err("the add-on thread isn't running".into()))) {
+        if self.addons.as_ref().map(|a| a.run(job)).is_none()
+            && self.updater.as_mut().is_some_and(|u| {
+                u.fetched(&mut self.st, Err("the add-on thread isn't running".into()))
+            })
+        {
             self.expand();
         }
     }
@@ -1565,11 +1843,22 @@ impl App {
             if let Some(dmg) = self.updater.as_ref().and_then(|u| u.downloaded(&self.st)) {
                 services::open(&dmg.to_string_lossy());
                 self.collapse();
-                self.st.notify(Icon::Download, self.st.accent, "Install it by hand this time", "Drag Oyenza Studio to Applications in the window that opened", 10.0, None);
+                self.st.notify(
+                    Icon::Download,
+                    self.st.accent,
+                    "Install it by hand this time",
+                    "Drag Oyenza Studio to Applications in the window that opened",
+                    10.0,
+                    None,
+                );
                 return;
             }
         }
-        if let Some(url) = self.updater.as_ref().and_then(|u| u.download_page(&self.st)) {
+        if let Some(url) = self
+            .updater
+            .as_ref()
+            .and_then(|u| u.download_page(&self.st))
+        {
             pinfo!("updates: opening {url}");
             services::open(&url);
         }
@@ -1614,7 +1903,11 @@ impl App {
         if hide == self.fullscreen_hidden {
             return;
         }
-        pinfo!("fullscreen app {}: island {}", if hide { "in front" } else { "gone" }, if hide { "hidden" } else { "shown" });
+        pinfo!(
+            "fullscreen app {}: island {}",
+            if hide { "in front" } else { "gone" },
+            if hide { "hidden" } else { "shown" }
+        );
         if hide {
             self.collapse();
             self.leave();
@@ -1635,16 +1928,30 @@ impl App {
     pub fn on_event(&mut self, ev: AppEvent) {
         let now = clock::mono();
         self.st.now = now;
-        let media_before = matches!(ev, AppEvent::Media(_) | AppEvent::MediaTimeline { .. }).then(|| self.media_snapshot());
+        let media_before = matches!(ev, AppEvent::Media(_) | AppEvent::MediaTimeline { .. })
+            .then(|| self.media_snapshot());
         // What the Settings window shows that a service reports.
-        let shown = matches!(ev, AppEvent::Update(_) | AppEvent::Oyenza(_) | AppEvent::Addon { .. } | AppEvent::Usage(_) | AppEvent::Located(_));
+        let shown = matches!(
+            ev,
+            AppEvent::Update(_)
+                | AppEvent::Oyenza(_)
+                | AppEvent::Addon { .. }
+                | AppEvent::Usage(_)
+                | AppEvent::Located(_)
+        );
         if let Some(s) = self.settings_ui.as_mut().filter(|_| shown) {
             s.view.dirty = true;
         }
         // A download's bytes coming in while nobody can see the island (locked,
         // displays asleep) wait for the next frame something else asks for:
         // the pill catches up then, as nothing else of it moves on its own.
-        let unseen = matches!(ev, AppEvent::Download { line: poni_core::ytdlp::Line::Progress { .. }, .. }) && (self.away.0 || self.away.1);
+        let unseen = matches!(
+            ev,
+            AppEvent::Download {
+                line: poni_core::ytdlp::Line::Progress { .. },
+                ..
+            }
+        ) && (self.away.0 || self.away.1);
         match ev {
             AppEvent::Media(session) => {
                 let prev_key = self.st.media.as_ref().map(|m| m.track_key.clone());
@@ -1661,7 +1968,11 @@ impl App {
                         }
                         let changed = prev_key.as_deref() != Some(s.track_key.as_str());
                         if changed {
-                            self.st.lyrics = LyricsState { track_key: s.track_key.clone(), status: LyricsStatus::Idle, ..Default::default() };
+                            self.st.lyrics = LyricsState {
+                                track_key: s.track_key.clone(),
+                                status: LyricsStatus::Idle,
+                                ..Default::default()
+                            };
                             if self.st.settings.lyrics && !s.title.is_empty() {
                                 if let Some(l) = self.lyrics.as_ref() {
                                     self.st.lyrics.status = LyricsStatus::Loading;
@@ -1677,7 +1988,10 @@ impl App {
                     }
                 }
             }
-            AppEvent::MediaTimeline { track_key, timeline } => {
+            AppEvent::MediaTimeline {
+                track_key,
+                timeline,
+            } => {
                 if let Some(m) = self.st.media.as_mut() {
                     if m.track_key == track_key {
                         m.timeline = timeline;
@@ -1695,7 +2009,12 @@ impl App {
             AppEvent::Lyrics { track_key, result } => {
                 if self.st.lyrics.track_key == track_key {
                     match result {
-                        LyricsResult::Found { lyrics, source, ruby, wants_ja_readings } => {
+                        LyricsResult::Found {
+                            lyrics,
+                            source,
+                            ruby,
+                            wants_ja_readings,
+                        } => {
                             self.st.lyrics.status = LyricsStatus::Found;
                             self.st.lyrics.lyrics = Some(lyrics);
                             self.st.lyrics.source = source;
@@ -1704,26 +2023,43 @@ impl App {
                             // The first Japanese song whose kanji went unread
                             // switches Japanese readings on, as on Windows
                             // (app.rs): switched off by hand, they stay off.
-                            if poni_core::addons::ja_switches_on(&self.st.settings, wants_ja_readings) {
+                            if poni_core::addons::ja_switches_on(
+                                &self.st.settings,
+                                wants_ja_readings,
+                            ) {
                                 pinfo!("lyrics: a Japanese song's kanji went unread; switching Japanese readings on");
                                 self.st.settings.set_addon(JAPANESE_READINGS.id, true);
                                 self.st.cmds.push(Command::SaveSettings);
                             }
                         }
-                        LyricsResult::Instrumental => self.st.lyrics.status = LyricsStatus::Instrumental,
+                        LyricsResult::Instrumental => {
+                            self.st.lyrics.status = LyricsStatus::Instrumental
+                        }
                         LyricsResult::NotFound => self.st.lyrics.status = LyricsStatus::NotFound,
                         LyricsResult::Error(e) => self.st.lyrics.status = LyricsStatus::Error(e),
                     }
                 }
             }
             AppEvent::AppleMusic(status) => self.on_apple_music(status),
-            AppEvent::Volume { level, muted, switched } => {
+            AppEvent::Volume {
+                level,
+                muted,
+                switched,
+            } => {
                 // The first report only sets the level; changes show the pop-up.
                 let first = !self.st.volume.known;
-                self.st.volume = VolumeState { level, muted, known: true };
+                self.st.volume = VolumeState {
+                    level,
+                    muted,
+                    known: true,
+                };
                 // A new output device's level isn't news while the headphone
                 // pop-up says why the device changed.
-                let headphones = switched && matches!(self.st.hud.as_ref().map(|h| &h.kind), Some(HudKind::Bluetooth { .. }));
+                let headphones = switched
+                    && matches!(
+                        self.st.hud.as_ref().map(|h| &h.kind),
+                        Some(HudKind::Bluetooth { .. })
+                    );
                 if !first && !headphones && self.st.settings.hud_volume {
                     self.st.show_hud(HudKind::Volume { level, muted }, 1.6);
                 }
@@ -1738,13 +2074,27 @@ impl App {
                 }
                 if self.st.settings.hud_power && p.has_battery {
                     if p.on_ac != old.on_ac {
-                        self.st.show_hud(HudKind::Charging { percent: p.percent, plugged: p.on_ac }, 2.2);
-                    } else if !p.on_ac && ((old.percent > 20 && p.percent <= 20) || (old.percent > 10 && p.percent <= 10)) {
-                        self.st.show_hud(HudKind::LowBattery { percent: p.percent }, 4.0);
+                        self.st.show_hud(
+                            HudKind::Charging {
+                                percent: p.percent,
+                                plugged: p.on_ac,
+                            },
+                            2.2,
+                        );
+                    } else if !p.on_ac
+                        && ((old.percent > 20 && p.percent <= 20)
+                            || (old.percent > 10 && p.percent <= 10))
+                    {
+                        self.st
+                            .show_hud(HudKind::LowBattery { percent: p.percent }, 4.0);
                     }
                 }
             }
-            AppEvent::ShelfAdd(paths) if self.expanded && self.st.page == PageKind::Script && pages::script::take_drop(&mut self.st, &paths) => {
+            AppEvent::ShelfAdd(paths)
+                if self.expanded
+                    && self.st.page == PageKind::Script
+                    && pages::script::take_drop(&mut self.st, &paths) =>
+            {
                 // A text file dropped on the Script page becomes the script.
                 self.drag_hover = false;
                 self.st.drag_hover = false;
@@ -1786,7 +2136,9 @@ impl App {
             }
             AppEvent::AppIcon { path, image } => {
                 let px = pages::system::icon_px(self.gfx.scale());
-                self.st.app_icons.insert(path, image.map(|i| pages::system::shrink_icon(&i, px)));
+                self.st
+                    .app_icons
+                    .insert(path, image.map(|i| pages::system::shrink_icon(&i, px)));
             }
             AppEvent::ScreensAsleep(on) => self.set_away(Some(on), None),
             AppEvent::Locked(on) => self.set_away(None, Some(on)),
@@ -1805,7 +2157,10 @@ impl App {
             AppEvent::Notes(reply) => self.notes_reply(*reply),
             AppEvent::NotesStopped(issue) => self.notes_stopped(issue),
             AppEvent::Update(services::update::UpdateEvent::Checked(r)) => {
-                let open = self.updater.as_mut().is_some_and(|u| u.checked(&mut self.st, r, crate::updates::unix_now()));
+                let open = self
+                    .updater
+                    .as_mut()
+                    .is_some_and(|u| u.checked(&mut self.st, r, crate::updates::unix_now()));
                 self.schedule_update();
                 self.fetch_setup();
                 self.refresh_menu();
@@ -1818,7 +2173,11 @@ impl App {
             }
             AppEvent::Update(services::update::UpdateEvent::Downloaded(r)) => {
                 // Check for updates… was waiting for it: the Update sheet.
-                if self.updater.as_mut().is_some_and(|u| u.fetched(&mut self.st, r)) {
+                if self
+                    .updater
+                    .as_mut()
+                    .is_some_and(|u| u.fetched(&mut self.st, r))
+                {
                     self.expand();
                 }
                 self.request_frame();
@@ -1829,9 +2188,22 @@ impl App {
             AppEvent::Usage(ev) => self.on_usage(ev),
             AppEvent::AdzanEnded => self.adzan_ended(),
             AppEvent::Log(s) => pinfo!("{s}"),
-            AppEvent::Bluetooth { name, connected, battery, audio } => {
+            AppEvent::Bluetooth {
+                name,
+                connected,
+                battery,
+                audio,
+            } => {
                 if self.st.settings.hud_bluetooth {
-                    self.st.show_hud(HudKind::Bluetooth { name, connected, battery, audio }, 2.6);
+                    self.st.show_hud(
+                        HudKind::Bluetooth {
+                            name,
+                            connected,
+                            battery,
+                            audio,
+                        },
+                        2.6,
+                    );
                 }
             }
             AppEvent::Fullscreen(on) => {
@@ -1855,7 +2227,10 @@ impl App {
             self.st.addons.insert(id, status);
         }
         if id == PRAYER_TIMES.id {
-            if status == AddonStatus::Ready && self.st.settings.addon_on(id) && self.st.prayer.places.is_none() {
+            if status == AddonStatus::Ready
+                && self.st.settings.addon_on(id)
+                && self.st.prayer.places.is_none()
+            {
                 self.prayer_ready();
             } else if status == AddonStatus::Off {
                 self.prayer_off();
@@ -1863,7 +2238,10 @@ impl App {
         }
         // Japanese readings arrived for the song that asked for them: read it
         // again (its lyrics come from the cache).
-        if id == JAPANESE_READINGS.id && status == AddonStatus::Ready && self.st.lyrics.wants_ja_readings {
+        if id == JAPANESE_READINGS.id
+            && status == AddonStatus::Ready
+            && self.st.lyrics.wants_ja_readings
+        {
             if let (Some(l), Some(m)) = (self.lyrics.as_ref(), self.st.media.as_ref()) {
                 if m.track_key == self.st.lyrics.track_key {
                     pinfo!("lyrics: Japanese readings are on this Mac; reading the song again");
@@ -1876,7 +2254,13 @@ impl App {
         let ours = pages::addons::OFFERED.iter().any(|a| a.id == id);
         // The update file is read on the same thread: it stays while this copy looks for new versions.
         let in_use = self.updater.is_some();
-        if ours && status == AddonStatus::Off && !in_use && !pages::addons::OFFERED.iter().any(|a| a.downloads() && self.st.settings.addon_on(a.id)) {
+        if ours
+            && status == AddonStatus::Off
+            && !in_use
+            && !pages::addons::OFFERED
+                .iter()
+                .any(|a| a.downloads() && self.st.settings.addon_on(a.id))
+        {
             self.addons = None;
         }
     }
@@ -1890,7 +2274,10 @@ impl App {
     /// and ask where the Mac is when following the location.
     fn prayer_ready(&mut self) {
         let path = services::addons::file_path(&PRAYER_TIMES, "places.json");
-        match std::fs::read_to_string(&path).map_err(|e| e.to_string()).and_then(|t| PlaceList::parse(&t)) {
+        match std::fs::read_to_string(&path)
+            .map_err(|e| e.to_string())
+            .and_then(|t| PlaceList::parse(&t))
+        {
             Ok(list) => {
                 pinfo!("prayer: {} places", list.places.len());
                 self.st.prayer.places = Some(std::sync::Arc::new(list));
@@ -1918,19 +2305,36 @@ impl App {
     /// kept as it is once settled; at start it comes from the lines settings
     /// keep of it (nothing online).
     fn resolve_prayer_place(&mut self) {
-        let Some(list) = self.st.prayer.places.clone() else { return };
+        let Some(list) = self.st.prayer.places.clone() else {
+            return;
+        };
         let chosen = match self.st.settings.prayer.place.as_deref() {
-            Some(id) if self.st.prayer.place.as_ref().is_some_and(|p| p.id == id) => self.st.prayer.place.clone(),
-            Some(id) => poni_core::prayer::find(&list, self.st.settings.prayer.world_place.as_deref(), id),
+            Some(id) if self.st.prayer.place.as_ref().is_some_and(|p| p.id == id) => {
+                self.st.prayer.place.clone()
+            }
+            Some(id) => {
+                poni_core::prayer::find(&list, self.st.settings.prayer.world_place.as_deref(), id)
+            }
             None => None,
         };
         let suggested = chosen.is_none();
-        let place = chosen.or_else(|| poni_core::prayer::suggested_place_id(self.utc_offset_min()).and_then(|id| list.find(id)).cloned());
+        let place = chosen.or_else(|| {
+            poni_core::prayer::suggested_place_id(self.utc_offset_min())
+                .and_then(|id| list.find(id))
+                .cloned()
+        });
         let changed = place.as_ref().map(|p| &p.id) != self.st.prayer.place.as_ref().map(|p| &p.id);
         self.st.prayer.place = place;
         self.st.prayer.suggested = suggested;
         if changed {
-            pinfo!("prayer: times for {}", self.st.prayer.place.as_ref().map_or("no place", |p| p.id.as_str()));
+            pinfo!(
+                "prayer: times for {}",
+                self.st
+                    .prayer
+                    .place
+                    .as_ref()
+                    .map_or("no place", |p| p.id.as_str())
+            );
             // A new place: prayer times that passed there don't ring now.
             self.st.prayer.handled_until = Some(self.st.prayer_now());
         }
@@ -1939,7 +2343,10 @@ impl App {
     /// The Mac's UTC offset in minutes, from its clock.
     fn utc_offset_min(&self) -> i32 {
         let l = &self.st.local;
-        let local = poni_core::datetime::days_from_civil(l.year, l.month, l.day) * 86_400 + l.hour as i64 * 3600 + l.minute as i64 * 60 + l.second as i64;
+        let local = poni_core::datetime::days_from_civil(l.year, l.month, l.day) * 86_400
+            + l.hour as i64 * 3600
+            + l.minute as i64 * 60
+            + l.second as i64;
         (((local - self.st.unix) as f64 / 900.0).round() * 15.0) as i32
     }
 
@@ -1971,10 +2378,18 @@ impl App {
         if !self.st.prayer_on() {
             return;
         }
-        if self.st.settings.prayer.follow_location && self.st.prayer.located_at.is_none_or(|t| self.st.unix - t >= 3 * 3600) {
+        if self.st.settings.prayer.follow_location
+            && self
+                .st
+                .prayer
+                .located_at
+                .is_none_or(|t| self.st.unix - t >= 3 * 3600)
+        {
             self.locate();
         }
-        let Some(site) = self.st.prayer.site() else { return };
+        let Some(site) = self.st.prayer.site() else {
+            return;
+        };
         let now = self.st.prayer_now();
         let Some(from) = self.st.prayer.handled_until else {
             self.st.prayer.handled_until = Some(now);
@@ -1996,10 +2411,21 @@ impl App {
     /// A prayer's time came: the island says so and plays the chosen sound.
     /// Quiet when it's late (after a sleep) or a full-screen app hides the island.
     fn prayer_moment(&mut self, m: PrayerMoment, ring: bool) {
-        let Some(site) = self.st.prayer.site() else { return };
-        let place = self.st.prayer.place.as_ref().map_or(String::new(), |p| p.label.clone());
+        let Some(site) = self.st.prayer.site() else {
+            return;
+        };
+        let place = self
+            .st
+            .prayer
+            .place
+            .as_ref()
+            .map_or(String::new(), |p| p.label.clone());
         let ring = ring && !self.fullscreen_hidden;
-        let sound = if ring { self.st.settings.prayer.sound } else { PrayerSound::Silent };
+        let sound = if ring {
+            self.st.settings.prayer.sound
+        } else {
+            PrayerSound::Silent
+        };
         let mut adzan = false;
         // The tone plays at once, not as a command: commands run with the
         // next frame, and frames rest while the displays sleep.
@@ -2017,11 +2443,23 @@ impl App {
         let title = pages::prayer::moment_title(m.prayer);
         let subtitle = format!("{} \u{b7} {place}", site.hhmm(m.at));
         let secs = if adzan { 200.0 } else { 60.0 };
-        self.st.notify(Icon::Moon, self.st.accent, title, subtitle, secs, Some(NoticeAction::OpenPage(PageKind::Prayer)));
+        self.st.notify(
+            Icon::Moon,
+            self.st.accent,
+            title,
+            subtitle,
+            secs,
+            Some(NoticeAction::OpenPage(PageKind::Prayer)),
+        );
         if adzan {
             self.st.set_notice_inline(InlineAction::StopAdzan);
         }
-        pinfo!("prayer: {} at {}{}", m.prayer.name(), site.hhmm(m.at), if ring { "" } else { ", quietly" });
+        pinfo!(
+            "prayer: {} at {}{}",
+            m.prayer.name(),
+            site.hhmm(m.at),
+            if ring { "" } else { ", quietly" }
+        );
     }
 
     /// Start the adzan; music that plays pauses (and stays paused).
@@ -2030,7 +2468,9 @@ impl App {
         match self.adzan.play(self.mtm, &path, &self.sink) {
             Ok(()) => {
                 self.st.prayer.adzan = true;
-                if self.st.settings.prayer.pause_music && self.st.media.as_ref().is_some_and(|m| m.is_playing()) {
+                if self.st.settings.prayer.pause_music
+                    && self.st.media.as_ref().is_some_and(|m| m.is_playing())
+                {
                     self.st.media_cmd(MediaCmd::PlayPause);
                 }
                 true
@@ -2049,7 +2489,11 @@ impl App {
     fn prayer_countdown_ok(&mut self) {
         self.refresh_time();
         if let (Some(m), Some(site)) = (self.st.prayer_countdown_ok(), self.st.prayer.site()) {
-            pinfo!("prayer: countdown put away until {} at {}", m.prayer.name(), site.hhmm(m.at));
+            pinfo!(
+                "prayer: countdown put away until {} at {}",
+                m.prayer.name(),
+                site.hhmm(m.at)
+            );
         }
     }
 
@@ -2058,14 +2502,22 @@ impl App {
         self.st.prayer.adzan = false;
         // The notice leaves soon after the adzan.
         let soon = self.st.now + 4.0;
-        if let Some(n) = self.st.notice.as_mut().filter(|n| n.inline == Some(InlineAction::StopAdzan)) {
+        if let Some(n) = self
+            .st
+            .notice
+            .as_mut()
+            .filter(|n| n.inline == Some(InlineAction::StopAdzan))
+        {
             n.until = n.until.min(soon);
         }
     }
 
     /// (player, track, playing) of the current media session.
     fn media_snapshot(&self) -> Option<(String, String, bool)> {
-        self.st.media.as_ref().map(|m| (m.app_id.clone(), m.track_key.clone(), m.is_playing()))
+        self.st
+            .media
+            .as_ref()
+            .map(|m| (m.app_id.clone(), m.track_key.clone(), m.is_playing()))
     }
 
     /// Track the pause grace period and the title peek after a media update.
@@ -2093,9 +2545,17 @@ impl App {
     }
 
     fn refresh_screen(&mut self) {
-        let Some(s) = window::pick_screen(self.mtm) else { return };
+        let Some(s) = window::pick_screen(self.mtm) else {
+            return;
+        };
         if s != self.screen {
-            pinfo!("screen {}x{} pt at {}x, notch {:?}", s.w, s.h, s.scale, s.notch);
+            pinfo!(
+                "screen {}x{} pt at {}x, notch {:?}",
+                s.w,
+                s.h,
+                s.scale,
+                s.notch
+            );
             self.screen = s;
             self.gfx.set_scale(s.scale);
             self.layout_surface();
@@ -2117,8 +2577,14 @@ impl App {
     /// centred in it, or at the spot it was dragged to, so a morph never
     /// moves or resizes the window.
     fn layout_surface(&mut self) {
-        let tallest = PageKind::ALL.iter().map(|p| pages::content_height(*p, &self.st)).fold(0.0f32, f32::max);
-        self.layout_surface_for(self.st.settings.expanded_width, pages::HEADER_H + tallest + pages::PAD);
+        let tallest = PageKind::ALL
+            .iter()
+            .map(|p| pages::content_height(*p, &self.st))
+            .fold(0.0f32, f32::max);
+        self.layout_surface_for(
+            self.st.settings.expanded_width,
+            pages::HEADER_H + tallest + pages::PAD,
+        );
     }
 
     fn layout_surface_for(&mut self, body_w: f32, body_h: f32) {
@@ -2146,7 +2612,11 @@ impl App {
     /// screen's left edge: None in the middle (at the notch), and where it
     /// can't move.
     fn spot(&self) -> Option<f32> {
-        self.st.settings.island_x.filter(|_| self.movable()).map(|f| f * self.screen.w as f32)
+        self.st
+            .settings
+            .island_x
+            .filter(|_| self.movable())
+            .map(|f| f * self.screen.w as f32)
     }
 
     /// Put the window at the top of the screen: centred on the notch (or the
@@ -2192,7 +2662,9 @@ impl App {
         };
         let at = at - self.win.0;
         let want = match self.screen.notch {
-            Some(n) => self.notch_cx + (at - self.notch_cx) * notch::detach(self.island.top(), Some(n)),
+            Some(n) => {
+                self.notch_cx + (at - self.notch_cx) * notch::detach(self.island.top(), Some(n))
+            }
             None => at,
         };
         self.cx = spot::fit_centre(want, self.win.1, self.island.current().w, self.room().0);
@@ -2216,10 +2688,17 @@ impl App {
         let need_w = bw + 2.0 * side;
         let need_h = bh + top + bottom;
         if need_w > self.surface.0 || need_h > self.surface.1 {
-            let tallest = PageKind::ALL.iter().map(|p| pages::content_height(*p, &self.st)).fold(0.0f32, f32::max);
-            let body_h = (pages::HEADER_H + tallest + pages::PAD).max((bh - self.strip()) / OVERSHOOT * 1.1);
+            let tallest = PageKind::ALL
+                .iter()
+                .map(|p| pages::content_height(*p, &self.st))
+                .fold(0.0f32, f32::max);
+            let body_h =
+                (pages::HEADER_H + tallest + pages::PAD).max((bh - self.strip()) / OVERSHOOT * 1.1);
             pinfo!("island outgrew the window; growing it to fit {bw:.0}x{bh:.0} DIP");
-            self.layout_surface_for(self.st.settings.expanded_width.max(bw / OVERSHOOT * 1.1), body_h);
+            self.layout_surface_for(
+                self.st.settings.expanded_width.max(bw / OVERSHOOT * 1.1),
+                body_h,
+            );
         }
     }
 
@@ -2232,7 +2711,11 @@ impl App {
             return (side, 0.0, HIT_MARGIN);
         }
         let top = self.screen.notch.map_or(0.0, |n| n.h) + pill::TOP_GAP;
-        (side.max(pill::shape::MARGIN), top, HIT_MARGIN.max(pill::shape::MARGIN))
+        (
+            side.max(pill::shape::MARGIN),
+            top,
+            HIT_MARGIN.max(pill::shape::MARGIN),
+        )
     }
 
     /// The strip the open island keeps behind a notch over its content
@@ -2279,7 +2762,11 @@ impl App {
     /// The resting island is out of sight: hidden until hover, or inside the notch.
     fn island_hidden(&self) -> bool {
         self.mode == Mode::Idle
-            && (self.st.settings.idle_style == IdleStyle::Hidden || self.screen.notch.is_some_and(|_| notch::fit(&self.mode, &self.st) == Fit::Inside))
+            && (self.st.settings.idle_style == IdleStyle::Hidden
+                || self
+                    .screen
+                    .notch
+                    .is_some_and(|_| notch::fit(&self.mode, &self.st) == Fit::Inside))
     }
 
     /// Island geometry for `m` (around the notch when the screen has one).
@@ -2391,11 +2878,23 @@ impl App {
     /// move here, so the eyes cost a redraw only when their side or where
     /// they look changes.
     fn peek_at(&mut self, p: Point) {
-        let Some(n) = self.screen.notch.filter(|_| self.st.settings.idle_style == IdleStyle::Eyes) else { return };
+        let Some(n) = self
+            .screen
+            .notch
+            .filter(|_| self.st.settings.idle_style == IdleStyle::Eyes)
+        else {
+            return;
+        };
         let now = clock::mono().max(self.st.now);
         let before = notch::peek_key(&self.st, n, now);
-        self.st.ui.peek.point(Point::new(p.x - self.notch_cx, p.y), now, n.w / 2.0);
-        if self.mode == Mode::Idle && !self.fullscreen_hidden && notch::peek_key(&self.st, n, now) != before {
+        self.st
+            .ui
+            .peek
+            .point(Point::new(p.x - self.notch_cx, p.y), now, n.w / 2.0);
+        if self.mode == Mode::Idle
+            && !self.fullscreen_hidden
+            && notch::peek_key(&self.st, n, now) != before
+        {
             self.request_frame();
         }
     }
@@ -2413,7 +2912,10 @@ impl App {
     }
 
     fn update_cursor(&mut self, p: Point) {
-        let kind = self.hit_at(p).map(|h| h.cursor).unwrap_or(CursorKind::Arrow);
+        let kind = self
+            .hit_at(p)
+            .map(|h| h.cursor)
+            .unwrap_or(CursorKind::Arrow);
         if kind != self.cursor {
             self.cursor = kind;
             match kind {
@@ -2441,7 +2943,12 @@ impl App {
                 self.input.press_pos = Some(p);
                 self.input.pressed_id = self.hit_at(p).map(|h| h.id);
                 if !self.expanded {
-                    let inline = self.st.notice.as_ref().and_then(|n| n.inline).filter(|_| self.input.pressed_id == Some(wid("notice.act")));
+                    let inline = self
+                        .st
+                        .notice
+                        .as_ref()
+                        .and_then(|n| n.inline)
+                        .filter(|_| self.input.pressed_id == Some(wid("notice.act")));
                     if let Some(a) = inline {
                         // The notice's inline pill acts in place without expanding.
                         self.input.pressed_id = None;
@@ -2450,11 +2957,17 @@ impl App {
                         // The prayer countdown's OK, the same way.
                         self.input.pressed_id = None;
                         self.prayer_countdown_ok();
-                    } else if self.movable() && (self.screen.notch.is_none() || self.island.floating()) {
+                    } else if self.movable()
+                        && (self.screen.notch.is_none() || self.island.floating())
+                    {
                         // Opens when the button comes up (`open_from_press`),
                         // unless the pointer moves sideways first: then it
                         // drags the island along the top edge (`drag_island`).
-                        self.grab = Some(Grab { from: self.win.0 + p.x, centre: self.win.0 + self.cx, moved: false });
+                        self.grab = Some(Grab {
+                            from: self.win.0 + p.x,
+                            centre: self.win.0 + self.cx,
+                            moved: false,
+                        });
                         // Held still on it, it doesn't open by itself either.
                         self.cancel_hover();
                     } else {
@@ -2518,7 +3031,11 @@ impl App {
                 self.input.wheel += notches;
                 self.request_frame();
             }
-            ViewInput::Key { code, text, command } => {
+            ViewInput::Key {
+                code,
+                text,
+                command,
+            } => {
                 if !self.text_focus {
                     return None;
                 }
@@ -2541,7 +3058,9 @@ impl App {
                     match text.as_str() {
                         "v" => {
                             if let Some(t) = services::clipboard::read_text() {
-                                self.input.keys.extend(t.chars().filter(|c| !c.is_control()).map(KeyInput::Char));
+                                self.input.keys.extend(
+                                    t.chars().filter(|c| !c.is_control()).map(KeyInput::Char),
+                                );
                             }
                         }
                         "a" => self.input.keys.push(KeyInput::SelectAll),
@@ -2549,7 +3068,11 @@ impl App {
                     }
                 } else {
                     // Function keys arrive as private-use characters.
-                    self.input.keys.extend(text.chars().filter(|c| !c.is_control() && !('\u{F700}'..='\u{F8FF}').contains(c)).map(KeyInput::Char));
+                    self.input.keys.extend(
+                        text.chars()
+                            .filter(|c| !c.is_control() && !('\u{F700}'..='\u{F8FF}').contains(c))
+                            .map(KeyInput::Char),
+                    );
                 }
                 self.request_frame();
             }
@@ -2690,7 +3213,11 @@ impl App {
                 self.expand();
                 true
             }
-            Message::State { phase, elapsed_ms, error } => {
+            Message::State {
+                phase,
+                elapsed_ms,
+                error,
+            } => {
                 let rec = &mut self.st.rec;
                 rec.opening_until = 0.0;
                 if phase == Phase::Idle {
@@ -2714,7 +3241,8 @@ impl App {
     /// behind on the island. Asked of macOS only while one is under way, at
     /// most every `REC_ALIVE_S` (`now`: as the island opens).
     fn check_recorder_alive(&mut self, now: bool) {
-        if !self.st.rec_live() || self.smoke.is_some() || (!now && self.st.now < self.rec_alive_at) {
+        if !self.st.rec_live() || self.smoke.is_some() || (!now && self.st.now < self.rec_alive_at)
+        {
             return;
         }
         self.rec_alive_at = self.st.now + REC_ALIVE_S;
@@ -2748,7 +3276,13 @@ impl App {
             self.st.ui.oyen_tab = None;
             // Settings closes with the island: it opens again on the page it was opened from.
             if self.st.page == PageKind::Settings {
-                self.st.page = self.st.ui.before_settings.take().filter(|p| pages::tabs(&self.st).contains(p)).unwrap_or_else(|| pages::first_tab(&self.st));
+                self.st.page = self
+                    .st
+                    .ui
+                    .before_settings
+                    .take()
+                    .filter(|p| pages::tabs(&self.st).contains(p))
+                    .unwrap_or_else(|| pages::first_tab(&self.st));
             }
             self.st.update.sheet = false;
             self.st.update.said = None;
@@ -2780,7 +3314,14 @@ impl App {
     }
 
     fn maybe_schedule_collapse(&mut self) {
-        if self.expanded && !self.hovering && !self.st.pinned && !self.text_focus && !self.drag_hover && !self.menu_open && !self.phone_holds() {
+        if self.expanded
+            && !self.hovering
+            && !self.st.pinned
+            && !self.text_focus
+            && !self.drag_hover
+            && !self.menu_open
+            && !self.phone_holds()
+        {
             self.set_timer(Timer::Collapse, self.st.settings.collapse_delay_ms.max(50));
         }
     }
@@ -2830,7 +3371,13 @@ impl App {
             }
             return;
         }
-        if a == InlineAction::WhatsNew && self.st.notice.as_ref().is_some_and(|n| n.icon != Icon::Check) {
+        if a == InlineAction::WhatsNew
+            && self
+                .st
+                .notice
+                .as_ref()
+                .is_some_and(|n| n.icon != Icon::Check)
+        {
             services::open(&crate::version::notes_url());
         }
         let st = &mut self.st;
@@ -2850,7 +3397,11 @@ impl App {
         }
         match a {
             InlineAction::StartFocus => st.pomodoro.start(st.now),
-            InlineAction::ShowAmount | InlineAction::StopAdzan | InlineAction::Hide | InlineAction::WhatsNew | InlineAction::Open => {}
+            InlineAction::ShowAmount
+            | InlineAction::StopAdzan
+            | InlineAction::Hide
+            | InlineAction::WhatsNew
+            | InlineAction::Open => {}
         }
         let until = st.now + INLINE_DONE_S;
         if let Some(n) = st.notice.as_mut() {
@@ -2887,7 +3438,8 @@ impl App {
                 Command::LoadThumb(p) => {
                     if !self.st.shelf_thumbs.contains_key(&p) {
                         self.st.shelf_thumbs.insert(p.clone(), None);
-                        let px = (crate::services::imaging::THUMB_DIP * self.gfx.scale()).round() as u32;
+                        let px =
+                            (crate::services::imaging::THUMB_DIP * self.gfx.scale()).round() as u32;
                         services::thumbs::load_async(p, px, self.sink.clone());
                     }
                 }
@@ -2909,7 +3461,9 @@ impl App {
                 Command::RecordResume => services::recorder::resume(),
                 Command::RecordStop => services::recorder::stop(),
                 Command::ScriptPaste => {
-                    let text = services::clipboard::read_text().map(|t| poni_core::script::clean(&t)).filter(|t| !t.is_empty());
+                    let text = services::clipboard::read_text()
+                        .map(|t| poni_core::script::clean(&t))
+                        .filter(|t| !t.is_empty());
                     match text {
                         Some(text) => pages::script::set_text(&mut self.st, text),
                         None => pages::script::note(&mut self.st, "Copy your script first"),
@@ -2933,7 +3487,11 @@ impl App {
                 Command::LoadAppIcon(p) => {
                     if !self.st.app_icons.contains_key(&p) && self.island.settled() {
                         self.st.app_icons.insert(p.clone(), None);
-                        services::thumbs::app_icon_async(p, pages::system::icon_px(self.gfx.scale()), self.sink.clone());
+                        services::thumbs::app_icon_async(
+                            p,
+                            pages::system::icon_px(self.gfx.scale()),
+                            self.sink.clone(),
+                        );
                     }
                 }
                 // Show over games reads Windows' frame log; the Mac has no Games view.
@@ -3036,7 +3594,11 @@ impl App {
                 let u = &mut self.st.settings.usage;
                 u.hidden.retain(|k| k != id.key());
                 u.added.retain(|k| k != id.key());
-                let list = if matches!(c, UsageCmd::Show(_)) { &mut u.added } else { &mut u.hidden };
+                let list = if matches!(c, UsageCmd::Show(_)) {
+                    &mut u.added
+                } else {
+                    &mut u.hidden
+                };
                 list.push(id.key().into());
                 let before = self.saved_settings.clone();
                 self.settings_changed(&before);
@@ -3176,8 +3738,16 @@ impl App {
                 self.st.oyenza.link = OyenzaLink::Connected { account };
                 self.ask_pro();
             }
-            OyenzaEvent::Connecting { code, url, expires_in_s } => {
-                self.st.oyenza.link = OyenzaLink::Connecting { code, url, until: now + expires_in_s as f64 };
+            OyenzaEvent::Connecting {
+                code,
+                url,
+                expires_in_s,
+            } => {
+                self.st.oyenza.link = OyenzaLink::Connecting {
+                    code,
+                    url,
+                    until: now + expires_in_s as f64,
+                };
                 // Keep the code on screen while the person goes to oyenza.app.
                 if self.st.oyenza.pinned_before.is_none() {
                     self.st.oyenza.pinned_before = Some(self.st.pinned);
@@ -3188,7 +3758,14 @@ impl App {
             }
             OyenzaEvent::Connected { account } => {
                 self.end_sign_in();
-                self.st.notify(Icon::Check, palette::GREEN, "Connected to Oyenza", format!("as {account}"), 6.0, Some(NoticeAction::OpenPage(PageKind::Oyenza)));
+                self.st.notify(
+                    Icon::Check,
+                    palette::GREEN,
+                    "Connected to Oyenza",
+                    format!("as {account}"),
+                    6.0,
+                    Some(NoticeAction::OpenPage(PageKind::Oyenza)),
+                );
                 self.st.oyenza.link = OyenzaLink::Connected { account };
                 self.ask_pro();
                 // Signed in from the Today page: back to it, where the day comes in.
@@ -3202,7 +3779,8 @@ impl App {
                 self.end_sign_in();
                 self.st.oyenza.link = OyenzaLink::Off;
                 let (title, subtitle) = oyenza::connect_failure_text(&code);
-                self.st.notify(Icon::Unlink, palette::ORANGE, title, subtitle, 6.0, None);
+                self.st
+                    .notify(Icon::Unlink, palette::ORANGE, title, subtitle, 6.0, None);
             }
             OyenzaEvent::ConnectCancelled => {
                 self.st.oyenza.from_today = false;
@@ -3230,7 +3808,11 @@ impl App {
             }
             OyenzaEvent::ActivityChecked => self.st.oyenza.updated_unix = Some(self.st.unix),
             OyenzaEvent::Bills { today, bills } => {
-                let day = if today.is_empty() { self.st.day_key() } else { today };
+                let day = if today.is_empty() {
+                    self.st.day_key()
+                } else {
+                    today
+                };
                 self.st.oyenza.bills = bills;
                 self.st.oyenza.bills_today = day.clone();
                 self.st.oyenza.updated_unix = Some(self.st.unix);
@@ -3246,7 +3828,9 @@ impl App {
                 self.st.oyenza.agenda = None;
                 self.st.oyenza.agenda_state = crate::state::AgendaState::Unavailable;
             }
-            OyenzaEvent::DayFailed => self.st.oyenza.agenda_state = crate::state::AgendaState::Failed,
+            OyenzaEvent::DayFailed => {
+                self.st.oyenza.agenda_state = crate::state::AgendaState::Failed
+            }
             OyenzaEvent::Pro(pro) => self.st.oyenza.pro = Some(pro),
             // Steps asked for before Health was switched off stay out.
             OyenzaEvent::Health(next) if self.st.health_on() => {
@@ -3273,7 +3857,11 @@ impl App {
             }
             OyenzaEvent::Undone => self.st.oyenza.flash = Some(("Taken back".into(), now + 3.0)),
             OyenzaEvent::UndoFailed(code) => {
-                let line = if code == "too_late" { "Too late to undo here. Change it in oyenza.app" } else { "Couldn't undo. Change it in oyenza.app" };
+                let line = if code == "too_late" {
+                    "Too late to undo here. Change it in oyenza.app"
+                } else {
+                    "Couldn't undo. Change it in oyenza.app"
+                };
                 self.st.oyenza.flash = Some((line.into(), now + 5.0));
             }
             OyenzaEvent::Disconnected { by_server } => {
@@ -3282,9 +3870,16 @@ impl App {
                 self.st.health = None;
                 // Signed out: an IELTS session ends, and the ladder was the account's.
                 self.ielts_off();
-                let (title, subtitle) =
-                    if by_server { ("Oyenza disconnected", "Sign in again in Settings") } else { ("Disconnected from Oyenza", "Sign in again any time in Settings") };
-                self.st.notify(Icon::Unlink, palette::TEXT_DIM, title, subtitle, 6.0, None);
+                let (title, subtitle) = if by_server {
+                    ("Oyenza disconnected", "Sign in again in Settings")
+                } else {
+                    (
+                        "Disconnected from Oyenza",
+                        "Sign in again any time in Settings",
+                    )
+                };
+                self.st
+                    .notify(Icon::Unlink, palette::TEXT_DIM, title, subtitle, 6.0, None);
             }
         }
         // The Oyenza tab came or went: the menu changes with it, and the
@@ -3336,7 +3931,14 @@ impl App {
     /// "Show amounts on the island" is on (`hidden` None: nothing to hide).
     /// While a full-screen app hides the island it waits, and shows when the
     /// island is back if it isn't old by then.
-    fn oyenza_notice(&mut self, icon: Icon, color: Color, title: String, shown: String, hidden: Option<String>) {
+    fn oyenza_notice(
+        &mut self,
+        icon: Icon,
+        color: Color,
+        title: String,
+        shown: String,
+        hidden: Option<String>,
+    ) {
         let now = self.st.now;
         let hide = hidden.is_some() && !self.st.settings.oyenza_show_amounts;
         let notice = Notice {
@@ -3344,7 +3946,11 @@ impl App {
             color,
             title,
             title_dim: String::new(),
-            subtitle: if hide { hidden.unwrap_or_default() } else { shown.clone() },
+            subtitle: if hide {
+                hidden.unwrap_or_default()
+            } else {
+                shown.clone()
+            },
             until: now + oyenza::NOTICE_S,
             action: Some(NoticeAction::OpenPage(PageKind::Oyenza)),
             inline: hide.then_some(InlineAction::ShowAmount),
@@ -3374,12 +3980,27 @@ impl App {
         if st.local.hour < oyenza::BILL_HOUR {
             return;
         }
-        let Some(b) = oyenza::bills_to_remind(&st.oyenza.bills, today, &st.store.oyenza_noticed).first().map(|b| (*b).clone()) else { return };
+        let Some(b) = oyenza::bills_to_remind(&st.oyenza.bills, today, &st.store.oyenza_noticed)
+            .first()
+            .map(|b| (*b).clone())
+        else {
+            return;
+        };
         st.store.oyenza_noticed.push(oyenza::notice_key(&b));
         st.save();
         let (shown, hidden) = oyenza::bill_subtitles(&b);
-        let icon = if b.is_card() { Icon::Card } else { Icon::Calendar };
-        self.oyenza_notice(icon, palette::ORANGE, oyenza::bill_title(&b, today), shown, hidden);
+        let icon = if b.is_card() {
+            Icon::Card
+        } else {
+            Icon::Calendar
+        };
+        self.oyenza_notice(
+            icon,
+            palette::ORANGE,
+            oyenza::bill_title(&b, today),
+            shown,
+            hidden,
+        );
     }
 
     // ------------------------------------------------------------ phone drop
@@ -3402,9 +4023,20 @@ impl App {
                 if let Some(pd) = self.st.phone.as_mut() {
                     if let Some(a) = pd.ask.take_if(|a| a.id == id) {
                         if accept {
-                            pd.transfer = Some(PhoneTransfer { id, from: a.from, file: 0, files: a.files.len(), done: 0, total: a.total });
+                            pd.transfer = Some(PhoneTransfer {
+                                id,
+                                from: a.from,
+                                file: 0,
+                                files: a.files.len(),
+                                done: 0,
+                                total: a.total,
+                            });
                         } else {
-                            pd.outcome = Some((format!("Declined {} from {}", files_label(a.files.len()), a.from), false, until));
+                            pd.outcome = Some((
+                                format!("Declined {} from {}", files_label(a.files.len()), a.from),
+                                false,
+                                until,
+                            ));
                         }
                     }
                 }
@@ -3419,7 +4051,10 @@ impl App {
         }
         let mut pd = PhoneDrop::default();
         let offer = self.st.store.shelf.paths();
-        match services::phonedrop::PhoneDrop::start(self.sink.clone(), offer.iter().map(PathBuf::from).collect()) {
+        match services::phonedrop::PhoneDrop::start(
+            self.sink.clone(),
+            offer.iter().map(PathBuf::from).collect(),
+        ) {
             Ok((svc, url)) => {
                 pd.qr = QrMatrix::encode(&url);
                 pd.url = url;
@@ -3448,10 +4083,20 @@ impl App {
 
     /// Minute tick: nobody has used the link for a while, so close it.
     fn close_idle_phone(&mut self) {
-        let idle = self.phone.as_ref().is_some_and(|svc| !svc.busy() && svc.idle_secs() >= PHONE_IDLE_S);
-        let quiet = self.st.phone.as_ref().is_some_and(|p| p.ask.is_none() && p.transfer.is_none());
+        let idle = self
+            .phone
+            .as_ref()
+            .is_some_and(|svc| !svc.busy() && svc.idle_secs() >= PHONE_IDLE_S);
+        let quiet = self
+            .st
+            .phone
+            .as_ref()
+            .is_some_and(|p| p.ask.is_none() && p.transfer.is_none());
         if idle && quiet {
-            pinfo!("phone drop: closed after {:.0} minutes without a phone", PHONE_IDLE_S / 60.0);
+            pinfo!(
+                "phone drop: closed after {:.0} minutes without a phone",
+                PHONE_IDLE_S / 60.0
+            );
             self.close_phone();
         }
     }
@@ -3469,7 +4114,9 @@ impl App {
     fn on_phone(&mut self, e: PhoneEvent) {
         let now = self.st.now;
         let until = now + pages::shelf::PHONE_OUTCOME_S;
-        let Some(pd) = self.st.phone.as_mut() else { return };
+        let Some(pd) = self.st.phone.as_mut() else {
+            return;
+        };
         match e {
             PhoneEvent::Visit { from } => {
                 pd.visitor = Some(from);
@@ -3478,9 +4125,19 @@ impl App {
             PhoneEvent::Ask(a) => {
                 pd.outcome = None;
                 pd.visitor.get_or_insert_with(|| a.from.clone());
-                let files: Vec<(String, u64)> = a.files.iter().map(|f| (f.name.clone(), f.size)).collect();
-                pinfo!("phone drop: {} asks to send {}", a.from, files_label(files.len()));
-                pd.ask = Some(PhoneAsk { id: a.id, from: a.from.clone(), total: a.total(), files });
+                let files: Vec<(String, u64)> =
+                    a.files.iter().map(|f| (f.name.clone(), f.size)).collect();
+                pinfo!(
+                    "phone drop: {} asks to send {}",
+                    a.from,
+                    files_label(files.len())
+                );
+                pd.ask = Some(PhoneAsk {
+                    id: a.id,
+                    from: a.from.clone(),
+                    total: a.total(),
+                    files,
+                });
                 self.st.page = PageKind::Shelf;
                 self.expand();
                 self.st.chime();
@@ -3491,7 +4148,13 @@ impl App {
                 }
                 self.maybe_schedule_collapse();
             }
-            PhoneEvent::Progress { id, file, files, done, total } => match pd.transfer.as_mut() {
+            PhoneEvent::Progress {
+                id,
+                file,
+                files,
+                done,
+                total,
+            } => match pd.transfer.as_mut() {
                 Some(t) if t.id == id => {
                     t.file = file;
                     t.files = files;
@@ -3500,15 +4163,29 @@ impl App {
                 }
                 _ => {
                     let from = pd.visitor.clone().unwrap_or_else(|| "Phone".into());
-                    pd.transfer = Some(PhoneTransfer { id, from, file, files, done, total });
+                    pd.transfer = Some(PhoneTransfer {
+                        id,
+                        from,
+                        file,
+                        files,
+                        done,
+                        total,
+                    });
                 }
             },
             PhoneEvent::Received { from, paths, .. } => {
                 pd.transfer = None;
                 let n = paths.len();
-                let title = format!("{} from {from} {} on the Shelf", files_label(n), if n == 1 { "is" } else { "are" });
+                let title = format!(
+                    "{} from {from} {} on the Shelf",
+                    files_label(n),
+                    if n == 1 { "is" } else { "are" }
+                );
                 pd.outcome = Some((title.clone(), true, until));
-                let added: Vec<String> = paths.iter().map(|p| p.to_string_lossy().into_owned()).collect();
+                let added: Vec<String> = paths
+                    .iter()
+                    .map(|p| p.to_string_lossy().into_owned())
+                    .collect();
                 self.st.store.shelf.add_paths(&added, self.st.unix);
                 for p in added {
                     self.st.cmds.push(Command::LoadThumb(p));
@@ -3516,12 +4193,24 @@ impl App {
                 self.st.save();
                 pinfo!("phone drop: {} from {from}", files_label(n));
                 if !self.expanded {
-                    self.st.notify(Icon::Phone, palette::GREEN, title, "Open the Shelf to see them", 6.0, Some(NoticeAction::OpenPage(PageKind::Shelf)));
+                    self.st.notify(
+                        Icon::Phone,
+                        palette::GREEN,
+                        title,
+                        "Open the Shelf to see them",
+                        6.0,
+                        Some(NoticeAction::OpenPage(PageKind::Shelf)),
+                    );
                 }
                 self.st.chime();
                 self.maybe_schedule_collapse();
             }
-            PhoneEvent::Failed { from, reason, detail, .. } => {
+            PhoneEvent::Failed {
+                from,
+                reason,
+                detail,
+                ..
+            } => {
                 pd.transfer = None;
                 pd.outcome = Some((format!("Nothing kept from {from}. {reason}."), false, until));
                 pwarn!("phone drop: transfer from {from} failed: {reason} {detail}");
@@ -3552,12 +4241,19 @@ impl App {
         }
         // A new version's notice (or "Updated to") waits for the island to be free.
         let free = !(self.away.0 || self.away.1) && !self.expanded && self.st.notice.is_none();
-        if self.updater.as_mut().is_some_and(|u| u.announce(&mut self.st, free)) {
+        if self
+            .updater
+            .as_mut()
+            .is_some_and(|u| u.announce(&mut self.st, free))
+        {
             self.request_frame();
         }
         // The AI tab's heads-up notices wait the same way, one at a time, and
         // while a full-screen app hides the island.
-        if self.st.show_usage_notice(free && !self.fullscreen_hidden, self.expanded && self.st.page == PageKind::Ai) {
+        if self.st.show_usage_notice(
+            free && !self.fullscreen_hidden,
+            self.expanded && self.st.page == PageKind::Ai,
+        ) {
             self.request_frame();
         }
         if let Some(ended) = self.st.pomodoro.tick(now) {
@@ -3566,7 +4262,8 @@ impl App {
         // The Script page: a reading pauses while its page isn't on screen,
         // and the island may close once nothing holds it. Whether Record
         // shows is asked as the page comes on screen.
-        let shown = self.expanded && self.st.page == PageKind::Script && !self.away.0 && !self.away.1;
+        let shown =
+            self.expanded && self.st.page == PageKind::Script && !self.away.0 && !self.away.1;
         if shown && !self.script_shown {
             self.st.recorder = services::recorder::installed();
         }
@@ -3610,7 +4307,11 @@ impl App {
         let mono = clock::mono();
         let anim_t = (mono + period).max(self.last_frame_t);
         let resumed = self.last_frame_t == 0.0 || anim_t - self.last_frame_t > 0.25;
-        let mut dt = if resumed { period } else { anim_t - self.last_frame_t };
+        let mut dt = if resumed {
+            period
+        } else {
+            anim_t - self.last_frame_t
+        };
         self.last_frame_t = anim_t;
         self.refresh_time();
         self.st.now = self.st.now.max(anim_t);
@@ -3620,13 +4321,18 @@ impl App {
         let target_mode = self.target_mode();
         let mut retarget = false;
         if target_mode != self.mode {
-            let new_content = activities::content_key(&target_mode) != activities::content_key(&self.mode);
+            let new_content =
+                activities::content_key(&target_mode) != activities::content_key(&self.mode);
             if new_content {
                 self.outgoing = Some((self.mode, now, self.island.target()));
             }
             if let (Mode::Expanded(a), Mode::Expanded(b)) = (self.mode, target_mode) {
                 if a != b {
-                    let dir = if b.tab_index() > a.tab_index() { 1.0 } else { -1.0 };
+                    let dir = if b.tab_index() > a.tab_index() {
+                        1.0
+                    } else {
+                        -1.0
+                    };
                     self.page_anim = Some((a, now, dir));
                 }
             }
@@ -3653,12 +4359,17 @@ impl App {
         }
         let dt = dt.clamp(0.0, 0.05) as f32;
         // Today's tiles need the readings only while they show (signed out it has the sign-in card, signed in the day).
-        self.set_stats(self.mode == Mode::Expanded(PageKind::Today) && pages::today::shows_tiles(&self.st));
+        self.set_stats(
+            self.mode == Mode::Expanded(PageKind::Today) && pages::today::shows_tiles(&self.st),
+        );
         self.set_sysmon(self.mode == Mode::Expanded(PageKind::System));
         self.set_oyenza_watch(self.mode == Mode::Expanded(PageKind::Oyenza));
         self.set_today_watch(self.mode == Mode::Expanded(PageKind::Today));
         self.set_health_shown(self.mode == Mode::Expanded(PageKind::Health));
-        self.set_pro_shown(matches!(self.mode, Mode::Expanded(PageKind::Ielts | PageKind::Notes | PageKind::Addons)));
+        self.set_pro_shown(matches!(
+            self.mode,
+            Mode::Expanded(PageKind::Ielts | PageKind::Notes | PageKind::Addons)
+        ));
         self.set_stocks_watch();
         self.set_usage_watch();
         // The Pill theme floats the island below the top edge (below the menu
@@ -3684,7 +4395,14 @@ impl App {
         self.note_motion(retarget, mono, period, dt as f64);
         // macOS's glass follows the island's outline, set before the repaint.
         let glass_at = (self.look().material == Material::Glass)
-            .then(|| glass::shape(self.island.body_rect_at(self.cx), self.island.current().r, self.screen.notch, self.island_hidden()))
+            .then(|| {
+                glass::shape(
+                    self.island.body_rect_at(self.cx),
+                    self.island.current().r,
+                    self.screen.notch,
+                    self.island_hidden(),
+                )
+            })
             .flatten();
         glass::show(glass_at);
 
@@ -3694,7 +4412,11 @@ impl App {
         // the clock): redraw inside the body, and the shadow and hairline
         // around it stay as drawn. Whole DIPs and one more, so no pixel on its
         // edge is half redrawn. Anything else redraws the canvas.
-        let still = self.island.floating() && self.island.settled() && self.outgoing.is_none() && self.page_anim.is_none() && self.prev_canvas == Some(canvas_r);
+        let still = self.island.floating()
+            && self.island.settled()
+            && self.outgoing.is_none()
+            && self.page_anim.is_none()
+            && self.prev_canvas == Some(canvas_r);
         let dirty = if still {
             let b = self.island.body_rect_at(self.cx).inset(-1.0, -1.0);
             let (x0, y0) = (b.x.floor(), b.y.floor());
@@ -3711,7 +4433,16 @@ impl App {
         let started = self.smoke.is_some().then(std::time::Instant::now);
         CGContext::clear_rect(
             Some(ctx),
-            CGRect { origin: CGPoint { x: dirty.x as f64, y: dirty.y as f64 }, size: CGSize { width: dirty.w as f64, height: dirty.h as f64 } },
+            CGRect {
+                origin: CGPoint {
+                    x: dirty.x as f64,
+                    y: dirty.y as f64,
+                },
+                size: CGSize {
+                    width: dirty.w as f64,
+                    height: dirty.h as f64,
+                },
+            },
         );
         let now = self.st.now;
         let body = self.island.body_rect_at(self.cx);
@@ -3740,10 +4471,15 @@ impl App {
         let hidden = self.island_hidden();
         let look = self.look();
         // The Pill theme's island away from the edge, and how far.
-        let (floating, detach) = (self.island.floating(), notch::detach(self.island.top(), notch));
+        let (floating, detach) = (
+            self.island.floating(),
+            notch::detach(self.island.top(), notch),
+        );
         // The smoke run's pretend notch (CI's Macs have none), painted where a
         // MacBook's camera hides the island, so its pictures show what one shows.
-        let pretend_notch = notch.filter(|_| self.smoke.is_some() && window::faking_notch()).map(|n| Rect::new(self.notch_cx - n.w / 2.0, -12.0, n.w, n.h + 12.0));
+        let pretend_notch = notch
+            .filter(|_| self.smoke.is_some() && window::faking_notch())
+            .map(|n| Rect::new(self.notch_cx - n.w / 2.0, -12.0, n.w, n.h + 12.0));
         self.gfx.set_look(look);
         let mut hits = std::mem::take(&mut self.hits);
         hits.clear();
@@ -3754,13 +4490,31 @@ impl App {
             if look.material == Material::Glass {
                 glass::draw_body(&mut canvas, body, geom.r, shoulder, notch, hidden, false);
             } else {
-                let border = if hidden { None } else { Some(canvas.look().border) };
+                let border = if hidden {
+                    None
+                } else {
+                    Some(canvas.look().border)
+                };
                 if floating {
                     // Hidden until hover, the floating island fades out as it nears
                     // its sliver (one below the edge would show); the pointer test
                     // takes the mouse there, not pixels. Inside a notch it stays black.
-                    let alpha = if hidden { ((geom.h - HIDDEN_SLIVER) / HIDDEN_FADE).clamp(0.0, 1.0) } else { 1.0 };
-                    canvas.with_alpha(alpha, |c| notch::draw_pill_body(c, body, geom.r, shoulder, detach, palette::ISLAND, border));
+                    let alpha = if hidden {
+                        ((geom.h - HIDDEN_SLIVER) / HIDDEN_FADE).clamp(0.0, 1.0)
+                    } else {
+                        1.0
+                    };
+                    canvas.with_alpha(alpha, |c| {
+                        notch::draw_pill_body(
+                            c,
+                            body,
+                            geom.r,
+                            shoulder,
+                            detach,
+                            palette::ISLAND,
+                            border,
+                        )
+                    });
                 } else {
                     canvas.notch(body, geom.r, shoulder, palette::ISLAND, border);
                 }
@@ -3768,7 +4522,11 @@ impl App {
             body_s = body_started.map_or(0.0, |t| t.elapsed().as_secs_f64());
             // Content scales about the top centre, where the island hangs
             // (floating, about the middle of the pill end of the morph).
-            let pivot = if floating { pill::motion::pivot(body, self.island.target()) } else { Point::new(body.center().x, body.y) };
+            let pivot = if floating {
+                pill::motion::pivot(body, self.island.target())
+            } else {
+                Point::new(body.center().x, body.y)
+            };
             if morphing {
                 canvas.clip(body);
                 if floating {
@@ -3786,25 +4544,62 @@ impl App {
                 } else {
                     let old_body = Rect::new(body.center().x - g.w / 2.0, body.y, g.w, g.h);
                     let alpha = 1.0 - t * t * (3.0 - 2.0 * t);
-                    let shrink = if floating { pill::motion::ghost_scale(geom, g, GHOST_MIN_SCALE) } else { (geom.w / g.w.max(1.0)).clamp(GHOST_MIN_SCALE, 1.0) };
+                    let shrink = if floating {
+                        pill::motion::ghost_scale(geom, g, GHOST_MIN_SCALE)
+                    } else {
+                        (geom.w / g.w.max(1.0)).clamp(GHOST_MIN_SCALE, 1.0)
+                    };
                     let xf = scale_about(pivot, shrink);
                     let st = &mut self.st;
                     canvas.layered(old_body, alpha, xf, |c| {
                         let mut ghost_input = Input::default();
                         let mut ghost_hits = Vec::new();
-                        draw_content(c, &mut ghost_input, &mut ghost_hits, st, m, old_body, old_body, None, now, notch);
+                        draw_content(
+                            c,
+                            &mut ghost_input,
+                            &mut ghost_hits,
+                            st,
+                            m,
+                            old_body,
+                            old_body,
+                            None,
+                            now,
+                            notch,
+                        );
                     });
                 }
             }
             // Incoming content settles down from the bezel as it fades in.
             let out = if content_alpha < 1.0 {
-                let grow = scale_about(pivot, CONTENT_SCALE_FROM + (1.0 - CONTENT_SCALE_FROM) * content_alpha);
-                let drop_by = if floating { pill::motion::CONTENT_DROP } else { CONTENT_DROP };
+                let grow = scale_about(
+                    pivot,
+                    CONTENT_SCALE_FROM + (1.0 - CONTENT_SCALE_FROM) * content_alpha,
+                );
+                let drop_by = if floating {
+                    pill::motion::CONTENT_DROP
+                } else {
+                    CONTENT_DROP
+                };
                 let xf = grow * Matrix3x2::translation(0.0, -drop_by * (1.0 - content_alpha));
                 let (input, st) = (&mut self.input, &mut self.st);
-                canvas.layered(union_rect(lay, body), content_alpha, xf, |c| draw_content(c, input, &mut hits, st, mode, lay, body, transition, now, notch))
+                canvas.layered(union_rect(lay, body), content_alpha, xf, |c| {
+                    draw_content(
+                        c, input, &mut hits, st, mode, lay, body, transition, now, notch,
+                    )
+                })
             } else {
-                draw_content(&mut canvas, &mut self.input, &mut hits, &mut self.st, mode, lay, body, transition, now, notch)
+                draw_content(
+                    &mut canvas,
+                    &mut self.input,
+                    &mut hits,
+                    &mut self.st,
+                    mode,
+                    lay,
+                    body,
+                    transition,
+                    now,
+                    notch,
+                )
             };
             if morphing {
                 canvas.pop_shape_mask();
@@ -3827,7 +4622,10 @@ impl App {
         let wheel_left = self.input.wheel;
         if let Mode::Expanded(p) = self.mode {
             let top = body.y + self.strip();
-            let over_header = self.input.mouse.is_some_and(|m| m.y < top + pages::HEADER_H);
+            let over_header = self
+                .input
+                .mouse
+                .is_some_and(|m| m.y < top + pages::HEADER_H);
             if wheel_left != 0.0 && over_header {
                 if now - self.wheel_t > 0.25 || wheel_left.signum() != self.wheel_acc.signum() {
                     self.wheel_acc = 0.0;
@@ -3843,7 +4641,12 @@ impl App {
             }
         }
         self.input.end_frame();
-        self.drawn = Drawn { repaint, anim, focus, live };
+        self.drawn = Drawn {
+            repaint,
+            anim,
+            focus,
+            live,
+        };
     }
 
     fn end_frame(&mut self) {
@@ -3896,8 +4699,13 @@ impl App {
     /// one, once the island rests, write `ready-<n>-<name>.txt` (the window's
     /// screen rectangle) and wait for CI's screenshot (`shot-<n>-<name>.done`).
     fn smoke_step(&mut self) {
-        let Some(mut sm) = self.smoke.take() else { return };
-        let settled = self.island.settled() && self.target_mode() == self.mode && self.outgoing.is_none() && self.page_anim.is_none();
+        let Some(mut sm) = self.smoke.take() else {
+            return;
+        };
+        let settled = self.island.settled()
+            && self.target_mode() == self.mode
+            && self.outgoing.is_none()
+            && self.page_anim.is_none();
         let now = clock::mono();
         match sm.phase {
             SmokePhase::Apply => {
@@ -3965,17 +4773,30 @@ impl App {
                     };
                 if ((settled && ready) || now - t0 > limit) && !replaying {
                     if !settled {
-                        sm.note(name, false, format!("the island did not settle within {limit:.0} s"));
+                        sm.note(
+                            name,
+                            false,
+                            format!("the island did not settle within {limit:.0} s"),
+                        );
                     } else {
                         let g = self.island.current();
-                        sm.note(name, true, format!("{:?}, {:.0}x{:.0} DIP, {} frames drawn", self.mode, g.w, g.h, self.frames_drawn));
+                        sm.note(
+                            name,
+                            true,
+                            format!(
+                                "{:?}, {:.0}x{:.0} DIP, {} frames drawn",
+                                self.mode, g.w, g.h, self.frames_drawn
+                            ),
+                        );
                     }
                     if let Some((check, ok, detail)) = self.smoke_check(name) {
                         sm.note(check, ok, detail);
                     }
                     // The Settings window's steps picture that window, and the
                     // drag steps the top of the whole screen (where along it the island is).
-                    let along = name.contains("-drag") || name.ends_with("-centre") || name == "notch-pill-rest";
+                    let along = name.contains("-drag")
+                        || name.ends_with("-centre")
+                        || name == "notch-pill-rest";
                     let rect = if name.starts_with("settings-window") && settings_host::is_open() {
                         settings_host::frame_top_left()
                     } else if along {
@@ -4040,14 +4861,29 @@ impl App {
                 self.st.pomodoro.start(self.st.now);
             }
             "notice" => {
-                self.st.notify(Icon::CheckCircle, self.st.accent, "Oyenza Studio is on", "Point at the island to open it", 30.0, None);
+                self.st.notify(
+                    Icon::CheckCircle,
+                    self.st.accent,
+                    "Oyenza Studio is on",
+                    "Point at the island to open it",
+                    30.0,
+                    None,
+                );
             }
             "volume-hud" => {
                 self.st.notice = None;
                 if !self.st.volume.known {
-                    self.on_event(AppEvent::Volume { level: 0.5, muted: false, switched: false });
+                    self.on_event(AppEvent::Volume {
+                        level: 0.5,
+                        muted: false,
+                        switched: false,
+                    });
                 }
-                self.on_event(AppEvent::Volume { level: 0.64, muted: false, switched: false });
+                self.on_event(AppEvent::Volume {
+                    level: 0.64,
+                    muted: false,
+                    switched: false,
+                });
             }
             // CI's Macs have no headphones to connect: a device only this app
             // sees comes and goes (the device list listener must hear it), and
@@ -4056,12 +4892,29 @@ impl App {
                 self.st.hud = None;
                 let before = services::audio::list_changes();
                 self.smoke_devices = Some((before, services::audio::smoke_device_change()));
-                self.on_event(AppEvent::Bluetooth { name: "AirPods Pro".into(), connected: true, battery: None, audio: true });
+                self.on_event(AppEvent::Bluetooth {
+                    name: "AirPods Pro".into(),
+                    connected: true,
+                    battery: None,
+                    audio: true,
+                });
             }
             "charging-hud" => {
                 self.st.hud = None;
-                self.st.power = crate::state::PowerState { has_battery: true, percent: 76, charging: false, on_ac: false, saver: false };
-                self.on_event(AppEvent::Power(crate::state::PowerState { has_battery: true, percent: 76, charging: true, on_ac: true, saver: false }));
+                self.st.power = crate::state::PowerState {
+                    has_battery: true,
+                    percent: 76,
+                    charging: false,
+                    on_ac: false,
+                    saver: false,
+                };
+                self.on_event(AppEvent::Power(crate::state::PowerState {
+                    has_battery: true,
+                    percent: 76,
+                    charging: true,
+                    on_ac: true,
+                    saver: false,
+                }));
             }
             "shelf-drop" => {
                 let paths = smoke_shelf_files();
@@ -4099,7 +4952,11 @@ impl App {
                 let p = self.island.body_rect_at(self.cx).center();
                 self.on_pointer(p);
                 self.cancel_hover();
-                let _ = self.on_view_input(ViewInput::Down { x: p.x, y: p.y, double: false });
+                let _ = self.on_view_input(ViewInput::Down {
+                    x: p.x,
+                    y: p.y,
+                    double: false,
+                });
                 let _ = self.on_view_input(ViewInput::Up { x: p.x, y: p.y });
             }
             // Move island to the centre puts it back in the middle.
@@ -4155,7 +5012,9 @@ impl App {
             // OK (what a click on it does). The next step's adzan still comes.
             "prayer-ok" => {
                 let unix = clock::unix_now();
-                if let Some(ashar) = self.st.prayer.site().and_then(|s| poni_core::prayer::day_times(&s, s.local_day(unix)).map(|t| t.ashar)) {
+                if let Some(ashar) = self.st.prayer.site().and_then(|s| {
+                    poni_core::prayer::day_times(&s, s.local_day(unix)).map(|t| t.ashar)
+                }) {
                     self.st.prayer.clock_shift = ashar - 5 * 60 - unix;
                     self.st.prayer.handled_until = Some(ashar - 5 * 60);
                 }
@@ -4166,10 +5025,20 @@ impl App {
                 self.st.settings.prayer.sound = PrayerSound::Adzan;
                 self.st.cmds.push(Command::SaveSettings);
                 let unix = clock::unix_now();
-                if let Some((site, ashar)) = self.st.prayer.site().and_then(|s| poni_core::prayer::day_times(&s, s.local_day(unix)).map(|t| (s, t.ashar))) {
+                if let Some((site, ashar)) = self.st.prayer.site().and_then(|s| {
+                    poni_core::prayer::day_times(&s, s.local_day(unix)).map(|t| (s, t.ashar))
+                }) {
                     self.st.prayer.clock_shift = ashar - 2 - unix;
                     self.st.prayer.handled_until = Some(ashar - 2);
-                    pinfo!("smoke: Ashar in {} is {}", site.hhmm(ashar), self.st.prayer.place.as_ref().map_or("", |p| p.label.as_str()));
+                    pinfo!(
+                        "smoke: Ashar in {} is {}",
+                        site.hhmm(ashar),
+                        self.st
+                            .prayer
+                            .place
+                            .as_ref()
+                            .map_or("", |p| p.label.as_str())
+                    );
                 }
             }
             // Stop in the notice; the prayer clock goes back to the Mac's.
@@ -4196,7 +5065,11 @@ impl App {
                 self.collapse();
                 self.st.settings.hide_in_fullscreen = true;
                 self.st.cmds.push(Command::SaveSettings);
-                match std::env::current_exe().and_then(|exe| std::process::Command::new(exe).args(["--full-screen-window", "90"]).spawn()) {
+                match std::env::current_exe().and_then(|exe| {
+                    std::process::Command::new(exe)
+                        .args(["--full-screen-window", "90"])
+                        .spawn()
+                }) {
                     Ok(child) => self.smoke_full_screen = Some(child),
                     Err(e) => pwarn!("smoke: no full-screen window ({e})"),
                 }
@@ -4227,22 +5100,34 @@ impl App {
             }
             "oyenza-code" => {
                 let url = "https://oyenza.app/connect?code=KPJX-TMNQ".to_string();
-                self.on_oyenza(OyenzaEvent::Connecting { code: "KPJX-TMNQ".into(), url, expires_in_s: 600 });
+                self.on_oyenza(OyenzaEvent::Connecting {
+                    code: "KPJX-TMNQ".into(),
+                    url,
+                    expires_in_s: 600,
+                });
             }
             "oyenza-page" => {
                 let fake = crate::render::fake_oyenza(&self.st, false);
-                self.on_oyenza(OyenzaEvent::Connected { account: "a\u{2022}\u{2022}\u{2022}@example.com".into() });
+                self.on_oyenza(OyenzaEvent::Connected {
+                    account: "a\u{2022}\u{2022}\u{2022}@example.com".into(),
+                });
                 if let Some(a) = fake.activity {
                     self.on_oyenza(OyenzaEvent::Activity(a));
                 }
-                self.on_oyenza(OyenzaEvent::Bills { today: fake.bills_today, bills: fake.bills });
+                self.on_oyenza(OyenzaEvent::Bills {
+                    today: fake.bills_today,
+                    bills: fake.bills,
+                });
                 self.st.notice = None;
                 self.set_page(PageKind::Oyenza);
                 self.expand();
             }
             "oyenza-money" => {
                 self.collapse();
-                let wallet = Some(poni_core::oyenza::WalletRef { name: "BCA".into(), color: "#0060AF".into() });
+                let wallet = Some(poni_core::oyenza::WalletRef {
+                    name: "BCA".into(),
+                    color: "#0060AF".into(),
+                });
                 let arrived = vec![poni_core::oyenza::Arrival {
                     id: "smoke-1".into(),
                     kind: "income".into(),
@@ -4422,7 +5307,9 @@ impl App {
             "ielts-voice" | "ielts-voice-mp3" => {
                 let file = if name == "ielts-voice" {
                     let p = paths::data_dir().join("ielts").join("smoke-voice.wav");
-                    smoke_tone_wav(&p, 0.5).map(|()| Some(p)).map_err(|e| e.to_string())
+                    smoke_tone_wav(&p, 0.5)
+                        .map(|()| Some(p))
+                        .map_err(|e| e.to_string())
                 } else {
                     Ok(std::env::var_os("PONI_SMOKE_MP3").map(PathBuf::from))
                 };
@@ -4431,10 +5318,22 @@ impl App {
                     Ok(Some(file)) => {
                         let mut player = services::voice::VoicePlayer::default();
                         let played = player.play(&file, &self.sink);
-                        Some(SmokeVoice { player, file, started, played, ended: None })
+                        Some(SmokeVoice {
+                            player,
+                            file,
+                            started,
+                            played,
+                            ended: None,
+                        })
                     }
                     Ok(None) => None,
-                    Err(e) => Some(SmokeVoice { player: Default::default(), file: PathBuf::new(), started, played: Err(e), ended: None }),
+                    Err(e) => Some(SmokeVoice {
+                        player: Default::default(),
+                        file: PathBuf::new(),
+                        started,
+                        played: Err(e),
+                        ended: None,
+                    }),
                 };
             }
             // Its microphone (services::mic): whatever this Mac allows (a
@@ -4451,7 +5350,11 @@ impl App {
             // two seconds, whatever this Mac allows; the stop step follows.
             "notes-capture" => {
                 let started = self.st.local;
-                self.smoke_notes = Some(services::notes::Recording::start(&paths::notes_audio_dir(), &started, &self.sink));
+                self.smoke_notes = Some(services::notes::Recording::start(
+                    &paths::notes_audio_dir(),
+                    &started,
+                    &self.sink,
+                ));
             }
             "notes-capture-stop" => self.smoke_notes_stop = Some(self.smoke_notes_stopped()),
             "menu" => {
@@ -4477,29 +5380,60 @@ impl App {
             // Full readings list the apps (their CPU from the second one on);
             // the apps' icons follow from Finder.
             "system-on" => services::sysmon::cost()[0].0 > 0 || waited > 5.0,
-            "open-system" => (self.st.system.latest.as_ref().is_some_and(|r| !r.top_cpu.is_empty()) && waited > 1.6) || waited > 5.0,
+            "open-system" => {
+                (self
+                    .st
+                    .system
+                    .latest
+                    .as_ref()
+                    .is_some_and(|r| !r.top_cpu.is_empty())
+                    && waited > 1.6)
+                    || waited > 5.0
+            }
             "system-gpu" | "system-memory" | "system-drives" | "system-network" => waited > 0.6,
             "system-power" => waited > 1.3,
-            "shelf-drop" => self.st.shelf_thumbs.values().filter(|t| t.is_some()).count() >= 3 || waited > 5.0,
+            "shelf-drop" => {
+                self.st
+                    .shelf_thumbs
+                    .values()
+                    .filter(|t| t.is_some())
+                    .count()
+                    >= 3
+                    || waited > 5.0
+            }
             // LRCLIB busy, slow or down: the service asks again 30 s later,
             // and the step waits for that answer too.
             "music-check" => {
                 let status = &self.st.lyrics.status;
-                let looked_up = !matches!(status, LyricsStatus::Idle | LyricsStatus::Loading) && !lrclib_failed(status);
+                let looked_up = !matches!(status, LyricsStatus::Idle | LyricsStatus::Loading)
+                    && !lrclib_failed(status);
                 (self.st.media.is_some() && looked_up) || waited > 50.0
             }
             "ja-auto" => {
                 let l = &self.st.lyrics;
-                let playing = self.st.media.as_ref().is_some_and(|m| m.track_key == l.track_key && m.title == SMOKE_JA_TRACK.0);
+                let playing = self
+                    .st
+                    .media
+                    .as_ref()
+                    .is_some_and(|m| m.track_key == l.track_key && m.title == SMOKE_JA_TRACK.0);
                 (playing && l.status == LyricsStatus::Found && waited > 0.5) || waited > 20.0
             }
             // The files in place and the song read again with them.
             "ja-get" => match self.st.addon(JAPANESE_READINGS.id) {
-                AddonStatus::Ready => (!self.st.lyrics.wants_ja_readings && self.st.lyrics.status == LyricsStatus::Found) || waited > 60.0,
+                AddonStatus::Ready => {
+                    (!self.st.lyrics.wants_ja_readings
+                        && self.st.lyrics.status == LyricsStatus::Found)
+                        || waited > 60.0
+                }
                 AddonStatus::Failed => true,
                 _ => waited > 60.0,
             },
-            "ja-off" => (self.st.addon(JAPANESE_READINGS.id) == AddonStatus::Off && !ja_folder().exists() && self.addons.is_none()) || waited > 10.0,
+            "ja-off" => {
+                (self.st.addon(JAPANESE_READINGS.id) == AddonStatus::Off
+                    && !ja_folder().exists()
+                    && self.addons.is_none())
+                    || waited > 10.0
+            }
             "prayer-get" => match self.st.addon(PRAYER_TIMES.id) {
                 AddonStatus::Ready => self.st.prayer_on() || waited > 60.0,
                 AddonStatus::Failed => true,
@@ -4511,26 +5445,71 @@ impl App {
             "prayer-page" => waited > 1.5,
             "prayer-adzan" => self.st.prayer.adzan || waited > 6.0,
             "prayer-locate" => self.st.prayer.locate != Locate::Asking || waited > 6.0,
-            "prayer-off" => (self.st.addon(PRAYER_TIMES.id) == AddonStatus::Off && !prayer_folder().exists() && self.addons.is_none()) || waited > 10.0,
-            "headphones" => self.smoke_devices.as_ref().is_some_and(|(before, _)| services::audio::list_changes() > *before) || waited > 4.0,
+            "prayer-off" => {
+                (self.st.addon(PRAYER_TIMES.id) == AddonStatus::Off
+                    && !prayer_folder().exists()
+                    && self.addons.is_none())
+                    || waited > 10.0
+            }
+            "headphones" => {
+                self.smoke_devices
+                    .as_ref()
+                    .is_some_and(|(before, _)| services::audio::list_changes() > *before)
+                    || waited > 4.0
+            }
             "fullscreen-hide" => self.fullscreen_hidden || waited > 12.0,
-            "fullscreen-stay" => (!self.fullscreen_hidden && window::is_shown() && waited > 1.0) || waited > 6.0,
-            "fullscreen-back" => (!self.front_full_screen && !self.fullscreen_hidden && window::is_shown() && waited > 1.0) || waited > 8.0,
-            "oyenza-code" | "oyenza-page" => (self.expanded && self.st.page == PageKind::Oyenza && waited > 0.6) || waited > 4.0,
+            "fullscreen-stay" => {
+                (!self.fullscreen_hidden && window::is_shown() && waited > 1.0) || waited > 6.0
+            }
+            "fullscreen-back" => {
+                (!self.front_full_screen
+                    && !self.fullscreen_hidden
+                    && window::is_shown()
+                    && waited > 1.0)
+                    || waited > 8.0
+            }
+            "oyenza-code" | "oyenza-page" => {
+                (self.expanded && self.st.page == PageKind::Oyenza && waited > 0.6) || waited > 4.0
+            }
             "oyenza-money" => self.st.notice.is_some() || waited > 4.0,
-            "ai-page" | "ai-back" => (self.expanded && self.st.page == PageKind::Ai && waited > 0.6) || waited > 4.0,
-            "now-playing" => self.st.media.as_ref().is_some_and(|m| m.title == SMOKE_SERVICE_TRACK) || std::env::var_os("PONI_SMOKE_NOW_PLAYING").is_none() || waited > 15.0,
-            "now-playing-browser" => self.st.media.as_ref().is_some_and(|m| m.title == SMOKE_BROWSER_TRACK) || std::env::var_os("PONI_SMOKE_BROWSER").is_none() || waited > 25.0,
+            "ai-page" | "ai-back" => {
+                (self.expanded && self.st.page == PageKind::Ai && waited > 0.6) || waited > 4.0
+            }
+            "now-playing" => {
+                self.st
+                    .media
+                    .as_ref()
+                    .is_some_and(|m| m.title == SMOKE_SERVICE_TRACK)
+                    || std::env::var_os("PONI_SMOKE_NOW_PLAYING").is_none()
+                    || waited > 15.0
+            }
+            "now-playing-browser" => {
+                self.st
+                    .media
+                    .as_ref()
+                    .is_some_and(|m| m.title == SMOKE_BROWSER_TRACK)
+                    || std::env::var_os("PONI_SMOKE_BROWSER").is_none()
+                    || waited > 25.0
+            }
             "menu" => waited > 1.0,
             // The line plays to its end (half a second).
-            "ielts-voice" | "ielts-voice-mp3" => self.smoke_voice.as_ref().is_none_or(|v| v.ended.is_some() || v.played.is_err()) || waited > 5.0,
+            "ielts-voice" | "ielts-voice-mp3" => {
+                self.smoke_voice
+                    .as_ref()
+                    .is_none_or(|v| v.ended.is_some() || v.played.is_err())
+                    || waited > 5.0
+            }
             // A second and a half of whatever the microphone hears.
             "ielts-mic" => waited > 1.5,
             // Two seconds of a meeting.
             "notes-capture" => waited > 2.0,
-            "settings-window" | "settings-window-light" => (settings_host::is_open() && waited > 0.8) || waited > 5.0,
+            "settings-window" | "settings-window-light" => {
+                (settings_host::is_open() && waited > 0.8) || waited > 5.0
+            }
             "settings-window-closed" => !settings_host::is_open() || waited > 3.0,
-            "record-check" => self.mode == Mode::Activity(activities::Activity::Recording) || waited > 5.0,
+            "record-check" => {
+                self.mode == Mode::Activity(activities::Activity::Recording) || waited > 5.0
+            }
             "record-gone" => self.st.rec.phase.is_none() || waited > 5.0,
             // About two seconds of frames at rest.
             "music-cost" | "pill-music-cost" => waited > 2.5,
@@ -4551,11 +5530,18 @@ impl App {
     fn smoke_drag(&mut self, dx: f32) {
         let p = self.island.body_rect_at(self.cx).center();
         let from = self.win.0 + p.x;
-        let _ = self.on_view_input(ViewInput::Down { x: p.x, y: p.y, double: false });
+        let _ = self.on_view_input(ViewInput::Down {
+            x: p.x,
+            y: p.y,
+            double: false,
+        });
         for step in [spot::DRAG_SLOP + 1.0, dx] {
             self.on_pointer(Point::new(from + step - self.win.0, p.y));
         }
-        let _ = self.on_view_input(ViewInput::Up { x: from + dx - self.win.0, y: p.y });
+        let _ = self.on_view_input(ViewInput::Up {
+            x: from + dx - self.win.0,
+            y: p.y,
+        });
     }
 
     fn pill_report(&self) -> (&'static str, bool, String) {
@@ -4565,14 +5551,20 @@ impl App {
         let (ok, place) = match self.screen.notch {
             None => {
                 let gap_takes = at(self.cx, pill::TOP_GAP / 2.0);
-                let ok = self.island.floating() && (self.island.top() - pill::TOP_GAP).abs() < 0.01 && gap_takes;
+                let ok = self.island.floating()
+                    && (self.island.top() - pill::TOP_GAP).abs() < 0.01
+                    && gap_takes;
                 (ok, format!("floating {:.0} DIP below the top edge, the gap above it takes the mouse: {gap_takes}", self.island.top()))
             }
             Some(n) if self.expanded || notch::floats(&self.mode, &self.st) => {
                 let gap_takes = at(self.cx, n.h + pill::TOP_GAP / 2.0);
                 let notch_takes = at(self.cx, n.h / 2.0);
                 let bar_free = !at(self.cx - n.w / 2.0 - 24.0, n.h / 2.0);
-                let ok = self.island.floating() && (self.island.top() - n.h - pill::TOP_GAP).abs() < 0.01 && gap_takes && notch_takes && bar_free;
+                let ok = self.island.floating()
+                    && (self.island.top() - n.h - pill::TOP_GAP).abs() < 0.01
+                    && gap_takes
+                    && notch_takes
+                    && bar_free;
                 let place = format!(
                     "floating {:.0} DIP below the top edge ({:.0} below a {:.0}x{:.0} notch); the gap takes the mouse: {gap_takes}, \
                      the notch: {notch_takes}, the menu bar beside it stays clickable: {bar_free}",
@@ -4586,16 +5578,32 @@ impl App {
             // At rest: back inside the notch, or the eyes beside it.
             Some(n) => {
                 let fit = notch::fit(&self.mode, &self.st);
-                let want = if self.st.settings.idle_style == IdleStyle::Eyes { Fit::Ears } else { Fit::Inside };
-                let ok = self.mode == Mode::Idle && !self.island.floating() && body.y == 0.0 && fit == want;
-                (ok, format!("resting in the menu bar's line ({fit:?} around a {:.0}x{:.0} notch)", n.w, n.h))
+                let want = if self.st.settings.idle_style == IdleStyle::Eyes {
+                    Fit::Ears
+                } else {
+                    Fit::Inside
+                };
+                let ok = self.mode == Mode::Idle
+                    && !self.island.floating()
+                    && body.y == 0.0
+                    && fit == want;
+                (
+                    ok,
+                    format!(
+                        "resting in the menu bar's line ({fit:?} around a {:.0}x{:.0} notch)",
+                        n.w, n.h
+                    ),
+                )
             }
         };
         let g = self.island.current();
         (
             "pill-theme",
             ok && look,
-            format!("{:?}, {:.0}x{:.0} DIP r {:.0}, {place}; Pill's look: {look}", self.mode, g.w, g.h, g.r),
+            format!(
+                "{:?}, {:.0}x{:.0} DIP r {:.0}, {place}; Pill's look: {look}",
+                self.mode, g.w, g.h, g.r
+            ),
         )
     }
 
@@ -4606,14 +5614,49 @@ impl App {
             "settings-window" => {
                 let open = settings_host::is_open() && self.settings_ui.is_some();
                 let at = settings_host::frame_top_left();
-                let ms = self.settings_ui.as_ref().map_or((0.0, 0.0), |s| (s.draw_ms, s.draw_max_ms));
-                let detail = format!("window {at:?}, {} mode, a frame draws in {:.1} ms (slowest {:.1})", if settings_host::is_light() { "light" } else { "dark" }, ms.0, ms.1);
+                let ms = self
+                    .settings_ui
+                    .as_ref()
+                    .map_or((0.0, 0.0), |s| (s.draw_ms, s.draw_max_ms));
+                let detail = format!(
+                    "window {at:?}, {} mode, a frame draws in {:.1} ms (slowest {:.1})",
+                    if settings_host::is_light() {
+                        "light"
+                    } else {
+                        "dark"
+                    },
+                    ms.0,
+                    ms.1
+                );
                 Some(("settings-window-open", open, detail))
             }
-            "settings-window-light" => Some(("settings-window-light", settings_host::is_light(), format!("section {:?}", self.settings_ui.as_ref().map(|s| s.view.section)))),
+            "settings-window-light" => Some((
+                "settings-window-light",
+                settings_host::is_light(),
+                format!(
+                    "section {:?}",
+                    self.settings_ui.as_ref().map(|s| s.view.section)
+                ),
+            )),
             "settings-window-closed" => {
                 let gone = !settings_host::is_open() && self.settings_ui.is_none();
-                Some(("settings-window-closed", gone, format!("window {}, content {}", if settings_host::is_open() { "still open" } else { "gone" }, if self.settings_ui.is_some() { "kept" } else { "dropped" })))
+                Some((
+                    "settings-window-closed",
+                    gone,
+                    format!(
+                        "window {}, content {}",
+                        if settings_host::is_open() {
+                            "still open"
+                        } else {
+                            "gone"
+                        },
+                        if self.settings_ui.is_some() {
+                            "kept"
+                        } else {
+                            "dropped"
+                        }
+                    ),
+                ))
             }
             "record-check" | "record-gone" => {
                 let showing = self.mode == Mode::Activity(activities::Activity::Recording);
@@ -4632,7 +5675,11 @@ impl App {
                 if name == "record-check" {
                     Some(("recording-pill", showing && recording, d))
                 } else {
-                    Some(("recording-ended", !showing && self.st.rec.phase.is_none(), d))
+                    Some((
+                        "recording-ended",
+                        !showing && self.st.rec.phase.is_none(),
+                        d,
+                    ))
                 }
             }
             // Signed out, Today shows the sign-in card, so its tiles' once-a-second
@@ -4640,7 +5687,12 @@ impl App {
             // (a server without the day): one taken here.
             "open-today" => {
                 let s = services::sysstats::sample();
-                let ok = s.valid && s.mem_total > 0 && s.disk_total > 0 && s.uptime_s > 0 && !self.stats_on && !pages::today::shows_tiles(&self.st);
+                let ok = s.valid
+                    && s.mem_total > 0
+                    && s.disk_total > 0
+                    && s.uptime_s > 0
+                    && !self.stats_on
+                    && !pages::today::shows_tiles(&self.st);
                 let d = format!(
                     "one reading: memory {:.1} of {:.1} GiB, disk {:.0} GiB free of {:.0}, up {} min; Today's readings {} (sign-in card)",
                     gib(s.mem_used),
@@ -4656,7 +5708,11 @@ impl App {
                 let tab = pages::tabs(&self.st).contains(&PageKind::System);
                 let [(light, _), _] = services::sysmon::cost();
                 let ok = tab && light > 0 && self.sysmon.is_some();
-                Some(("system-addon", ok, format!("System tab: {tab}; light readings with the page closed: {light}")))
+                Some((
+                    "system-addon",
+                    ok,
+                    format!("System tab: {tab}; light readings with the page closed: {light}"),
+                ))
             }
             "open-system" => {
                 let (ok, d) = system_report(&self.st);
@@ -4674,55 +5730,128 @@ impl App {
             // key (virtual, Intel) has no Power module.
             "system-power" => {
                 let smc = services::smc::Smc::open();
-                let w = smc.as_ref().and_then(|s| s.float(services::smc::SYSTEM_TOTAL));
-                let page = self.st.system.latest.as_ref().and_then(|r| r.power.as_ref()).map(|p| p.total_w);
+                let w = smc
+                    .as_ref()
+                    .and_then(|s| s.float(services::smc::SYSTEM_TOTAL));
+                let page = self
+                    .st
+                    .system
+                    .latest
+                    .as_ref()
+                    .and_then(|r| r.power.as_ref())
+                    .map(|p| p.total_w);
                 let ok = w.is_none_or(|w| w.is_finite() && w >= 0.0);
-                let d = format!("SMC {}; the whole Mac's draw: {w:?} W; on the page: {page:?} W", if smc.is_some() { "open" } else { "not available" });
+                let d = format!(
+                    "SMC {}; the whole Mac's draw: {w:?} W; on the page: {page:?} W",
+                    if smc.is_some() {
+                        "open"
+                    } else {
+                        "not available"
+                    }
+                );
                 Some(("system-power", ok, d))
             }
             "volume-hud" => {
-                let ok = matches!(self.st.hud.as_ref().map(|h| &h.kind), Some(HudKind::Volume { .. }));
-                Some(("volume-hud", ok, format!("output device: {:?}", services::audio::current())))
+                let ok = matches!(
+                    self.st.hud.as_ref().map(|h| &h.kind),
+                    Some(HudKind::Volume { .. })
+                );
+                Some((
+                    "volume-hud",
+                    ok,
+                    format!("output device: {:?}", services::audio::current()),
+                ))
             }
             "headphones" => {
-                let popup = matches!(self.st.hud.as_ref().map(|h| &h.kind), Some(HudKind::Bluetooth { connected: true, .. }));
+                let popup = matches!(
+                    self.st.hud.as_ref().map(|h| &h.kind),
+                    Some(HudKind::Bluetooth {
+                        connected: true,
+                        ..
+                    })
+                );
                 let (before, made) = self.smoke_devices.clone().unwrap_or((0, Err(0)));
                 let after = services::audio::list_changes();
                 let ok = popup && made.is_ok() && after > before;
                 Some(("headphones", ok, format!("pop-up shown: {popup}; device list changes heard: {before} -> {after} (test device: {made:?})")))
             }
             "charging-hud" => {
-                let ok = matches!(self.st.hud.as_ref().map(|h| &h.kind), Some(HudKind::Charging { .. }));
-                Some(("charging-hud", ok, format!("this Mac's power: {:?}", services::power::query())))
+                let ok = matches!(
+                    self.st.hud.as_ref().map(|h| &h.kind),
+                    Some(HudKind::Charging { .. })
+                );
+                Some((
+                    "charging-hud",
+                    ok,
+                    format!("this Mac's power: {:?}", services::power::query()),
+                ))
             }
             "shelf-drop" => {
-                let made = self.st.shelf_thumbs.values().filter(|t| t.is_some()).count();
-                Some(("shelf-thumbnails", made >= 3, format!("{made} of {} tiles drawn", self.st.shelf_thumbs.len())))
+                let made = self
+                    .st
+                    .shelf_thumbs
+                    .values()
+                    .filter(|t| t.is_some())
+                    .count();
+                Some((
+                    "shelf-thumbnails",
+                    made >= 3,
+                    format!("{made} of {} tiles drawn", self.st.shelf_thumbs.len()),
+                ))
             }
             "glass-open" | "notch-glass-open" => {
-                let notch = self.screen.notch.map_or("no notch".to_string(), |n| format!("a {:.0}x{:.0} notch with a black brow", n.w, n.h));
+                let notch = self.screen.notch.map_or("no notch".to_string(), |n| {
+                    format!("a {:.0}x{:.0} notch with a black brow", n.w, n.h)
+                });
                 let what = glass::kind().unwrap_or("no glass view");
-                Some(("glass-theme", glass::shown() && self.look().material == Material::Glass, format!("{what} under the open island, {notch}")))
+                Some((
+                    "glass-theme",
+                    glass::shown() && self.look().material == Material::Glass,
+                    format!("{what} under the open island, {notch}"),
+                ))
             }
             "notch-oyen-open" | "notch-oyen-collapsed" => {
                 let look = self.look();
-                let ok = self.screen.notch.is_some() && *look == poni_core::look::OYEN_NIGHT && !glass::shown();
-                Some(("oyen-around-notch", ok, format!("ground {:?}, ink {:?}, font {:?}", look.ground, look.ink, look.font)))
+                let ok = self.screen.notch.is_some()
+                    && *look == poni_core::look::OYEN_NIGHT
+                    && !glass::shown();
+                Some((
+                    "oyen-around-notch",
+                    ok,
+                    format!(
+                        "ground {:?}, ink {:?}, font {:?}",
+                        look.ground, look.ink, look.font
+                    ),
+                ))
             }
-            "pill-open" | "pill-collapsed" | "notch-pill-open" | "notch-pill-collapsed" => Some(self.pill_report()),
+            "pill-open" | "pill-collapsed" | "notch-pill-open" | "notch-pill-collapsed" => {
+                Some(self.pill_report())
+            }
             "notch-pill-music" => {
                 let (_, placed, d) = self.pill_report();
                 let line = pill::lyric::current(&self.st).is_some();
-                let ok = placed && self.mode == Mode::Activity(activities::Activity::Media) && !line;
-                Some(("pill-music-floats", ok, format!("{d}; a line to sing: {line}")))
+                let ok =
+                    placed && self.mode == Mode::Activity(activities::Activity::Media) && !line;
+                Some((
+                    "pill-music-floats",
+                    ok,
+                    format!("{d}; a line to sing: {line}"),
+                ))
             }
             "notch-eyes" => {
-                let Some(n) = self.screen.notch else { return Some(("eyes-around-notch", false, "no notch".into())) };
+                let Some(n) = self.screen.notch else {
+                    return Some(("eyes-around-notch", false, "no notch".into()));
+                };
                 let g = self.island.current();
                 let fit = notch::fit(&self.mode, &self.st);
                 let peek = self.st.ui.peek;
                 let (along, moving) = peek.along(clock::mono());
-                let ok = self.mode == Mode::Idle && fit == Fit::Ears && g.w > n.w + 40.0 && peek.left && along == -1.0 && !moving;
+                let ok = self.mode == Mode::Idle
+                    && fit == Fit::Ears
+                    && g.w > n.w + 40.0
+                    && peek.left
+                    && along == -1.0
+                    && !moving;
                 let d = format!(
                     "{:?} {fit:?}, {:.0}x{:.0} DIP around a {:.0}x{:.0} notch; pointer at {:?} from its middle: the eyes peek out {} of the camera ({along:.2} of the way), looking {:?}",
                     self.mode,
@@ -4738,7 +5867,13 @@ impl App {
             }
             "music-cost" | "pill-music-cost" => {
                 let c = self.cost;
-                let per = |s: f64| if c.frames > 0 { s / c.frames as f64 * 1e6 } else { 0.0 };
+                let per = |s: f64| {
+                    if c.frames > 0 {
+                        s / c.frames as f64 * 1e6
+                    } else {
+                        0.0
+                    }
+                };
                 let d = format!(
                     "{:?}{}, {} frames at rest: {:.0} us a frame in draw, {:.0} us of it the body; at 120 Hz {:.1} ms of CPU a second",
                     self.mode,
@@ -4752,21 +5887,56 @@ impl App {
             }
             "now-playing" => {
                 if std::env::var_os("PONI_SMOKE_NOW_PLAYING").is_none() {
-                    return Some(("now-playing-service", true, "skipped: no test player on this run".into()));
+                    return Some((
+                        "now-playing-service",
+                        true,
+                        "skipped: no test player on this run".into(),
+                    ));
                 }
                 let m = self.st.media.as_ref();
                 let ok = m.is_some_and(|m| m.title == SMOKE_SERVICE_TRACK);
-                let d = m.map_or("nothing".to_string(), |m| format!("{} by {} from {:?} ({})", m.title, m.artist, m.app_id, if m.is_playing() { "playing" } else { "paused" }));
-                Some(("now-playing-service", ok, format!("macOS's now playing through the adapter: {d}")))
+                let d = m.map_or("nothing".to_string(), |m| {
+                    format!(
+                        "{} by {} from {:?} ({})",
+                        m.title,
+                        m.artist,
+                        m.app_id,
+                        if m.is_playing() { "playing" } else { "paused" }
+                    )
+                });
+                Some((
+                    "now-playing-service",
+                    ok,
+                    format!("macOS's now playing through the adapter: {d}"),
+                ))
             }
             "now-playing-browser" => {
                 if std::env::var_os("PONI_SMOKE_BROWSER").is_none() {
-                    return Some(("now-playing-browser", true, "skipped: no Edge or Chrome on this run".into()));
+                    return Some((
+                        "now-playing-browser",
+                        true,
+                        "skipped: no Edge or Chrome on this run".into(),
+                    ));
                 }
                 let m = self.st.media.as_ref();
-                let ok = m.is_some_and(|m| m.title == SMOKE_BROWSER_TRACK && poni_core::nowplaying::is_browser(&m.app_id));
-                let d = m.map_or("nothing".to_string(), |m| format!("{} by {} in {} ({:?}, {})", m.title, m.artist, m.app_name, m.app_id, if m.is_playing() { "playing" } else { "paused" }));
-                Some(("now-playing-browser", ok, format!("a browser tab in macOS's now playing: {d}")))
+                let ok = m.is_some_and(|m| {
+                    m.title == SMOKE_BROWSER_TRACK && poni_core::nowplaying::is_browser(&m.app_id)
+                });
+                let d = m.map_or("nothing".to_string(), |m| {
+                    format!(
+                        "{} by {} in {} ({:?}, {})",
+                        m.title,
+                        m.artist,
+                        m.app_name,
+                        m.app_id,
+                        if m.is_playing() { "playing" } else { "paused" }
+                    )
+                });
+                Some((
+                    "now-playing-browser",
+                    ok,
+                    format!("a browser tab in macOS's now playing: {d}"),
+                ))
             }
             "notch-pill-ear" => {
                 let armed = self.timers[Timer::Collapse as usize].is_some();
@@ -4785,8 +5955,13 @@ impl App {
                 let (home, centre) = (self.screen.cx as f32, self.win.0 + self.cx);
                 let want = (home + 300.0).min(sw - self.island.current().w / 2.0 - self.room().0);
                 // Around a notch the window keeps the notch in it (Pill docks there to rest).
-                let notch_in = self.screen.notch.is_none_or(|n| self.notch_cx >= n.w / 2.0 && self.notch_cx + n.w / 2.0 <= self.win.1);
-                let ok = !self.expanded && self.st.settings.island_x.is_some() && (centre - want).abs() < 1.5 && notch_in;
+                let notch_in = self.screen.notch.is_none_or(|n| {
+                    self.notch_cx >= n.w / 2.0 && self.notch_cx + n.w / 2.0 <= self.win.1
+                });
+                let ok = !self.expanded
+                    && self.st.settings.island_x.is_some()
+                    && (centre - want).abs() < 1.5
+                    && notch_in;
                 let d = format!(
                     "{:?}: centre {home:.0} -> {centre:.0} DIP across a {sw:.0} DIP screen (want {want:.0}), saved {:?}, {}; window {:.0}+{:.0}, the notch (or middle) at {:.0} in it",
                     self.mode,
@@ -4796,31 +5971,73 @@ impl App {
                     self.win.1,
                     self.notch_cx
                 );
-                Some((if self.screen.notch.is_some() { "notch-pill-dragged" } else { "island-dragged" }, ok, d))
+                Some((
+                    if self.screen.notch.is_some() {
+                        "notch-pill-dragged"
+                    } else {
+                        "island-dragged"
+                    },
+                    ok,
+                    d,
+                ))
             }
             "pill-drag-open" => {
                 let sw = self.screen.w as f32;
                 let b = self.island.body_rect_at(self.cx);
                 let (l, r) = (self.win.0 + b.x, self.win.0 + b.right());
-                let ok = self.expanded && l >= -0.5 && r <= sw + 0.5 && self.win.0 + b.center().x > self.screen.cx as f32;
-                Some(("island-opens-at-its-spot", ok, format!("{:?} from {l:.0} to {r:.0} DIP across a {sw:.0} DIP screen", self.mode)))
+                let ok = self.expanded
+                    && l >= -0.5
+                    && r <= sw + 0.5
+                    && self.win.0 + b.center().x > self.screen.cx as f32;
+                Some((
+                    "island-opens-at-its-spot",
+                    ok,
+                    format!(
+                        "{:?} from {l:.0} to {r:.0} DIP across a {sw:.0} DIP screen",
+                        self.mode
+                    ),
+                ))
             }
             "notch-pill-rest" => {
-                let ok = self.spot().is_some() && self.mode == Mode::Idle && !self.island.floating() && (self.cx - self.notch_cx).abs() < 0.5;
-                let d = format!("{:?}, the island at {:.0} and the notch at {:.0} in the window, spot {:?}", self.mode, self.cx, self.notch_cx, self.spot());
+                let ok = self.spot().is_some()
+                    && self.mode == Mode::Idle
+                    && !self.island.floating()
+                    && (self.cx - self.notch_cx).abs() < 0.5;
+                let d = format!(
+                    "{:?}, the island at {:.0} and the notch at {:.0} in the window, spot {:?}",
+                    self.mode,
+                    self.cx,
+                    self.notch_cx,
+                    self.spot()
+                );
                 Some(("notch-pill-docks-at-the-notch", ok, d))
             }
             "pill-drag-centre" | "notch-pill-centre" => {
                 let (home, centre) = (self.screen.cx as f32, self.win.0 + self.cx);
-                let ok = self.st.settings.island_x.is_none() && (centre - home).abs() < 0.5 && self.win.1 == self.surface.0;
+                let ok = self.st.settings.island_x.is_none()
+                    && (centre - home).abs() < 0.5
+                    && self.win.1 == self.surface.0;
                 let d = format!("centre {centre:.0} DIP (the notch or middle: {home:.0}), window {:.0} wide for a {:.0} room, saved {:?}", self.win.1, self.surface.0, self.st.settings.island_x);
-                Some((if self.screen.notch.is_some() { "notch-pill-centred" } else { "island-centred" }, ok, d))
+                Some((
+                    if self.screen.notch.is_some() {
+                        "notch-pill-centred"
+                    } else {
+                        "island-centred"
+                    },
+                    ok,
+                    d,
+                ))
             }
             "pill-hover" => {
-                let (now, rest) = (self.island.current(), activities::geom(&self.mode, &self.st));
+                let (now, rest) = (
+                    self.island.current(),
+                    activities::geom(&self.mode, &self.st),
+                );
                 let want = pill::motion::hover_lift(rest);
                 let top = pill::TOP_GAP + want.dy;
-                let ok = self.hovering && (now.w, now.h, now.r) == (want.w, want.h, want.r) && (self.island.top() - top).abs() < 0.01;
+                let ok = self.hovering
+                    && (now.w, now.h, now.r) == (want.w, want.h, want.r)
+                    && (self.island.top() - top).abs() < 0.01;
                 let d = format!(
                     "pointer in the gap above the pill: hovering {}, {:.0}x{:.0} DIP r {:.0} at {:.0} below the top edge (resting {:.0}x{:.0} at {:.0})",
                     self.hovering,
@@ -4835,18 +6052,31 @@ impl App {
                 Some(("pill-hover", ok, d))
             }
             "music-check" => {
-                let playing = self.st.media.as_ref().map_or("nothing".to_string(), |m| format!("{} by {} in {}", m.title, m.artist, m.app_name));
+                let playing = self.st.media.as_ref().map_or("nothing".to_string(), |m| {
+                    format!("{} by {} in {}", m.title, m.artist, m.app_name)
+                });
                 let l = &self.st.lyrics;
                 let lines = l.lyrics.as_ref().map_or(0, |x| x.lines.len());
                 let synced = l.lyrics.as_ref().is_some_and(|x| x.synced);
-                let track = self.st.media.as_ref().is_some_and(|m| m.title == SMOKE_TRACK);
+                let track = self
+                    .st
+                    .media
+                    .as_ref()
+                    .is_some_and(|m| m.title == SMOKE_TRACK);
                 // LRCLIB didn't answer, even asked again: an outside service's
                 // trouble, not this copy's, so it fails neither CI nor a release.
                 if track && lrclib_failed(&l.status) {
                     return Some(("now-playing-lyrics", true, format!("skipped: {playing}, but LRCLIB didn't answer, even asked again 30 s later ({:?})", l.status)));
                 }
                 let ok = track && l.status == LyricsStatus::Found && lines > 0;
-                Some(("now-playing-lyrics", ok, format!("{playing}; lyrics {:?} from {}: {lines} lines, synced {synced}", l.status, l.source)))
+                Some((
+                    "now-playing-lyrics",
+                    ok,
+                    format!(
+                        "{playing}; lyrics {:?} from {}: {lines} lines, synced {synced}",
+                        l.status, l.source
+                    ),
+                ))
             }
             "ja-auto" => {
                 let l = &self.st.lyrics;
@@ -4860,104 +6090,315 @@ impl App {
             "ja-get" => {
                 let status = self.st.addon(JAPANESE_READINGS.id);
                 let checked = |f: &poni_core::addons::AddonFile| {
-                    std::fs::read(services::addons::file_path(&JAPANESE_READINGS, f.name)).is_ok_and(|b| f.matches(&b))
+                    std::fs::read(services::addons::file_path(&JAPANESE_READINGS, f.name))
+                        .is_ok_and(|b| f.matches(&b))
                 };
-                let files: Vec<String> = JAPANESE_READINGS.files.iter().map(|f| format!("{} {}", f.name, if checked(f) { "checked" } else { "missing or different" })).collect();
+                let files: Vec<String> = JAPANESE_READINGS
+                    .files
+                    .iter()
+                    .map(|f| {
+                        format!(
+                            "{} {}",
+                            f.name,
+                            if checked(f) {
+                                "checked"
+                            } else {
+                                "missing or different"
+                            }
+                        )
+                    })
+                    .collect();
                 let (read, needing) = romaji_lines(&self.st.lyrics);
-                let ok = status == AddonStatus::Ready && JAPANESE_READINGS.files.iter().all(checked) && read == needing && !self.st.lyrics.wants_ja_readings;
-                Some(("ja-readings-addon", ok, format!("{status:?}: {}; read again: {read} of {needing} lines with romaji", files.join(", "))))
+                let ok = status == AddonStatus::Ready
+                    && JAPANESE_READINGS.files.iter().all(checked)
+                    && read == needing
+                    && !self.st.lyrics.wants_ja_readings;
+                Some((
+                    "ja-readings-addon",
+                    ok,
+                    format!(
+                        "{status:?}: {}; read again: {read} of {needing} lines with romaji",
+                        files.join(", ")
+                    ),
+                ))
             }
             "addons-tab" => {
                 let tabs = pages::tabs(&self.st);
                 let status = self.st.addon(JAPANESE_READINGS.id);
-                let ok = self.st.page == PageKind::Addons && tabs.last() == Some(&PageKind::Addons) && status == AddonStatus::Ready;
-                let d = format!("{} tabs, the last {:?}; Japanese readings: {}", tabs.len(), tabs.last(), status.line(&JAPANESE_READINGS, true));
+                let ok = self.st.page == PageKind::Addons
+                    && tabs.last() == Some(&PageKind::Addons)
+                    && status == AddonStatus::Ready;
+                let d = format!(
+                    "{} tabs, the last {:?}; Japanese readings: {}",
+                    tabs.len(),
+                    tabs.last(),
+                    status.line(&JAPANESE_READINGS, true)
+                );
                 Some(("addons-tab", ok, d))
             }
             "prayer-get" => {
                 let status = self.st.addon(PRAYER_TIMES.id);
-                let checked =
-                    |f: &poni_core::addons::AddonFile| std::fs::read(services::addons::file_path(&PRAYER_TIMES, f.name)).is_ok_and(|b| f.matches(&b));
-                let files: Vec<String> = PRAYER_TIMES.files.iter().map(|f| format!("{} {}", f.name, if checked(f) { "checked" } else { "missing or different" })).collect();
+                let checked = |f: &poni_core::addons::AddonFile| {
+                    std::fs::read(services::addons::file_path(&PRAYER_TIMES, f.name))
+                        .is_ok_and(|b| f.matches(&b))
+                };
+                let files: Vec<String> = PRAYER_TIMES
+                    .files
+                    .iter()
+                    .map(|f| {
+                        format!(
+                            "{} {}",
+                            f.name,
+                            if checked(f) {
+                                "checked"
+                            } else {
+                                "missing or different"
+                            }
+                        )
+                    })
+                    .collect();
                 let places = self.st.prayer.places.as_ref().map_or(0, |l| l.places.len());
-                let place = self.st.prayer.place.as_ref().map_or("none", |p| p.id.as_str());
-                let ok = status == AddonStatus::Ready && PRAYER_TIMES.files.iter().all(checked) && places > 500 && place == "jakarta";
-                Some(("prayer-addon", ok, format!("{status:?}: {}; {places} places, times for {place}", files.join(", "))))
+                let place = self
+                    .st
+                    .prayer
+                    .place
+                    .as_ref()
+                    .map_or("none", |p| p.id.as_str());
+                let ok = status == AddonStatus::Ready
+                    && PRAYER_TIMES.files.iter().all(checked)
+                    && places > 500
+                    && place == "jakarta";
+                Some((
+                    "prayer-addon",
+                    ok,
+                    format!(
+                        "{status:?}: {}; {places} places, times for {place}",
+                        files.join(", ")
+                    ),
+                ))
             }
             "prayer-page" => {
                 let tabs = pages::tabs(&self.st);
                 let now = self.st.prayer_now();
-                let next = self.st.prayer.site().and_then(|s| poni_core::prayer::next_prayer(&s, now).map(|m| format!("{} at {}", m.prayer.name(), s.hhmm(m.at))));
-                let ok = self.st.page == PageKind::Prayer && tabs.contains(&PageKind::Prayer) && next.is_some();
-                Some(("prayer-page", ok, format!("{} tabs; next: {}", tabs.len(), next.unwrap_or_else(|| "none".into()))))
+                let next = self.st.prayer.site().and_then(|s| {
+                    poni_core::prayer::next_prayer(&s, now)
+                        .map(|m| format!("{} at {}", m.prayer.name(), s.hhmm(m.at)))
+                });
+                let ok = self.st.page == PageKind::Prayer
+                    && tabs.contains(&PageKind::Prayer)
+                    && next.is_some();
+                Some((
+                    "prayer-page",
+                    ok,
+                    format!(
+                        "{} tabs; next: {}",
+                        tabs.len(),
+                        next.unwrap_or_else(|| "none".into())
+                    ),
+                ))
             }
             "prayer-ok" => {
-                let running = self.st.prayer.site().and_then(|s| poni_core::prayer::countdown(&s, self.st.prayer_now(), self.st.settings.prayer.remind_before_min));
+                let running = self.st.prayer.site().and_then(|s| {
+                    poni_core::prayer::countdown(
+                        &s,
+                        self.st.prayer_now(),
+                        self.st.settings.prayer.remind_before_min,
+                    )
+                });
                 let shown = activities::prayer_countdown(&self.st);
-                let ok = running.is_some() && shown.is_none() && self.st.prayer.countdown_ok == running.map(|(m, _)| m.at);
-                Some(("prayer-ok", ok, format!("countdown {:?}, on the island: {shown:?}", running.map(|(m, left)| (m.prayer, left)))))
+                let ok = running.is_some()
+                    && shown.is_none()
+                    && self.st.prayer.countdown_ok == running.map(|(m, _)| m.at);
+                Some((
+                    "prayer-ok",
+                    ok,
+                    format!(
+                        "countdown {:?}, on the island: {shown:?}",
+                        running.map(|(m, left)| (m.prayer, left))
+                    ),
+                ))
             }
             "prayer-adzan" => {
                 let playing = self.adzan.is_playing();
-                let notice = self.st.notice.as_ref().map(|n| format!("{} / {}", n.title, n.subtitle)).unwrap_or_default();
-                let stop = self.st.notice.as_ref().is_some_and(|n| n.inline == Some(InlineAction::StopAdzan));
+                let notice = self
+                    .st
+                    .notice
+                    .as_ref()
+                    .map(|n| format!("{} / {}", n.title, n.subtitle))
+                    .unwrap_or_default();
+                let stop = self
+                    .st
+                    .notice
+                    .as_ref()
+                    .is_some_and(|n| n.inline == Some(InlineAction::StopAdzan));
                 let ok = playing && self.st.prayer.adzan && stop;
-                Some(("prayer-adzan", ok, format!("adzan playing: {playing}; notice \"{notice}\", Stop in it: {stop}")))
+                Some((
+                    "prayer-adzan",
+                    ok,
+                    format!("adzan playing: {playing}; notice \"{notice}\", Stop in it: {stop}"),
+                ))
             }
             "prayer-stop" => {
                 let playing = self.adzan.is_playing();
-                Some(("prayer-stop", !playing && !self.st.prayer.adzan, format!("adzan playing: {playing}")))
+                Some((
+                    "prayer-stop",
+                    !playing && !self.st.prayer.adzan,
+                    format!("adzan playing: {playing}"),
+                ))
             }
             "prayer-locate" => {
                 let l = self.st.prayer.locate;
-                Some(("prayer-locate", l != Locate::Idle, format!("location: {l:?}")))
+                Some((
+                    "prayer-locate",
+                    l != Locate::Idle,
+                    format!("location: {l:?}"),
+                ))
             }
             "prayer-off" => {
                 let status = self.st.addon(PRAYER_TIMES.id);
                 let gone = !prayer_folder().exists();
                 let tab = pages::tabs(&self.st).contains(&PageKind::Prayer);
-                let ok = status == AddonStatus::Off && gone && self.st.prayer.places.is_none() && !tab && self.addons.is_none();
-                Some(("prayer-off", ok, format!("{status:?}; files {}; Prayer tab: {tab}", if gone { "deleted" } else { "still there" })))
+                let ok = status == AddonStatus::Off
+                    && gone
+                    && self.st.prayer.places.is_none()
+                    && !tab
+                    && self.addons.is_none();
+                Some((
+                    "prayer-off",
+                    ok,
+                    format!(
+                        "{status:?}; files {}; Prayer tab: {tab}",
+                        if gone { "deleted" } else { "still there" }
+                    ),
+                ))
             }
             "fullscreen-hide" => {
                 let ok = self.front_full_screen && self.fullscreen_hidden && !window::is_shown();
-                let d = format!("full-screen app in front: {}; island {}", self.front_full_screen, if window::is_shown() { "still on the screen" } else { "off the screen" });
+                let d = format!(
+                    "full-screen app in front: {}; island {}",
+                    self.front_full_screen,
+                    if window::is_shown() {
+                        "still on the screen"
+                    } else {
+                        "off the screen"
+                    }
+                );
                 Some(("fullscreen-hide", ok, d))
             }
             "fullscreen-stay" => {
                 let ok = self.front_full_screen && !self.fullscreen_hidden && window::is_shown();
-                Some(("fullscreen-stay", ok, format!("full-screen app in front: {}; island on the screen: {}", self.front_full_screen, window::is_shown())))
+                Some((
+                    "fullscreen-stay",
+                    ok,
+                    format!(
+                        "full-screen app in front: {}; island on the screen: {}",
+                        self.front_full_screen,
+                        window::is_shown()
+                    ),
+                ))
             }
             "fullscreen-back" => {
                 let ok = !self.front_full_screen && !self.fullscreen_hidden && window::is_shown();
-                Some(("fullscreen-back", ok, format!("full-screen app in front: {}; island on the screen: {}", self.front_full_screen, window::is_shown())))
+                Some((
+                    "fullscreen-back",
+                    ok,
+                    format!(
+                        "full-screen app in front: {}; island on the screen: {}",
+                        self.front_full_screen,
+                        window::is_shown()
+                    ),
+                ))
             }
             "oyenza-post" => {
                 let (ok, d) = self.smoke_post.clone().unwrap_or((false, "not run".into()));
-                Some(("oyenza-post", ok && self.oyenza.is_some(), format!("worker {}; {d}", if self.oyenza.is_some() { "running" } else { "not started" })))
+                Some((
+                    "oyenza-post",
+                    ok && self.oyenza.is_some(),
+                    format!(
+                        "worker {}; {d}",
+                        if self.oyenza.is_some() {
+                            "running"
+                        } else {
+                            "not started"
+                        }
+                    ),
+                ))
             }
             "oyenza-code" => {
                 let code = matches!(&self.st.oyenza.link, OyenzaLink::Connecting { code, .. } if code == "KPJX-TMNQ");
-                let ok = code && self.st.pinned && self.st.page == PageKind::Oyenza && pages::tabs(&self.st).contains(&PageKind::Oyenza);
-                Some(("oyenza-code", ok, format!("code shown: {code}; island kept open: {}; page {:?}", self.st.pinned, self.st.page)))
+                let ok = code
+                    && self.st.pinned
+                    && self.st.page == PageKind::Oyenza
+                    && pages::tabs(&self.st).contains(&PageKind::Oyenza);
+                Some((
+                    "oyenza-code",
+                    ok,
+                    format!(
+                        "code shown: {code}; island kept open: {}; page {:?}",
+                        self.st.pinned, self.st.page
+                    ),
+                ))
             }
             "oyenza-page" => {
                 let o = &self.st.oyenza;
-                let rows = o.activity.as_ref().map_or(0, |a| a.days.iter().map(|d| d.rows.len()).sum::<usize>());
-                let ok = matches!(o.link, OyenzaLink::Connected { .. }) && rows > 0 && !o.bills.is_empty() && self.st.oyenza.pinned_before.is_none();
-                Some(("oyenza-page", ok, format!("{:?}; {rows} transactions, {} bills; island no longer held open: {}", o.link, o.bills.len(), o.pinned_before.is_none())))
+                let rows = o
+                    .activity
+                    .as_ref()
+                    .map_or(0, |a| a.days.iter().map(|d| d.rows.len()).sum::<usize>());
+                let ok = matches!(o.link, OyenzaLink::Connected { .. })
+                    && rows > 0
+                    && !o.bills.is_empty()
+                    && self.st.oyenza.pinned_before.is_none();
+                Some((
+                    "oyenza-page",
+                    ok,
+                    format!(
+                        "{:?}; {rows} transactions, {} bills; island no longer held open: {}",
+                        o.link,
+                        o.bills.len(),
+                        o.pinned_before.is_none()
+                    ),
+                ))
             }
             "oyenza-money" => {
                 let n = self.st.notice.as_ref();
-                let ok = n.is_some_and(|n| n.title == "Money in \u{b7} BCA" && n.inline == Some(InlineAction::ShowAmount) && n.reveal.is_some());
-                Some(("oyenza-money", ok, format!("notice: {:?} / {:?}, sum held back for Show: {}", n.map(|n| &n.title), n.map(|n| &n.subtitle), n.is_some_and(|n| n.reveal.is_some()))))
+                let ok = n.is_some_and(|n| {
+                    n.title == "Money in \u{b7} BCA"
+                        && n.inline == Some(InlineAction::ShowAmount)
+                        && n.reveal.is_some()
+                });
+                Some((
+                    "oyenza-money",
+                    ok,
+                    format!(
+                        "notice: {:?} / {:?}, sum held back for Show: {}",
+                        n.map(|n| &n.title),
+                        n.map(|n| &n.subtitle),
+                        n.is_some_and(|n| n.reveal.is_some())
+                    ),
+                ))
             }
             "ai-page" => {
                 let tab = pages::tabs(&self.st).contains(&PageKind::Ai);
                 let asked = services::keychain::asked();
-                let ok = tab && self.expanded && self.st.page == PageKind::Ai && self.usage.is_none() && asked == 0;
-                let worker = if self.usage.is_none() { "not started" } else { "running" };
-                Some(("ai-page", ok, format!("AI tab: {tab}; page {:?}; worker {worker}; keychain asked {asked} times", self.st.page)))
+                let ok = tab
+                    && self.expanded
+                    && self.st.page == PageKind::Ai
+                    && self.usage.is_none()
+                    && asked == 0;
+                let worker = if self.usage.is_none() {
+                    "not started"
+                } else {
+                    "running"
+                };
+                Some((
+                    "ai-page",
+                    ok,
+                    format!(
+                        "AI tab: {tab}; page {:?}; worker {worker}; keychain asked {asked} times",
+                        self.st.page
+                    ),
+                ))
             }
             "ai-keychain" => {
                 let (ok, d) = smoke_keychain();
@@ -4970,7 +6411,8 @@ impl App {
                 let before = services::keychain::asked();
                 let read = services::keychain::read(SMOKE_KEYCHAIN.0, Some("plain"));
                 let asked = services::keychain::asked() - before;
-                let kept = std::env::var_os("PONI_SMOKE_KEYCHAIN").is_none() || read == studio_usage::Got::Text(SMOKE_KEYCHAIN.1.into());
+                let kept = std::env::var_os("PONI_SMOKE_KEYCHAIN").is_none()
+                    || read == studio_usage::Got::Text(SMOKE_KEYCHAIN.1.into());
                 let ok = self.away.1 && !ask && keep && kept && asked == 0;
                 Some(("keychain-locked", ok, format!("locked, notices on: may ask macOS {ask}, keeps what it read {keep}; a read now: {read:?}, macOS asked {asked} times")))
             }
@@ -4978,8 +6420,16 @@ impl App {
                 let (ask, keep) = services::keychain::watching();
                 services::keychain::ask_again();
                 // Locking and unlocking went through set_usage_watch: still no worker.
-                let ok = !self.away.1 && self.mode == Mode::Expanded(PageKind::Ai) && ask && keep && self.usage.is_none();
-                let worker = if self.usage.is_none() { "not started" } else { "running" };
+                let ok = !self.away.1
+                    && self.mode == Mode::Expanded(PageKind::Ai)
+                    && ask
+                    && keep
+                    && self.usage.is_none();
+                let worker = if self.usage.is_none() {
+                    "not started"
+                } else {
+                    "running"
+                };
                 Some(("keychain-back", ok, format!("unlocked, on the AI tab: may ask macOS {ask}, keeps what it read {keep}; worker {worker}")))
             }
             "ai-secret" => {
@@ -4990,27 +6440,57 @@ impl App {
                 // Signed out, the tab stays: it is where to sign in again.
                 let tab = pages::tabs(&self.st).contains(&PageKind::Oyenza);
                 let ok = self.st.oyenza.link == OyenzaLink::Off && tab;
-                Some(("oyenza-off", ok, format!("{:?}; Oyenza tab: {tab}", self.st.oyenza.link)))
+                Some((
+                    "oyenza-off",
+                    ok,
+                    format!("{:?}; Oyenza tab: {tab}", self.st.oyenza.link),
+                ))
             }
             "ja-off" => {
                 let status = self.st.addon(JAPANESE_READINGS.id);
                 let gone = !ja_folder().exists();
                 let ok = status == AddonStatus::Off && gone && self.addons.is_none();
-                let d = format!("{status:?}; files {}; downloader {}", if gone { "deleted" } else { "still there" }, if self.addons.is_none() { "stopped" } else { "still running" });
+                let d = format!(
+                    "{status:?}; files {}; downloader {}",
+                    if gone { "deleted" } else { "still there" },
+                    if self.addons.is_none() {
+                        "stopped"
+                    } else {
+                        "still running"
+                    }
+                );
                 Some(("ja-readings-off", ok, d))
             }
             "ielts-voice" | "ielts-voice-mp3" => {
-                let check = if name == "ielts-voice" { "ielts-voice-wav" } else { "ielts-voice-mp3" };
-                let Some(v) = &self.smoke_voice else { return Some((check, true, "skipped: no mp3 on this run".into())) };
-                let ended = v.ended.map_or("never".to_string(), |t| format!("after {:.2} s", t - v.started));
+                let check = if name == "ielts-voice" {
+                    "ielts-voice-wav"
+                } else {
+                    "ielts-voice-mp3"
+                };
+                let Some(v) = &self.smoke_voice else {
+                    return Some((check, true, "skipped: no mp3 on this run".into()));
+                };
+                let ended = v.ended.map_or("never".to_string(), |t| {
+                    format!("after {:.2} s", t - v.started)
+                });
                 let ok = v.played.is_ok() && v.ended.is_some() && !v.player.playing();
-                Some((check, ok, format!("{}: play {:?}, VoiceEnded {ended}", v.file.display(), v.played)))
+                Some((
+                    check,
+                    ok,
+                    format!(
+                        "{}: play {:?}, VoiceEnded {ended}",
+                        v.file.display(),
+                        v.played
+                    ),
+                ))
             }
             "ielts-mic" => {
                 use services::mic::MicError;
                 let (ok, gave) = match &self.smoke_mic {
                     Some(Ok(mic)) => (true, format!("Ok ({mic:?}, level {:.3})", mic.level())),
-                    Some(Err(MicError::NoDevice)) => (true, "NoDevice (no microphone on this Mac)".to_string()),
+                    Some(Err(MicError::NoDevice)) => {
+                        (true, "NoDevice (no microphone on this Mac)".to_string())
+                    }
                     Some(Err(MicError::Denied)) => (true, "Denied (macOS says no)".to_string()),
                     Some(Err(MicError::Failed(e))) => (false, format!("Failed: {e}")),
                     None => (false, "nothing".to_string()),
@@ -5018,11 +6498,17 @@ impl App {
                 Some(("ielts-mic-start", ok, format!("Mic::start gave {gave}")))
             }
             "ielts-mic-stop" => {
-                let (ok, d) = self.smoke_mic_stop.clone().unwrap_or((false, "not run".into()));
+                let (ok, d) = self
+                    .smoke_mic_stop
+                    .clone()
+                    .unwrap_or((false, "not run".into()));
                 Some(("ielts-mic-stop", ok, d))
             }
             "notes-capture-stop" => {
-                let (ok, d) = self.smoke_notes_stop.clone().unwrap_or((false, "not run".into()));
+                let (ok, d) = self
+                    .smoke_notes_stop
+                    .clone()
+                    .unwrap_or((false, "not run".into()));
                 Some(("notes-capture", ok, d))
             }
             _ => None,
@@ -5038,14 +6524,23 @@ impl App {
                 match mic.stop() {
                     Ok((path, secs)) => match smoke_wav_format(&path) {
                         Some((rate, channels, bits, at, bytes)) => {
-                            let ok = rate == 16_000 && channels == 1 && bits == 16 && secs > 1.0 && bytes >= 32_000;
+                            let ok = rate == 16_000
+                                && channels == 1
+                                && bits == 16
+                                && secs > 1.0
+                                && bytes >= 32_000;
                             (ok, format!("{secs:.2} s in {}: {rate} Hz, {channels} channel(s), {bits}-bit, {bytes} bytes of samples from byte {at}", path.display()))
                         }
-                        None => (false, format!("{secs:.2} s, but {} isn't a WAV file", path.display())),
+                        None => (
+                            false,
+                            format!("{secs:.2} s, but {} isn't a WAV file", path.display()),
+                        ),
                     },
                     // macOS's question still up (nobody answers it on CI), or
                     // the person said no meanwhile: nothing was recorded.
-                    Err(e) if was == "asking macOS" || was == "turned down" => (true, format!("{e:?} (it was {was})")),
+                    Err(e) if was == "asking macOS" || was == "turned down" => {
+                        (true, format!("{e:?} (it was {was})"))
+                    }
                     Err(e) => (false, format!("{e:?} (it was {was})")),
                 }
             }
@@ -5064,17 +6559,29 @@ impl App {
                 let (lm, lp) = rec.levels();
                 match rec.stop() {
                     Ok(take) => {
-                        let formats: Vec<_> = take.parts.iter().map(|p| smoke_wav_format(p).map(|(r, c, b, _, n)| (r, c, b, n))).collect();
-                        let ok = formats.iter().all(|f| matches!(f, Some((16_000, 1, 16, _))));
+                        let formats: Vec<_> = take
+                            .parts
+                            .iter()
+                            .map(|p| smoke_wav_format(p).map(|(r, c, b, _, n)| (r, c, b, n)))
+                            .collect();
+                        let ok = formats
+                            .iter()
+                            .all(|f| matches!(f, Some((16_000, 1, 16, _))));
                         let _ = std::fs::remove_dir_all(&take.dir);
                         (ok, format!("microphone {mic}, the Mac's sound {pc}; levels {lm:.3}/{lp:.3}; {:.2} s in {} part(s) {formats:?}", take.secs, take.parts.len()))
                     }
-                    Err(issue) => (true, format!("microphone {mic}, the Mac's sound {pc}; stop gave {issue:?}")),
+                    Err(issue) => (
+                        true,
+                        format!("microphone {mic}, the Mac's sound {pc}; stop gave {issue:?}"),
+                    ),
                 }
             }
             // No microphone, or macOS saying no, is the runner's business; a
             // recording that fails to start (a source hanging) is ours.
-            Some(Err(issue)) => (issue != poni_core::notes::CaptureIssue::Failed, format!("no recording: {issue:?}")),
+            Some(Err(issue)) => (
+                issue != poni_core::notes::CaptureIssue::Failed,
+                format!("no recording: {issue:?}"),
+            ),
             None => (false, "Recording::start didn't run".into()),
         }
     }
@@ -5143,7 +6650,11 @@ fn smoke_wav_format(path: &std::path::Path) -> Option<(u32, u16, u16, usize, usi
 /// The keychain items tools/mac-smoke.sh adds for the AI tab's reader: their
 /// service, and the passwords of the accounts "plain" and "accent" (an accent
 /// and a line break, which `security` prints as hex). "absent" is never added.
-const SMOKE_KEYCHAIN: (&str, &str, &str) = ("Oyenza Studio smoke", "{\"claudeAiOauth\":{\"accessToken\":\"test-token\"}}", "caf\u{e9}\nnext");
+const SMOKE_KEYCHAIN: (&str, &str, &str) = (
+    "Oyenza Studio smoke",
+    "{\"claudeAiOauth\":{\"accessToken\":\"test-token\"}}",
+    "caf\u{e9}\nnext",
+);
 
 /// The smoke test of the AI tab's keychain reader (`services::keychain`) on
 /// the items above, with the tab closed, open, then closed with the notices
@@ -5151,8 +6662,8 @@ const SMOKE_KEYCHAIN: (&str, &str, &str) = ("Oyenza Studio smoke", "{\"claudeAiO
 /// how often macOS was asked. The worker never runs in the smoke run, so the
 /// reader's gate is this test's alone.
 fn smoke_keychain() -> (bool, String) {
-    use studio_usage::Got;
     use services::keychain as k;
+    use studio_usage::Got;
     if std::env::var_os("PONI_SMOKE_KEYCHAIN").is_none() {
         return (true, "skipped: no test items in the keychain".into());
     }
@@ -5167,7 +6678,11 @@ fn smoke_keychain() -> (bool, String) {
     let closed_ok = closed == Got::Missing && asked() == 0;
     k::set_watch(true, false);
     let t = std::time::Instant::now();
-    let open = [k::read(svc, Some("plain")), k::read(svc, Some("accent")), k::read(svc, Some("absent"))];
+    let open = [
+        k::read(svc, Some("plain")),
+        k::read(svc, Some("accent")),
+        k::read(svc, Some("absent")),
+    ];
     let ms = t.elapsed().as_millis();
     let open_ok = open == [text(plain), text(accent), Got::Missing] && asked() == 3;
     // Once an opening: the next read is the one kept.
@@ -5197,10 +6712,18 @@ fn smoke_secret() -> (bool, String) {
         return (false, format!("not saved: {e}"));
     }
     let out = |cmd: &str, args: &[&std::ffi::OsStr]| {
-        std::process::Command::new(cmd).args(args).output().map(|o| String::from_utf8_lossy(&o.stdout).into_owned()).unwrap_or_default()
+        std::process::Command::new(cmd)
+            .args(args)
+            .output()
+            .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
+            .unwrap_or_default()
     };
-    let tm = out("/usr/bin/tmutil", &["isexcluded".as_ref(), path.as_os_str()]);
-    let attr = out("/usr/bin/xattr", &[path.as_os_str()]).contains("com.apple.metadata:com_apple_backup_excludeItem");
+    let tm = out(
+        "/usr/bin/tmutil",
+        &["isexcluded".as_ref(), path.as_os_str()],
+    );
+    let attr = out("/usr/bin/xattr", &[path.as_os_str()])
+        .contains("com.apple.metadata:com_apple_backup_excludeItem");
     let back = services::secret::load(&path);
     let _ = services::secret::delete(&path);
     let verdict = if tm.contains("[Excluded]") {
@@ -5211,7 +6734,14 @@ fn smoke_secret() -> (bool, String) {
         "no answer"
     };
     let ok = attr && verdict != "included" && back.as_deref() == Some("test-key");
-    (ok, format!("tmutil: {verdict}; exclusion attribute: {}; read back: {}", if attr { "set" } else { "missing" }, back.is_some()))
+    (
+        ok,
+        format!(
+            "tmutil: {verdict}; exclusion attribute: {}; read back: {}",
+            if attr { "set" } else { "missing" },
+            back.is_some()
+        ),
+    )
 }
 
 /// The smoke test: one POST with a JSON body and a key through the Mac's
@@ -5236,7 +6766,9 @@ fn smoke_post() -> (bool, String) {
                 Err(_) => std::thread::sleep(Duration::from_millis(20)),
             }
         }
-        let Some(mut c) = conn else { return String::new() };
+        let Some(mut c) = conn else {
+            return String::new();
+        };
         let _ = c.set_nonblocking(false);
         let _ = c.set_read_timeout(Some(Duration::from_secs(5)));
         let mut buf = Vec::new();
@@ -5249,7 +6781,14 @@ fn smoke_post() -> (bool, String) {
             }
             let text = String::from_utf8_lossy(&buf).into_owned();
             if let Some(end) = text.find("\r\n\r\n") {
-                let len = text.lines().find_map(|l| l.to_ascii_lowercase().strip_prefix("content-length:").map(|v| v.trim().parse::<usize>().unwrap_or(0))).unwrap_or(0);
+                let len = text
+                    .lines()
+                    .find_map(|l| {
+                        l.to_ascii_lowercase()
+                            .strip_prefix("content-length:")
+                            .map(|v| v.trim().parse::<usize>().unwrap_or(0))
+                    })
+                    .unwrap_or(0);
                 if buf.len() >= end + 4 + len {
                     break;
                 }
@@ -5261,13 +6800,33 @@ fn smoke_post() -> (bool, String) {
     });
     let json = "{\"app\":\"poni\",\"name\":\"Smoke Mac\"}";
     let answer = services::http::Client::new("OyenzaStudio smoke").and_then(|c| {
-        c.send(services::http::Method::Post, &format!("http://127.0.0.1:{port}/connect/start"), &[("Authorization", "Bearer oyzd_smoke")], Some(json), Duration::from_secs(5))
+        c.send(
+            services::http::Method::Post,
+            &format!("http://127.0.0.1:{port}/connect/start"),
+            &[("Authorization", "Bearer oyzd_smoke")],
+            Some(json),
+            Duration::from_secs(5),
+        )
     });
     let seen = server.join().unwrap_or_default();
-    let arrived = seen.starts_with("POST /connect/start ") && seen.contains("Bearer oyzd_smoke") && seen.to_ascii_lowercase().contains("content-type: application/json") && seen.ends_with(json);
+    let arrived = seen.starts_with("POST /connect/start ")
+        && seen.contains("Bearer oyzd_smoke")
+        && seen
+            .to_ascii_lowercase()
+            .contains("content-type: application/json")
+        && seen.ends_with(json);
     match answer {
-        Ok(r) => (arrived && r.status == 200 && r.body.contains("\"ok\":true"), format!("request arrived whole: {arrived}; answer {} {}", r.status, r.body)),
-        Err(e) => (false, format!("request arrived whole: {arrived}; no answer ({e})")),
+        Ok(r) => (
+            arrived && r.status == 200 && r.body.contains("\"ok\":true"),
+            format!(
+                "request arrived whole: {arrived}; answer {} {}",
+                r.status, r.body
+            ),
+        ),
+        Err(e) => (
+            false,
+            format!("request arrived whole: {arrived}; no answer ({e})"),
+        ),
     }
 }
 
@@ -5279,8 +6838,19 @@ fn lrclib_failed(status: &LyricsStatus) -> bool {
 
 /// Lines of these lyrics that have romaji, and lines that need it.
 fn romaji_lines(l: &LyricsState) -> (usize, usize) {
-    let needing = l.lyrics.as_ref().map_or(0, |x| x.lines.iter().filter(|line| poni_core::romanize::needs_roman(line.text.trim())).count());
-    (l.ruby.iter().filter(|p| p.iter().any(|r| !r.roman.is_empty())).count(), needing)
+    let needing = l.lyrics.as_ref().map_or(0, |x| {
+        x.lines
+            .iter()
+            .filter(|line| poni_core::romanize::needs_roman(line.text.trim()))
+            .count()
+    });
+    (
+        l.ruby
+            .iter()
+            .filter(|p| p.iter().any(|r| !r.roman.is_empty()))
+            .count(),
+        needing,
+    )
 }
 
 /// The Japanese readings add-on's folder (every version).
@@ -5299,7 +6869,12 @@ fn prayer_folder() -> PathBuf {
 fn seed_japanese_lyrics() {
     use poni_core::lrclib::{self, LrclibRecord, TrackQuery};
     let (title, artist, album, duration_s) = SMOKE_JA_TRACK;
-    let q = lrclib::normalize_query(&TrackQuery { title: title.into(), artist: artist.into(), album: album.into(), duration_s });
+    let q = lrclib::normalize_query(&TrackQuery {
+        title: title.into(),
+        artist: artist.into(),
+        album: album.into(),
+        duration_s,
+    });
     let record = LrclibRecord {
         track_name: title.into(),
         artist_name: artist.into(),
@@ -5310,9 +6885,13 @@ fn seed_japanese_lyrics() {
     };
     let entry = serde_json::json!({ "v": 1, "lookup": 2, "fetched_at": clock::unix_now(), "record": record });
     let path = paths::lyrics_cache_dir().join(format!("{}.json", lrclib::cache_key(&q)));
-    let saved = std::fs::create_dir_all(paths::lyrics_cache_dir()).and_then(|_| std::fs::write(&path, entry.to_string()));
+    let saved = std::fs::create_dir_all(paths::lyrics_cache_dir())
+        .and_then(|_| std::fs::write(&path, entry.to_string()));
     if let Err(e) = saved {
-        pwarn!("smoke: couldn't put the Japanese song's lyrics in {} ({e})", path.display());
+        pwarn!(
+            "smoke: couldn't put the Japanese song's lyrics in {} ({e})",
+            path.display()
+        );
     }
 }
 
@@ -5321,9 +6900,17 @@ fn seed_japanese_lyrics() {
 /// battery are reported (CI's Mac is a virtual one, and has no battery).
 fn system_report(st: &AppState) -> (bool, String) {
     use poni_core::sysmon::{fmt_app_cpu, fmt_bytes, fmt_link, fmt_rate, pressure_word, AppUse};
-    let Some(r) = st.system.latest.as_ref() else { return (false, "no reading arrived".into()) };
-    let cpu = r.cpu.as_ref().filter(|c| c.logical > 0 && !c.cores.is_empty() && (0.0..=1.0).contains(&c.load));
-    let mem = r.memory.as_ref().filter(|m| m.total > 0 && m.used <= m.total);
+    let Some(r) = st.system.latest.as_ref() else {
+        return (false, "no reading arrived".into());
+    };
+    let cpu = r
+        .cpu
+        .as_ref()
+        .filter(|c| c.logical > 0 && !c.cores.is_empty() && (0.0..=1.0).contains(&c.load));
+    let mem = r
+        .memory
+        .as_ref()
+        .filter(|m| m.total > 0 && m.used <= m.total);
     let net = r.network.as_ref().filter(|n| !n.adapter.is_empty());
     let ok = cpu.is_some() && mem.is_some() && !r.drives.is_empty() && net.is_some();
     let pct = |f: f32| format!("{:.0}%", f * 100.0);
@@ -5331,11 +6918,20 @@ fn system_report(st: &AppState) -> (bool, String) {
         let kinds = match c.hybrid() {
             Some((p, e)) => {
                 let load = |k: CoreKind| pct(c.kind_load(k).unwrap_or(0.0));
-                format!(" ({p} P at {}, {e} E at {})", load(CoreKind::Performance), load(CoreKind::Efficiency))
+                format!(
+                    " ({p} P at {}, {e} E at {})",
+                    load(CoreKind::Performance),
+                    load(CoreKind::Efficiency)
+                )
             }
             None => String::new(),
         };
-        format!("{} of {} cores{kinds}, system {}", pct(c.load), c.cores.len(), pct(c.kernel))
+        format!(
+            "{} of {} cores{kinds}, system {}",
+            pct(c.load),
+            c.cores.len(),
+            pct(c.kernel)
+        )
     });
     let memory = mem.map_or("missing".into(), |m| {
         let parts = m.parts().map(|(_, b)| fmt_bytes(b));
@@ -5353,16 +6949,35 @@ fn system_report(st: &AppState) -> (bool, String) {
             fmt_bytes(m.page_total)
         )
     });
-    let drives: Vec<String> =
-        r.drives.iter().map(|d| format!("{}{} {} free of {}", d.root, if d.system { " (startup)" } else { "" }, fmt_bytes(d.free), fmt_bytes(d.total))).collect();
+    let drives: Vec<String> = r
+        .drives
+        .iter()
+        .map(|d| {
+            format!(
+                "{}{} {} free of {}",
+                d.root,
+                if d.system { " (startup)" } else { "" },
+                fmt_bytes(d.free),
+                fmt_bytes(d.total)
+            )
+        })
+        .collect();
     let network = r.network.as_ref().map_or("missing".into(), |n| {
         format!(
             "{} {} {} MAC {} link {} down {} up {} received {} sent {}",
-            if n.adapter.is_empty() { "(no name)" } else { &n.adapter },
+            if n.adapter.is_empty() {
+                "(no name)"
+            } else {
+                &n.adapter
+            },
             if n.online { "connected" } else { "offline" },
             n.ipv4.as_deref().unwrap_or("no IPv4"),
             if n.mac.is_empty() { "none" } else { &n.mac },
-            if n.link_bps > 0 { fmt_link(n.link_bps) } else { "not reported".into() },
+            if n.link_bps > 0 {
+                fmt_link(n.link_bps)
+            } else {
+                "not reported".into()
+            },
             fmt_rate(n.down_bps),
             fmt_rate(n.up_bps),
             fmt_bytes(n.received),
@@ -5370,18 +6985,46 @@ fn system_report(st: &AppState) -> (bool, String) {
         )
     });
     let gpu = r.gpu.as_ref().map_or("none".into(), |g| {
-        format!("{} {} (renderer {}, tiler {}), {} of {}", g.name, pct(g.util), pct(g.engine_3d), pct(g.tiler), fmt_bytes(g.mem_used), fmt_bytes(g.mem_total))
+        format!(
+            "{} {} (renderer {}, tiler {}), {} of {}",
+            g.name,
+            pct(g.util),
+            pct(g.engine_3d),
+            pct(g.tiler),
+            fmt_bytes(g.mem_used),
+            fmt_bytes(g.mem_total)
+        )
     });
-    let battery = r.battery.as_ref().map_or("none".into(), |b| format!("{}%", b.percent));
+    let battery = r
+        .battery
+        .as_ref()
+        .map_or("none".into(), |b| format!("{}%", b.percent));
     let apps = |list: &[AppUse], value: &dyn Fn(&AppUse) -> String| {
         let one = |a: &AppUse| {
-            let count = if a.processes == 1 { "1 process".to_string() } else { format!("{} processes", a.processes) };
-            format!("{} {} ({count}{})", a.name, value(a), if a.path.is_some() { ", icon path" } else { "" })
+            let count = if a.processes == 1 {
+                "1 process".to_string()
+            } else {
+                format!("{} processes", a.processes)
+            };
+            format!(
+                "{} {} ({count}{})",
+                a.name,
+                value(a),
+                if a.path.is_some() { ", icon path" } else { "" }
+            )
         };
         list.iter().take(4).map(one).collect::<Vec<_>>().join(", ")
     };
-    let wanted: Vec<&String> = r.top_cpu.iter().chain(&r.top_memory).filter_map(|a| a.path.as_ref()).collect();
-    let drawn = wanted.iter().filter(|p| st.app_icons.get(p.as_str()).is_some_and(|i| i.is_some())).count();
+    let wanted: Vec<&String> = r
+        .top_cpu
+        .iter()
+        .chain(&r.top_memory)
+        .filter_map(|a| a.path.as_ref())
+        .collect();
+    let drawn = wanted
+        .iter()
+        .filter(|p| st.app_icons.get(p.as_str()).is_some_and(|i| i.is_some()))
+        .count();
     let detail = format!(
         "{} · CPU {cores}, up {} min · memory {memory} · drives {} · disk {} · network {network} · GPU {gpu} · battery {battery} \
          · top CPU {} · top memory {} · icons {drawn} of {} drawn",
@@ -5411,12 +7054,21 @@ fn smoke_shelf_files() -> Vec<String> {
     let base = paths::data_dir().join("shelf-demo");
     let folder = base.join("Project assets");
     let _ = std::fs::create_dir_all(&folder);
-    let _ = std::fs::write(folder.join("readme.txt"), "Drafts and exports for the harbor poster.\n");
+    let _ = std::fs::write(
+        folder.join("readme.txt"),
+        "Drafts and exports for the harbor poster.\n",
+    );
     let notes = base.join("Trip notes.txt");
-    let _ = std::fs::write(&notes, "Weekend trip\n\n- ferry leaves at 9:40\n- pack the blue jacket\n");
+    let _ = std::fs::write(
+        &notes,
+        "Weekend trip\n\n- ferry leaves at 9:40\n- pack the blue jacket\n",
+    );
     let sketch = base.join("Harbor sketch.png");
     let _ = crate::png::save_pbgra(&sketch, 240, 240, &crate::render::make_art(240));
-    [sketch, notes, folder].iter().map(|p| p.to_string_lossy().into_owned()).collect()
+    [sketch, notes, folder]
+        .iter()
+        .map(|p| p.to_string_lossy().into_owned())
+        .collect()
 }
 
 fn files_label(n: usize) -> String {
@@ -5474,7 +7126,12 @@ pub fn draw_content(
             },
         },
     }
-    (ui.repaint_requested(), ui.anim_requested(), ui.focus_request(), ui.live_requested())
+    (
+        ui.repaint_requested(),
+        ui.anim_requested(),
+        ui.focus_request(),
+        ui.live_requested(),
+    )
 }
 
 // ---------------------------------------------------------------- smoke test bookkeeping
@@ -5568,7 +7225,8 @@ const SMOKE_STEPS: [&str; 83] = [
 const SMOKE_TRACK: &str = "Blinding Lights";
 /// The made-up song with Japanese lyrics CI announces after it: title,
 /// artist, album and length (tools/mac-smoke.sh sends the same).
-const SMOKE_JA_TRACK: (&str, &str, &str, u32) = ("Paper Boats", "The Lanterns", "Harbor Lights", 201);
+const SMOKE_JA_TRACK: (&str, &str, &str, u32) =
+    ("Paper Boats", "The Lanterns", "Harbor Lights", 201);
 /// The track the MediaRemote adapter's test player reports in macOS's own
 /// now playing (third_party/mediaremote-adapter/src/test/NowPlayingTest.m).
 const SMOKE_SERVICE_TRACK: &str = "Is It Broken Yet?";
@@ -5596,15 +7254,26 @@ struct Smoke {
 impl Smoke {
     fn new(dir: PathBuf) -> Smoke {
         let _ = std::fs::create_dir_all(&dir);
-        Smoke { dir, step: 0, phase: SmokePhase::Apply, checks: Vec::new(), failed: false, replayed: None }
+        Smoke {
+            dir,
+            step: 0,
+            phase: SmokePhase::Apply,
+            checks: Vec::new(),
+            failed: false,
+            replayed: None,
+        }
     }
 
     fn file(&self, kind: &str, name: &str, ext: &str) -> PathBuf {
-        self.dir.join(format!("{kind}-{:02}-{name}.{ext}", self.step + 1))
+        self.dir
+            .join(format!("{kind}-{:02}-{name}.{ext}", self.step + 1))
     }
 
     fn note(&mut self, name: &str, ok: bool, detail: String) {
-        pinfo!("smoke: {name}: {} ({detail})", if ok { "ok" } else { "FAILED" });
+        pinfo!(
+            "smoke: {name}: {} ({detail})",
+            if ok { "ok" } else { "FAILED" }
+        );
         self.failed |= !ok;
         self.checks.push((name.to_string(), ok, detail));
     }
@@ -5627,7 +7296,9 @@ impl Smoke {
         let mut out = String::from("{\n  \"checks\": [\n");
         for (i, (name, ok, detail)) in self.checks.iter().enumerate() {
             let comma = if i + 1 < self.checks.len() { "," } else { "" };
-            out.push_str(&format!("    {{\"name\": {name:?}, \"ok\": {ok}, \"detail\": {detail:?}}}{comma}\n"));
+            out.push_str(&format!(
+                "    {{\"name\": {name:?}, \"ok\": {ok}, \"detail\": {detail:?}}}{comma}\n"
+            ));
         }
         out.push_str(&format!("  ],\n  \"ok\": {}\n}}\n", !self.failed));
         let _ = std::fs::write(self.dir.join("report.json"), out);

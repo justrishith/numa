@@ -15,6 +15,15 @@ Oyenza Studio sits on screen all day, so how little it costs is part of the prod
 - **Measure CPU in cycles, not milliseconds.** `TotalProcessorTime`, `GetProcessTimes` and Task Manager count in 15.6 ms clock ticks, so a reading that takes a fraction of a millisecond shows as zero. Use `QueryProcessCycleTime` or `QueryThreadCycleTime`.
 - **Every PR says what it costs:** download size (the installer in the `oyenza-studio-setup` artifact), memory at rest (`smoke-out/metrics.txt` in the `poni-screens` artifact), and anything new that runs at rest or on every frame. "Nothing new" is a fine answer.
 
+## NUMA gateway (port 8900)
+
+`numa-core/gateway` is the one brain for the notch: speech in/out, the OpenCode coding lane, Composio connectors and app launching. It runs on Node 24 with its own types stripped at load, so it is ESM only and `arguments` can't be a binding name.
+
+- **`tasklist /v` is unusable for window titles.** It asks every process for its title and blocks on any hung one; on this machine a full listing can take minutes. `Get-Process | Where-Object { $_.MainWindowTitle }` reads the same thing in about 150 ms. `tasklist` with an `IMAGENAME` filter stays fast and is fine for process counts.
+- **`tasklist` exits 1** when it prints a "no tasks" note, so read its output, not its status code.
+- **Verify launches from the OS, never from the request.** An exe must show a process; an AUMID or URL must show a window that was not there before (or one that already matched, reported as "already open").
+- **App names come from the machine, not a table.** `src/apps.ts` indexes Start Menu shortcuts (targets resolved through `WScript.Shell`), App Paths and `Get-StartApps`, and is cached for ten minutes. Add a spoken name to `BASE_SYNONYMS`, never a new hardcoded app list.
+
 ## Names that stay
 
 The app is Oyenza Studio; it was Oyen Poni until 0.2.0. Only the names people see changed. `poni.exe`, its folders, the uninstall key, the Run value, `Local\Poni.Island`, the Mac bundle id `com.oyenza.poni`, the crates, the `PONI_*` variables and the Oyenza sign-in app id `poni` stay as they are, so older copies update in place and stay signed in. Every release also carries `Oyen-Poni-Setup.exe` and `Oyen-Poni-Mac.dmg` next to the new names, because links to them are out there.

@@ -26,7 +26,9 @@ use crate::pages::settings::picker_width;
 use crate::pages::PageKind;
 use crate::pill::status;
 use crate::state::AppState;
-use crate::ui::{wid, wid_n, CursorKind, Hit, Input, MouseButton, PillStyle, Ui, PILL_GAP, PILL_SMALL};
+use crate::ui::{
+    wid, wid_n, CursorKind, Hit, Input, MouseButton, PillStyle, Ui, PILL_GAP, PILL_SMALL,
+};
 use crate::version::VERSION;
 use poni_core::geom::{palette, Color, Point, Rect};
 use poni_core::settings::{IdleStyle, MonitorChoice, PrayerSound, Theme};
@@ -296,7 +298,12 @@ pub struct Item {
 }
 
 fn item(key: Key, label: &str, sub: Option<&str>, ctl: Ctl) -> Item {
-    Item { key, label: label.to_string(), sub: sub.map(str::to_string), ctl }
+    Item {
+        key,
+        label: label.to_string(),
+        sub: sub.map(str::to_string),
+        ctl,
+    }
 }
 
 fn switch(key: Key, label: &str, sub: Option<&str>, on: bool) -> Item {
@@ -333,9 +340,16 @@ pub enum Act {
 const HOVER: [(u32, &str); 3] = [(120, "Quick"), (220, "Normal"), (450, "Slow")];
 /// How long it stays open after the pointer leaves (ms).
 const CLOSE: [(u32, &str); 3] = [(0, "At once"), (400, "Short"), (1000, "Long")];
-const DISPLAYS: [(MonitorChoice, &str); 2] = [(MonitorChoice::Primary, "Main display"), (MonitorChoice::Cursor, "Under the pointer")];
+const DISPLAYS: [(MonitorChoice, &str); 2] = [
+    (MonitorChoice::Primary, "Main display"),
+    (MonitorChoice::Cursor, "Under the pointer"),
+];
 const FULLSCREEN: [(bool, &str); 2] = [(true, "Hide"), (false, "Stay on top")];
-const SOUNDS: [(PrayerSound, &str); 3] = [(PrayerSound::Adzan, "Adzan"), (PrayerSound::Tone, "Tone"), (PrayerSound::Silent, "Silent")];
+const SOUNDS: [(PrayerSound, &str); 3] = [
+    (PrayerSound::Adzan, "Adzan"),
+    (PrayerSound::Tone, "Tone"),
+    (PrayerSound::Silent, "Silent"),
+];
 const THEMES: [(Theme, &str, &str); 4] = [
     (Theme::Classic, "Classic", "A black island at the top edge"),
     (Theme::Oyen, "Oyen", "Oyen lives in the island"),
@@ -361,7 +375,10 @@ fn names<T>(list: &[(T, &'static str)]) -> Vec<&'static str> {
 
 /// The preset nearest to `ms` (a hand-edited file's value lands on one).
 fn nearest(list: &[(u32, &str)], ms: u32) -> Option<usize> {
-    list.iter().enumerate().min_by_key(|(_, (v, _))| v.abs_diff(ms)).map(|(i, _)| i)
+    list.iter()
+        .enumerate()
+        .min_by_key(|(_, (v, _))| v.abs_diff(ms))
+        .map(|(i, _)| i)
 }
 
 fn idle_name(s: IdleStyle, theme: Theme) -> &'static str {
@@ -377,7 +394,10 @@ fn idle_name(s: IdleStyle, theme: Theme) -> &'static str {
 
 /// The pages the island may open on: its tabs, but not the Add-ons "+".
 fn start_pages(st: &AppState) -> Vec<PageKind> {
-    crate::pages::tabs(st).into_iter().filter(|p| *p != PageKind::Addons).collect()
+    crate::pages::tabs(st)
+        .into_iter()
+        .filter(|p| *p != PageKind::Addons)
+        .collect()
 }
 
 fn minutes(m: u32) -> String {
@@ -388,7 +408,11 @@ fn minutes(m: u32) -> String {
 fn offset_text(ms: i32) -> String {
     match ms {
         0 => "On time".into(),
-        _ => format!("{}{:.1} s", if ms > 0 { "−" } else { "+" }, ms.unsigned_abs() as f32 / 1000.0),
+        _ => format!(
+            "{}{:.1} s",
+            if ms > 0 { "−" } else { "+" },
+            ms.unsigned_abs() as f32 / 1000.0
+        ),
     }
 }
 
@@ -398,12 +422,27 @@ pub fn blocks(section: Section, st: &AppState) -> Vec<Block> {
     match section {
         Section::General => {
             let mut rows = vec![
-                item(Key::Autostart, AUTOSTART.0, Some(AUTOSTART.1), Ctl::Switch(st.ui.autostart)),
-                switch(Key::Sounds, "Sounds", Some("A soft sound for timers, drops and reminders"), s.sounds),
+                item(
+                    Key::Autostart,
+                    AUTOSTART.0,
+                    Some(AUTOSTART.1),
+                    Ctl::Switch(st.ui.autostart),
+                ),
+                switch(
+                    Key::Sounds,
+                    "Sounds",
+                    Some("A soft sound for timers, drops and reminders"),
+                    s.sounds,
+                ),
                 switch(Key::Clock24, "24-hour clock", None, s.use_24h),
             ];
             if s.system_on() {
-                rows.push(switch(Key::SystemHistory, "Keep System page history", Some("The charts keep the last minute while the page is closed"), s.system_history));
+                rows.push(switch(
+                    Key::SystemHistory,
+                    "Keep System page history",
+                    Some("The charts keep the last minute while the page is closed"),
+                    s.system_history,
+                ));
             }
             vec![Block::Version, Block::Group(None, rows)]
         }
@@ -415,7 +454,12 @@ pub fn blocks(section: Section, st: &AppState) -> Vec<Block> {
                 Block::Themes,
                 Block::Group(
                     Some("Island at rest"),
-                    vec![item(Key::IdleLook, "Idle look", Some("What the closed island shows"), Ctl::Choice(look_names, looks.iter().position(|l| *l == shown)))],
+                    vec![item(
+                        Key::IdleLook,
+                        "Idle look",
+                        Some("What the closed island shows"),
+                        Ctl::Choice(look_names, looks.iter().position(|l| *l == shown)),
+                    )],
                 ),
             ]
         }
@@ -423,20 +467,58 @@ pub fn blocks(section: Section, st: &AppState) -> Vec<Block> {
             // The Mac's island goes where the notch is; the game readout is Windows'.
             let mut shows = Vec::new();
             if cfg!(windows) {
-                shows.push(item(Key::Display, "Display", Some("The screen the island hangs on"), Ctl::Choice(names(&DISPLAYS), chosen(&DISPLAYS, s.monitor))));
+                shows.push(item(
+                    Key::Display,
+                    "Display",
+                    Some("The screen the island hangs on"),
+                    Ctl::Choice(names(&DISPLAYS), chosen(&DISPLAYS, s.monitor)),
+                ));
             }
-            shows.push(item(Key::Fullscreen, "In full-screen apps", Some("Games and videos that fill the screen"), Ctl::Choice(names(&FULLSCREEN), chosen(&FULLSCREEN, s.hide_in_fullscreen))));
+            shows.push(item(
+                Key::Fullscreen,
+                "In full-screen apps",
+                Some("Games and videos that fill the screen"),
+                Ctl::Choice(
+                    names(&FULLSCREEN),
+                    chosen(&FULLSCREEN, s.hide_in_fullscreen),
+                ),
+            ));
             if cfg!(windows) {
-                shows.push(switch(Key::GameStats, "Show FPS, GPU and CPU over games", Some("Keeps the island on top of full-screen apps"), s.game_stats));
-                shows.push(switch(Key::GamePeek, "Only for a few seconds", Some("Then the island hides and adds no delay to the game"), s.game_peek));
+                shows.push(switch(
+                    Key::GameStats,
+                    "Show FPS, GPU and CPU over games",
+                    Some("Keeps the island on top of full-screen apps"),
+                    s.game_stats,
+                ));
+                shows.push(switch(
+                    Key::GamePeek,
+                    "Only for a few seconds",
+                    Some("Then the island hides and adds no delay to the game"),
+                    s.game_peek,
+                ));
             }
             vec![
                 Block::Group(
                     Some("Opening and closing"),
                     vec![
-                        item(Key::HoverDelay, "Opens after", Some("How long the pointer rests on the island first"), Ctl::Choice(names(&HOVER), nearest(&HOVER, s.hover_delay_ms))),
-                        item(Key::CloseDelay, "Closes", Some("Once the pointer leaves the open island"), Ctl::Choice(names(&CLOSE), nearest(&CLOSE, s.collapse_delay_ms))),
-                        item(Key::Width, "Width when open", Some("Wider gives the pages more room"), Ctl::Stepper(format!("{:.0}", s.expanded_width))),
+                        item(
+                            Key::HoverDelay,
+                            "Opens after",
+                            Some("How long the pointer rests on the island first"),
+                            Ctl::Choice(names(&HOVER), nearest(&HOVER, s.hover_delay_ms)),
+                        ),
+                        item(
+                            Key::CloseDelay,
+                            "Closes",
+                            Some("Once the pointer leaves the open island"),
+                            Ctl::Choice(names(&CLOSE), nearest(&CLOSE, s.collapse_delay_ms)),
+                        ),
+                        item(
+                            Key::Width,
+                            "Width when open",
+                            Some("Wider gives the pages more room"),
+                            Ctl::Stepper(format!("{:.0}", s.expanded_width)),
+                        ),
                     ],
                 ),
                 Block::Group(Some("Where it shows"), shows),
@@ -446,31 +528,97 @@ pub fn blocks(section: Section, st: &AppState) -> Vec<Block> {
             Block::Group(
                 Some("Lyrics"),
                 vec![
-                    switch(Key::Lyrics, "Synced lyrics", Some("Lyrics move with the song, from LRCLIB"), s.lyrics),
-                    switch(Key::Pronunciation, "Lyrics pronunciation", Some("Romaji, pinyin and Korean under the lines"), s.lyrics_pronunciation),
-                    item(Key::LyricsOffset, "Timing", Some("Shift every line earlier or later"), Ctl::Stepper(offset_text(s.lyrics_offset_ms))),
+                    switch(
+                        Key::Lyrics,
+                        "Synced lyrics",
+                        Some("Lyrics move with the song, from LRCLIB"),
+                        s.lyrics,
+                    ),
+                    switch(
+                        Key::Pronunciation,
+                        "Lyrics pronunciation",
+                        Some("Romaji, pinyin and Korean under the lines"),
+                        s.lyrics_pronunciation,
+                    ),
+                    item(
+                        Key::LyricsOffset,
+                        "Timing",
+                        Some("Shift every line earlier or later"),
+                        Ctl::Stepper(offset_text(s.lyrics_offset_ms)),
+                    ),
                 ],
             ),
-            Block::Group(Some("Closed island"), vec![switch(Key::MediaActivity, "Show what's playing", Some("The song and its cover on the closed island"), s.show_media_activity)]),
+            Block::Group(
+                Some("Closed island"),
+                vec![switch(
+                    Key::MediaActivity,
+                    "Show what's playing",
+                    Some("The song and its cover on the closed island"),
+                    s.show_media_activity,
+                )],
+            ),
         ],
         Section::Popups => vec![Block::Group(
             Some("The island shows a pop-up for"),
             vec![
-                switch(Key::HudVolume, "Volume", Some("When you change the volume or mute"), s.hud_volume),
-                switch(Key::HudPower, "Charger and battery", Some("When you plug in, unplug or run low"), s.hud_power),
-                switch(Key::HudBluetooth, "Bluetooth", Some("When headphones and other devices connect"), s.hud_bluetooth),
+                switch(
+                    Key::HudVolume,
+                    "Volume",
+                    Some("When you change the volume or mute"),
+                    s.hud_volume,
+                ),
+                switch(
+                    Key::HudPower,
+                    "Charger and battery",
+                    Some("When you plug in, unplug or run low"),
+                    s.hud_power,
+                ),
+                switch(
+                    Key::HudBluetooth,
+                    "Bluetooth",
+                    Some("When headphones and other devices connect"),
+                    s.hud_bluetooth,
+                ),
             ],
         )],
         Section::Tabs => {
             let pages = start_pages(st);
             let start = PageKind::from_key(&s.start_page);
-            let start_name = if pages.contains(&start) { start.title() } else { pages.first().map_or("Music", |p| p.title()) };
-            let mut open = vec![switch(Key::RememberPage, "Open where you left off", Some("The page you last had open"), s.remember_page)];
+            let start_name = if pages.contains(&start) {
+                start.title()
+            } else {
+                pages.first().map_or("Music", |p| p.title())
+            };
+            let mut open = vec![switch(
+                Key::RememberPage,
+                "Open where you left off",
+                Some("The page you last had open"),
+                s.remember_page,
+            )];
             if !s.remember_page {
-                open.push(item(Key::StartPage, "Opens on", None, Ctl::Stepper(start_name.to_string())));
+                open.push(item(
+                    Key::StartPage,
+                    "Opens on",
+                    None,
+                    Ctl::Stepper(start_name.to_string()),
+                ));
             }
-            let tabs = PageKind::HIDEABLE.iter().map(|p| item(Key::Tab(*p), p.title(), None, Ctl::Switch(Some(!st.tab_hidden(*p))))).collect();
-            vec![Block::Group(Some("When the island opens"), open), Block::Group(Some("Tabs in the island"), tabs), Block::Note("AI, Oyenza and the add-ons' pages always have a tab.")]
+            let tabs = PageKind::HIDEABLE
+                .iter()
+                .map(|p| {
+                    item(
+                        Key::Tab(*p),
+                        p.title(),
+                        None,
+                        Ctl::Switch(Some(!st.tab_hidden(*p))),
+                    )
+                })
+                .collect();
+            vec![
+                Block::Group(Some("When the island opens"), open),
+                Block::Group(Some("Tabs in the island"), tabs),
+                Block::Note("AI, Oyenza and the add-ons' pages always have a tab."),
+            ]
         }
         Section::Addons => vec![Block::Addons],
         Section::Focus => {
@@ -484,44 +632,114 @@ pub fn blocks(section: Section, st: &AppState) -> Vec<Block> {
                 Block::Group(
                     Some("Lengths"),
                     vec![
-                        item(Key::FocusMin, "Focus", None, Ctl::Stepper(minutes(p.focus_min))),
-                        item(Key::ShortBreak, "Short break", None, Ctl::Stepper(minutes(p.short_break_min))),
-                        item(Key::LongBreak, "Long break", None, Ctl::Stepper(minutes(p.long_break_min))),
-                        item(Key::LongEvery, "Long break after", Some("Focus sessions before a long break"), Ctl::Stepper(every)),
+                        item(
+                            Key::FocusMin,
+                            "Focus",
+                            None,
+                            Ctl::Stepper(minutes(p.focus_min)),
+                        ),
+                        item(
+                            Key::ShortBreak,
+                            "Short break",
+                            None,
+                            Ctl::Stepper(minutes(p.short_break_min)),
+                        ),
+                        item(
+                            Key::LongBreak,
+                            "Long break",
+                            None,
+                            Ctl::Stepper(minutes(p.long_break_min)),
+                        ),
+                        item(
+                            Key::LongEvery,
+                            "Long break after",
+                            Some("Focus sessions before a long break"),
+                            Ctl::Stepper(every),
+                        ),
                     ],
                 ),
                 Block::Group(
                     Some("Starting by itself"),
                     vec![
-                        switch(Key::AutoBreaks, "Breaks", Some("A break starts when a focus session ends"), p.auto_start_breaks),
-                        switch(Key::AutoFocus, "Focus sessions", Some("The next session starts when a break ends"), p.auto_start_focus),
+                        switch(
+                            Key::AutoBreaks,
+                            "Breaks",
+                            Some("A break starts when a focus session ends"),
+                            p.auto_start_breaks,
+                        ),
+                        switch(
+                            Key::AutoFocus,
+                            "Focus sessions",
+                            Some("The next session starts when a break ends"),
+                            p.auto_start_focus,
+                        ),
                     ],
                 ),
             ]
         }
         Section::Prayer => {
             let p = &s.prayer;
-            let countdown = if p.remind_before_min == 0 { "Off".to_string() } else { minutes(p.remind_before_min) };
+            let countdown = if p.remind_before_min == 0 {
+                "Off".to_string()
+            } else {
+                minutes(p.remind_before_min)
+            };
             vec![
                 Block::Group(
                     Some("When it's time"),
                     vec![
-                        item(Key::PrayerSound, "Sound", Some("Subuh plays the tone"), Ctl::Choice(names(&SOUNDS), chosen(&SOUNDS, p.sound))),
-                        switch(Key::PrayerPause, "Pause music for the adzan", None, p.pause_music),
-                        item(Key::PrayerCountdown, "Countdown before each prayer", Some("On the closed island"), Ctl::Stepper(countdown)),
+                        item(
+                            Key::PrayerSound,
+                            "Sound",
+                            Some("Subuh plays the tone"),
+                            Ctl::Choice(names(&SOUNDS), chosen(&SOUNDS, p.sound)),
+                        ),
+                        switch(
+                            Key::PrayerPause,
+                            "Pause music for the adzan",
+                            None,
+                            p.pause_music,
+                        ),
+                        item(
+                            Key::PrayerCountdown,
+                            "Countdown before each prayer",
+                            Some("On the closed island"),
+                            Ctl::Stepper(countdown),
+                        ),
                     ],
                 ),
-                Block::Group(Some("Place"), vec![switch(Key::PrayerFollow, "Follow my location", Some("Windows' location picks the nearest place"), p.follow_location)]),
+                Block::Group(
+                    Some("Place"),
+                    vec![switch(
+                        Key::PrayerFollow,
+                        "Follow my location",
+                        Some("Windows' location picks the nearest place"),
+                        p.follow_location,
+                    )],
+                ),
                 Block::Note("Pick a place by hand on the island's Prayer page."),
             ]
         }
         Section::Ai => {
             let u = &s.usage;
-            let mut rows = vec![switch(Key::AiNotices, "Heads-up notices", Some("When a plan's limit gets close, runs out or comes back"), u.notices)];
+            let mut rows = vec![switch(
+                Key::AiNotices,
+                "Heads-up notices",
+                Some("When a plan's limit gets close, runs out or comes back"),
+                u.notices,
+            )];
             if u.notices {
-                rows.push(item(Key::AiNear, "Close to the limit at", None, Ctl::Stepper(format!("{} %", st.usage_near_pct()))));
+                rows.push(item(
+                    Key::AiNear,
+                    "Close to the limit at",
+                    None,
+                    Ctl::Stepper(format!("{} %", st.usage_near_pct())),
+                ));
             }
-            vec![Block::Group(None, rows), Block::Note("Services, keys and the Oyenza Inference connect are on the AI tab.")]
+            vec![
+                Block::Group(None, rows),
+                Block::Note("Services, keys and the Oyenza Inference connect are on the AI tab."),
+            ]
         }
         Section::Oyenza => vec![Block::Account],
         Section::About => vec![
@@ -529,15 +747,35 @@ pub fn blocks(section: Section, st: &AppState) -> Vec<Block> {
             Block::Group(
                 None,
                 vec![
-                    item(Key::ReleaseNotes, "What's new", Some("This version's release notes"), Ctl::Button("Open")),
-                    item(Key::LyricsCredit, "Lyrics", Some("Synced lyrics come from LRCLIB"), Ctl::Button("lrclib.net")),
+                    item(
+                        Key::ReleaseNotes,
+                        "What's new",
+                        Some("This version's release notes"),
+                        Ctl::Button("Open"),
+                    ),
+                    item(
+                        Key::LyricsCredit,
+                        "Lyrics",
+                        Some("Synced lyrics come from LRCLIB"),
+                        Ctl::Button("lrclib.net"),
+                    ),
                 ],
             ),
             Block::Group(
                 Some("Files"),
                 vec![
-                    item(Key::SettingsFile, "Settings file", Some("settings.json, the same settings as a file"), Ctl::Button("Open")),
-                    item(Key::DataFolder, "Data folder", Some("Tasks, the Shelf and your Focus history"), Ctl::Button("Open")),
+                    item(
+                        Key::SettingsFile,
+                        "Settings file",
+                        Some("settings.json, the same settings as a file"),
+                        Ctl::Button("Open"),
+                    ),
+                    item(
+                        Key::DataFolder,
+                        "Data folder",
+                        Some("Tasks, the Shelf and your Focus history"),
+                        Ctl::Button("Open"),
+                    ),
                 ],
             ),
         ],
@@ -547,21 +785,34 @@ pub fn blocks(section: Section, st: &AppState) -> Vec<Block> {
 /// The widget id of `key`'s row in `section` (the self-test's film).
 #[cfg(windows)]
 pub fn row_id(section: Section, st: &AppState, key: Key) -> Option<u64> {
-    blocks(section, st).iter().enumerate().find_map(|(bi, b)| match b {
-        Block::Group(_, items) => items.iter().position(|it| it.key == key).map(|ri| wid_n(&format!("settingswin.row.{bi}"), ri as u64)),
-        _ => None,
-    })
+    blocks(section, st)
+        .iter()
+        .enumerate()
+        .find_map(|(bi, b)| match b {
+            Block::Group(_, items) => items
+                .iter()
+                .position(|it| it.key == key)
+                .map(|ri| wid_n(&format!("settingswin.row.{bi}"), ri as u64)),
+            _ => None,
+        })
 }
 
 /// The widget id of `section`'s row in the sidebar (the self-test's film).
 #[cfg(windows)]
 pub fn nav_id(st: &AppState, section: Section) -> Option<u64> {
-    sections(st).iter().position(|s| *s == section).map(|i| wid_n("settingswin.nav", i as u64))
+    sections(st)
+        .iter()
+        .position(|s| *s == section)
+        .map(|i| wid_n("settingswin.nav", i as u64))
 }
 
 /// Step a number of minutes: by 5, by 1 below 5.
 fn step_min(v: u32, d: i32, lo: u32, hi: u32) -> u32 {
-    let by = if (d < 0 && v <= 5) || (d > 0 && v < 5) { 1 } else { 5 };
+    let by = if (d < 0 && v <= 5) || (d > 0 && v < 5) {
+        1
+    } else {
+        5
+    };
     (v as i64 + d as i64 * by).clamp(lo as i64, hi as i64) as u32
 }
 
@@ -596,7 +847,9 @@ pub fn apply(st: &mut AppState, key: Key, act: Act) {
             Act::Pick(i) if i < CLOSE.len() => s.collapse_delay_ms = CLOSE[i].0,
             _ => return,
         },
-        Key::Width => s.expanded_width = (s.expanded_width + step as f32 * WIDTH_STEP).clamp(480.0, 900.0),
+        Key::Width => {
+            s.expanded_width = (s.expanded_width + step as f32 * WIDTH_STEP).clamp(480.0, 900.0)
+        }
         Key::Display => match act {
             Act::Pick(i) if i < DISPLAYS.len() => s.monitor = DISPLAYS[i].0,
             _ => return,
@@ -611,7 +864,9 @@ pub fn apply(st: &mut AppState, key: Key, act: Act) {
         Key::Pronunciation => s.lyrics_pronunciation = !s.lyrics_pronunciation,
         Key::MediaActivity => s.show_media_activity = !s.show_media_activity,
         // + shows the lines later, as people hear a late line.
-        Key::LyricsOffset => s.lyrics_offset_ms = (s.lyrics_offset_ms - step * OFFSET_STEP).clamp(-5000, 5000),
+        Key::LyricsOffset => {
+            s.lyrics_offset_ms = (s.lyrics_offset_ms - step * OFFSET_STEP).clamp(-5000, 5000)
+        }
         Key::HudVolume => s.hud_volume = !s.hud_volume,
         Key::HudPower => s.hud_power = !s.hud_power,
         Key::HudBluetooth => s.hud_bluetooth = !s.hud_bluetooth,
@@ -621,7 +876,10 @@ pub fn apply(st: &mut AppState, key: Key, act: Act) {
             if pages.is_empty() || step == 0 {
                 return;
             }
-            let at = pages.iter().position(|p| p.key() == st.settings.start_page).unwrap_or(0) as i32;
+            let at = pages
+                .iter()
+                .position(|p| p.key() == st.settings.start_page)
+                .unwrap_or(0) as i32;
             let next = (at + step).rem_euclid(pages.len() as i32) as usize;
             st.settings.start_page = pages[next].key().to_string();
         }
@@ -635,26 +893,39 @@ pub fn apply(st: &mut AppState, key: Key, act: Act) {
             }
         }
         Key::FocusMin => s.pomodoro.focus_min = step_min(s.pomodoro.focus_min, step, 1, 180),
-        Key::ShortBreak => s.pomodoro.short_break_min = (s.pomodoro.short_break_min as i32 + step).clamp(1, 60) as u32,
-        Key::LongBreak => s.pomodoro.long_break_min = step_min(s.pomodoro.long_break_min, step, 1, 120),
-        Key::LongEvery => s.pomodoro.long_every = (s.pomodoro.long_every as i32 + step).clamp(0, 12) as u32,
+        Key::ShortBreak => {
+            s.pomodoro.short_break_min =
+                (s.pomodoro.short_break_min as i32 + step).clamp(1, 60) as u32
+        }
+        Key::LongBreak => {
+            s.pomodoro.long_break_min = step_min(s.pomodoro.long_break_min, step, 1, 120)
+        }
+        Key::LongEvery => {
+            s.pomodoro.long_every = (s.pomodoro.long_every as i32 + step).clamp(0, 12) as u32
+        }
         Key::AutoBreaks => s.pomodoro.auto_start_breaks = !s.pomodoro.auto_start_breaks,
         Key::AutoFocus => s.pomodoro.auto_start_focus = !s.pomodoro.auto_start_focus,
         Key::PrayerSound => match act {
             Act::Pick(i) if i < SOUNDS.len() => s.prayer.sound = SOUNDS[i].0,
             _ => return,
         },
-        Key::PrayerCountdown => s.prayer.remind_before_min = step_min(s.prayer.remind_before_min, step, 0, 60),
+        Key::PrayerCountdown => {
+            s.prayer.remind_before_min = step_min(s.prayer.remind_before_min, step, 0, 60)
+        }
         Key::PrayerPause => s.prayer.pause_music = !s.prayer.pause_music,
         Key::PrayerFollow => s.prayer.follow_location = !s.prayer.follow_location,
         Key::AiNotices => s.usage.notices = !s.usage.notices,
         Key::AiNear => s.usage.near_pct = (s.usage.near_pct as i32 + step * 5).clamp(50, 95) as u8,
         Key::SettingsFile => {
-            st.cmd(Command::OpenPath(crate::paths::settings_path().to_string_lossy().into_owned()));
+            st.cmd(Command::OpenPath(
+                crate::paths::settings_path().to_string_lossy().into_owned(),
+            ));
             return;
         }
         Key::DataFolder => {
-            st.cmd(Command::OpenPath(crate::paths::data_dir().to_string_lossy().into_owned()));
+            st.cmd(Command::OpenPath(
+                crate::paths::data_dir().to_string_lossy().into_owned(),
+            ));
             return;
         }
         Key::ReleaseNotes => {
@@ -714,7 +985,12 @@ pub struct View {
 /// `a` and `b` together.
 fn span(a: Rect, b: Rect) -> Rect {
     let (x0, y0) = (a.x.min(b.x), a.y.min(b.y));
-    Rect::new(x0, y0, a.right().max(b.right()) - x0, a.bottom().max(b.bottom()) - y0)
+    Rect::new(
+        x0,
+        y0,
+        a.right().max(b.right()) - x0,
+        a.bottom().max(b.bottom()) - y0,
+    )
 }
 
 /// How far the content is scrolled (DIPs): where it is, where it's going
@@ -731,7 +1007,15 @@ struct Scroll {
 
 impl View {
     pub fn new(section: Section) -> Self {
-        View { input: Input::default(), hits: Vec::new(), section, scroll: Scroll::default(), motion: Motion::default(), dirty: true, moving: false }
+        View {
+            input: Input::default(),
+            hits: Vec::new(),
+            section,
+            scroll: Scroll::default(),
+            motion: Motion::default(),
+            dirty: true,
+            moving: false,
+        }
     }
 
     /// Show `section`, from outside the window (it opens on it): no glide,
@@ -820,7 +1104,14 @@ impl View {
     }
 
     /// Draw the window on `c` for `st`, light or dark.
-    pub fn draw(&mut self, c: &mut Canvas, st: &mut AppState, now: f64, frame: Frame, light: bool) -> Painted {
+    pub fn draw(
+        &mut self,
+        c: &mut Canvas,
+        st: &mut AppState,
+        now: f64,
+        frame: Frame,
+        light: bool,
+    ) -> Painted {
         self.dirty = false;
         // A section that went away (Prayer times switched off) is General.
         if !self.section.shown(st) {
@@ -834,7 +1125,15 @@ impl View {
         hits.clear();
         {
             let mut ui = Ui::new(c, &mut self.input, &mut hits, now);
-            match draw(&mut ui, st, self.section, frame, light, &mut self.scroll, &mut self.motion) {
+            match draw(
+                &mut ui,
+                st,
+                self.section,
+                frame,
+                light,
+                &mut self.scroll,
+                &mut self.motion,
+            ) {
                 Some(Nav::Section(s)) => {
                     self.section = s;
                     self.scroll = Scroll::default();
@@ -901,7 +1200,11 @@ impl Motion {
     fn begin(&mut self, now: f64, still: bool) {
         // Out of rest, a motion starts with one refresh's step, not the whole
         // time since the last frame (a jump on its first frame).
-        let dt = if self.moving { (now - self.last) as f32 } else { FIRST_STEP };
+        let dt = if self.moving {
+            (now - self.last) as f32
+        } else {
+            FIRST_STEP
+        };
         self.dt = dt.clamp(0.0, 1.0 / 30.0);
         self.last = now;
         self.moving = false;
@@ -921,7 +1224,12 @@ impl Motion {
         self.next = Some(match self.next {
             Some(n) => {
                 let (x0, y0) = (n.x.min(r.x), n.y.min(r.y));
-                Rect::new(x0, y0, n.right().max(r.right()) - x0, n.bottom().max(r.bottom()) - y0)
+                Rect::new(
+                    x0,
+                    y0,
+                    n.right().max(r.right()) - x0,
+                    n.bottom().max(r.bottom()) - y0,
+                )
             }
             None => r,
         });
@@ -990,7 +1298,15 @@ enum Nav {
 
 /// The whole window: the card, the sidebar and the section. Returns the
 /// section picked in the sidebar, or the close button.
-fn draw(ui: &mut Ui, st: &mut AppState, section: Section, frame: Frame, light: bool, sc: &mut Scroll, m: &mut Motion) -> Option<Nav> {
+fn draw(
+    ui: &mut Ui,
+    st: &mut AppState,
+    section: Section,
+    frame: Frame,
+    light: bool,
+    sc: &mut Scroll,
+    m: &mut Motion,
+) -> Option<Nav> {
     let card = frame.card;
     let sf = surfaces(light);
     // Windows' borderless window: its own shadow and rounded corners.
@@ -998,7 +1314,12 @@ fn draw(ui: &mut Ui, st: &mut AppState, section: Section, frame: Frame, light: b
     ui.c.unthemed(|c| {
         if frame.own_chrome {
             let shadow = Color::black(if light { 0.30 } else { 0.55 });
-            c.rrect_shadow(card.offset(0.0, 4.0), RADIUS, shadow, &crate::pill::shape::SHADOW_RAMP);
+            c.rrect_shadow(
+                card.offset(0.0, 4.0),
+                RADIUS,
+                shadow,
+                &crate::pill::shape::SHADOW_RAMP,
+            );
         }
         c.fill_rrect(card, radius, sf.ground);
     });
@@ -1009,7 +1330,10 @@ fn draw(ui: &mut Ui, st: &mut AppState, section: Section, frame: Frame, light: b
     ui.c.unthemed(|c| {
         c.fill_rrect(side, radius, sf.sidebar);
         if radius > 0.0 {
-            c.fill_rect(Rect::new(side.right() - radius, side.y, radius, side.h), sf.sidebar);
+            c.fill_rect(
+                Rect::new(side.right() - radius, side.y, radius, side.h),
+                sf.sidebar,
+            );
         }
     });
     let px = 1.0 / ui.c.scale().max(0.5);
@@ -1019,11 +1343,25 @@ fn draw(ui: &mut Ui, st: &mut AppState, section: Section, frame: Frame, light: b
     }
 
     let picked = draw_sidebar(ui, st, side, section, frame.top, m);
-    let content = Rect::new(side.right() + PAD, card.y, card.right() - side.right() - 2.0 * PAD, card.h);
-    ui.c.text(section.title(), Rect::new(content.x, card.y + TITLE_Y, content.w - 40.0, TITLE_H), &TextStyle::new(22.0).weight(Weight::Bold));
+    let content = Rect::new(
+        side.right() + PAD,
+        card.y,
+        card.right() - side.right() - 2.0 * PAD,
+        card.h,
+    );
+    ui.c.text(
+        section.title(),
+        Rect::new(content.x, card.y + TITLE_Y, content.w - 40.0, TITLE_H),
+        &TextStyle::new(22.0).weight(Weight::Bold),
+    );
     let close = frame.own_chrome && draw_close(ui, card, m);
 
-    let view = Rect::new(content.x - PAD / 2.0, card.y + CONTENT_Y, content.w + PAD, card.bottom() - CONTENT_Y - card.y - 1.0);
+    let view = Rect::new(
+        content.x - PAD / 2.0,
+        card.y + CONTENT_Y,
+        content.w + PAD,
+        card.bottom() - CONTENT_Y - card.y - 1.0,
+    );
     // From here on, the section's own: its scroll and rows, whose values go
     // when another section opens.
     m.content = true;
@@ -1049,7 +1387,16 @@ fn draw(ui: &mut Ui, st: &mut AppState, section: Section, frame: Frame, light: b
     let mut y = view.y - sc.at;
     let x = content.x;
     for (bi, b) in blocks(section, st).into_iter().enumerate() {
-        y = draw_block(ui, st, &b, bi, Rect::new(x, y, content.w, 0.0), view, &sf, m);
+        y = draw_block(
+            ui,
+            st,
+            &b,
+            bi,
+            Rect::new(x, y, content.w, 0.0),
+            view,
+            &sf,
+            m,
+        );
     }
     ui.c.unclip();
     sc.content_h = y + sc.at - view.y;
@@ -1068,7 +1415,13 @@ fn draw_close(ui: &mut Ui, card: Rect, m: &mut Motion) -> bool {
     let r = Rect::new(card.right() - 14.0 - 28.0, card.y + 14.0, 28.0, 28.0);
     let id = wid("settingswin.close");
     let resp = ui.button(id, r);
-    let to = if resp.pressed { 0.8 } else if resp.hovered { 0.6 } else { 0.0 };
+    let to = if resp.pressed {
+        0.8
+    } else if resp.hovered {
+        0.6
+    } else {
+        0.0
+    };
     let a = m.fade(mkey(id, K_WASH), to, WASH);
     if a != to {
         m.cover(r);
@@ -1088,13 +1441,30 @@ fn draw_close(ui: &mut Ui, card: Rect, m: &mut Motion) -> bool {
 /// The sidebar: Oyen's tile and the window's name, then a row per section
 /// (About at the bottom). The highlight glides to the section picked.
 /// `top`: room for the Mac's window buttons.
-fn draw_sidebar(ui: &mut Ui, st: &mut AppState, side: Rect, section: Section, top: f32, m: &mut Motion) -> Option<Section> {
+fn draw_sidebar(
+    ui: &mut Ui,
+    st: &mut AppState,
+    side: Rect,
+    section: Section,
+    top: f32,
+    m: &mut Motion,
+) -> Option<Section> {
     let icon_c = Point::new(side.x + 20.0 + 12.0, side.y + top + 32.0);
     crate::oyen::app_icon(ui.c, icon_c, 24.0);
-    ui.c.text("Advanced settings", Rect::new(icon_c.x + 20.0, side.y + top + 20.0, side.w - 60.0, 24.0), &TextStyle::headline());
+    ui.c.text(
+        "Advanced settings",
+        Rect::new(icon_c.x + 20.0, side.y + top + 20.0, side.w - 60.0, 24.0),
+        &TextStyle::headline(),
+    );
     let list = sections(st);
     let about_at = side.bottom() - 12.0 - NAV_H;
-    let row_y = |i: usize, s: Section| if s == Section::About { about_at } else { side.y + top + NAV_Y + i as f32 * (NAV_H + NAV_GAP) };
+    let row_y = |i: usize, s: Section| {
+        if s == Section::About {
+            about_at
+        } else {
+            side.y + top + NAV_Y + i as f32 * (NAV_H + NAV_GAP)
+        }
+    };
     // The highlight, under the rows.
     let sel_key = mkey(wid("settingswin.nav.sel"), K_Y);
     if let Some(i) = list.iter().position(|s| *s == section) {
@@ -1115,7 +1485,15 @@ fn draw_sidebar(ui: &mut Ui, st: &mut AppState, side: Rect, section: Section, to
             picked = Some(*s);
         }
         let on = *s == section;
-        let to = if on { 0.0 } else if resp.pressed { 0.09 } else if resp.hovered { 0.05 } else { 0.0 };
+        let to = if on {
+            0.0
+        } else if resp.pressed {
+            0.09
+        } else if resp.hovered {
+            0.05
+        } else {
+            0.0
+        };
         let wash = m.fade(mkey(id, K_WASH), to, WASH);
         if wash != to {
             m.cover(r);
@@ -1128,11 +1506,29 @@ fn draw_sidebar(ui: &mut Ui, st: &mut AppState, side: Rect, section: Section, to
             crate::oyen::app_icon(ui.c, tile.center(), NAV_TILE);
         } else {
             ui.c.fill_rrect(tile, 6.0, s.tint());
-            ui.c.icon(s.icon(), Rect::from_center(tile.center(), 14.0, 14.0), palette::ON_ACCENT);
+            ui.c.icon(
+                s.icon(),
+                Rect::from_center(tile.center(), 14.0, 14.0),
+                palette::ON_ACCENT,
+            );
         }
         let tx = tile.right() + 10.0;
-        let style = TextStyle::body().weight(if on { Weight::Semibold } else { Weight::Regular }).color(if on { palette::TEXT } else { Color::white(0.82) });
-        ui.c.text(s.title(), Rect::new(tx, r.y, (r.right() - tx - 6.0).max(0.0), r.h), &style);
+        let style = TextStyle::body()
+            .weight(if on {
+                Weight::Semibold
+            } else {
+                Weight::Regular
+            })
+            .color(if on {
+                palette::TEXT
+            } else {
+                Color::white(0.82)
+            });
+        ui.c.text(
+            s.title(),
+            Rect::new(tx, r.y, (r.right() - tx - 6.0).max(0.0), r.h),
+            &style,
+        );
     }
     picked
 }
@@ -1158,7 +1554,9 @@ fn row_h(it: &Item) -> f32 {
 /// How tall a block is drawn.
 fn block_h(st: &AppState, b: &Block) -> f32 {
     match b {
-        Block::Group(title, items) => title.map_or(0.0, |_| GROUP_TITLE_H) + items.iter().map(row_h).sum::<f32>(),
+        Block::Group(title, items) => {
+            title.map_or(0.0, |_| GROUP_TITLE_H) + items.iter().map(row_h).sum::<f32>()
+        }
         Block::Version => {
             if st.update.offer.is_some() {
                 112.0
@@ -1181,7 +1579,16 @@ fn fill_group(ui: &mut Ui, r: Rect, color: Color) {
 /// Draw block `b` (the `bi`-th) from `at`'s top left, `at.w` wide; returns
 /// where the next one starts.
 #[allow(clippy::too_many_arguments)]
-fn draw_block(ui: &mut Ui, st: &mut AppState, b: &Block, bi: usize, at: Rect, view: Rect, sf: &Surfaces, m: &mut Motion) -> f32 {
+fn draw_block(
+    ui: &mut Ui,
+    st: &mut AppState,
+    b: &Block,
+    bi: usize,
+    at: Rect,
+    view: Rect,
+    sf: &Surfaces,
+    m: &mut Motion,
+) -> f32 {
     let h = block_h(st, b);
     let r = Rect::new(at.x, at.y, at.w, h);
     let next = r.bottom() + GROUP_GAP;
@@ -1192,7 +1599,13 @@ fn draw_block(ui: &mut Ui, st: &mut AppState, b: &Block, bi: usize, at: Rect, vi
         Block::Group(title, items) => {
             let mut y = r.y;
             if let Some(t) = title {
-                ui.c.text(t, Rect::new(r.x + 2.0, y, r.w, GROUP_TITLE_H - 6.0), &TextStyle::footnote().weight(Weight::Semibold).color(palette::TEXT_DIM));
+                ui.c.text(
+                    t,
+                    Rect::new(r.x + 2.0, y, r.w, GROUP_TITLE_H - 6.0),
+                    &TextStyle::footnote()
+                        .weight(Weight::Semibold)
+                        .color(palette::TEXT_DIM),
+                );
                 y += GROUP_TITLE_H;
             }
             let card = Rect::new(r.x, y, r.w, r.bottom() - y);
@@ -1205,7 +1618,16 @@ fn draw_block(ui: &mut Ui, st: &mut AppState, b: &Block, bi: usize, at: Rect, vi
                 if i > 0 {
                     ui.c.fill_rect(Rect::new(row.x + ROW_PAD, row.y, row.w - ROW_PAD, px), RULE);
                 }
-                if let Some(act) = draw_row(ui, it, (bi, i), row, view, accent, (i == 0, i + 1 == items.len()), m) {
+                if let Some(act) = draw_row(
+                    ui,
+                    it,
+                    (bi, i),
+                    row,
+                    view,
+                    accent,
+                    (i == 0, i + 1 == items.len()),
+                    m,
+                ) {
                     apply(st, it.key, act);
                 }
                 y += rh;
@@ -1220,7 +1642,11 @@ fn draw_block(ui: &mut Ui, st: &mut AppState, b: &Block, bi: usize, at: Rect, vi
             }
         }
         Block::Addons => crate::pages::addons::draw(ui, st, r),
-        Block::Note(t) => ui.c.text(t, Rect::new(r.x + 2.0, r.y, r.w, r.h), &TextStyle::footnote().color(palette::TEXT_FAINT)),
+        Block::Note(t) => ui.c.text(
+            t,
+            Rect::new(r.x + 2.0, r.y, r.w, r.h),
+            &TextStyle::footnote().color(palette::TEXT_FAINT),
+        ),
     }
     next
 }
@@ -1228,7 +1654,16 @@ fn draw_block(ui: &mut Ui, st: &mut AppState, b: &Block, bi: usize, at: Rect, vi
 /// One row: its label (and dim line), and its control. Returns what a
 /// click did. `ends`: the row is the card's first, its last.
 #[allow(clippy::too_many_arguments)]
-fn draw_row(ui: &mut Ui, it: &Item, at: (usize, usize), row: Rect, view: Rect, accent: Color, ends: (bool, bool), m: &mut Motion) -> Option<Act> {
+fn draw_row(
+    ui: &mut Ui,
+    it: &Item,
+    at: (usize, usize),
+    row: Rect,
+    view: Rect,
+    accent: Color,
+    ends: (bool, bool),
+    m: &mut Motion,
+) -> Option<Act> {
     let id = |what: &str| wid_n(&format!("settingswin.{what}.{}", at.0), at.1 as u64);
     let shown = visible(row, view);
     let whole = shown.is_some_and(|v| v.h >= row.h - 0.5);
@@ -1250,7 +1685,13 @@ fn draw_row(ui: &mut Ui, it: &Item, at: (usize, usize), row: Rect, view: Rect, a
                 (Some(_), Some(hit)) => ui.button(rid, hit),
                 _ => Default::default(),
             };
-            let to = if resp.pressed { 0.07 } else if resp.hovered { 0.04 } else { 0.0 };
+            let to = if resp.pressed {
+                0.07
+            } else if resp.hovered {
+                0.04
+            } else {
+                0.0
+            };
             let wash = m.fade(mkey(rid, K_WASH), to, WASH);
             if wash != to {
                 m.cover(row);
@@ -1273,39 +1714,84 @@ fn draw_row(ui: &mut Ui, it: &Item, at: (usize, usize), row: Rect, view: Rect, a
         }
         Ctl::Choice(names, sel) => {
             let y = row.center().y - PICKER_H / 2.0;
-            if let Some(i) = picker_glide(ui, m, &format!("settingswin.pick.{}.{}", at.0, at.1), ctl_x, y, names, *sel, whole) {
+            if let Some(i) = picker_glide(
+                ui,
+                m,
+                &format!("settingswin.pick.{}.{}", at.0, at.1),
+                ctl_x,
+                y,
+                names,
+                *sel,
+                whole,
+            ) {
                 act = Some(Act::Pick(i));
             }
         }
         Ctl::Stepper(value) => {
             let cy = row.center().y;
             let minus = Rect::new(ctl_x, cy - STEP_BTN / 2.0, STEP_BTN, STEP_BTN);
-            let plus = Rect::new(inner.right() - STEP_BTN, cy - STEP_BTN / 2.0, STEP_BTN, STEP_BTN);
-            for (r, icon, d, what) in [(minus, Icon::Minus, -1, "minus"), (plus, Icon::Plus, 1, "plus")] {
+            let plus = Rect::new(
+                inner.right() - STEP_BTN,
+                cy - STEP_BTN / 2.0,
+                STEP_BTN,
+                STEP_BTN,
+            );
+            for (r, icon, d, what) in [
+                (minus, Icon::Minus, -1, "minus"),
+                (plus, Icon::Plus, 1, "plus"),
+            ] {
                 let bid = id(what);
                 let resp = match visible(r, view) {
                     Some(hit) => ui.button(bid, hit),
                     None => Default::default(),
                 };
-                let to = if resp.pressed { 1.0 } else if resp.hovered { 0.5 } else { 0.0 };
+                let to = if resp.pressed {
+                    1.0
+                } else if resp.hovered {
+                    0.5
+                } else {
+                    0.0
+                };
                 let lit = m.fade(mkey(bid, K_WASH), to, WASH);
                 if lit != to {
                     m.cover(r.inset(-1.0, -1.0));
                 }
-                let fill = if lit <= 0.5 { Color::lerp(palette::SURFACE, palette::SURFACE_HOVER, lit * 2.0) } else { Color::lerp(palette::SURFACE_HOVER, palette::SURFACE_PRESSED, lit * 2.0 - 1.0) };
+                let fill = if lit <= 0.5 {
+                    Color::lerp(palette::SURFACE, palette::SURFACE_HOVER, lit * 2.0)
+                } else {
+                    Color::lerp(
+                        palette::SURFACE_HOVER,
+                        palette::SURFACE_PRESSED,
+                        lit * 2.0 - 1.0,
+                    )
+                };
                 ui.c.fill_circle(r.center(), STEP_BTN / 2.0, fill);
-                ui.c.icon(icon, Rect::from_center(r.center(), 12.0, 12.0), palette::TEXT);
+                ui.c.icon(
+                    icon,
+                    Rect::from_center(r.center(), 12.0, 12.0),
+                    palette::TEXT,
+                );
                 if resp.clicked {
                     act = Some(Act::Step(d));
                 }
             }
             let vr = Rect::new(minus.right(), row.y, plus.x - minus.right(), row.h);
-            ui.c.text(value, vr, &TextStyle::body().weight(Weight::Semibold).tabular().center());
+            ui.c.text(
+                value,
+                vr,
+                &TextStyle::body()
+                    .weight(Weight::Semibold)
+                    .tabular()
+                    .center(),
+            );
         }
         Ctl::Button(label) => {
             let r = Rect::new(ctl_x, row.center().y - PILL_SMALL / 2.0, ctl_w, PILL_SMALL);
             let clicked = match visible(r, view).filter(|v| v.h >= r.h - 0.5) {
-                Some(_) => ui.pill(id("button"), r, label, Some(Icon::Open), PillStyle::Utility).clicked,
+                Some(_) => {
+                    ui.pill(id("button"), r, label, Some(Icon::Open), PillStyle::Utility)
+                        .clicked
+                }
                 None => {
                     let mut none = Input::default();
                     let mut no_hits = Vec::new();
@@ -1324,10 +1810,22 @@ fn draw_row(ui: &mut Ui, it: &Item, at: (usize, usize), row: Rect, view: Rect, a
     match &it.sub {
         Some(sub) => {
             let cy = row.center().y;
-            ui.c.text(&it.label, Rect::new(inner.x, cy - 19.0, tw, 19.0), &TextStyle::body());
-            ui.c.text(sub, Rect::new(inner.x, cy + 1.0, tw, 17.0), &TextStyle::footnote().color(palette::TEXT_DIM));
+            ui.c.text(
+                &it.label,
+                Rect::new(inner.x, cy - 19.0, tw, 19.0),
+                &TextStyle::body(),
+            );
+            ui.c.text(
+                sub,
+                Rect::new(inner.x, cy + 1.0, tw, 17.0),
+                &TextStyle::footnote().color(palette::TEXT_DIM),
+            );
         }
-        None => ui.c.text(&it.label, Rect::new(inner.x, row.y, tw, row.h), &TextStyle::body()),
+        None => ui.c.text(
+            &it.label,
+            Rect::new(inner.x, row.y, tw, row.h),
+            &TextStyle::body(),
+        ),
     }
     act
 }
@@ -1343,14 +1841,27 @@ fn draw_switch_at(c: &mut Canvas, r: Rect, k: f32, accent: Color) {
     let d = r.h - 2.0 * KNOB_INSET;
     let x0 = r.x + KNOB_INSET + d / 2.0;
     let x1 = r.right() - KNOB_INSET - d / 2.0;
-    c.fill_circle(Point::new(x0 + (x1 - x0) * k, r.center().y), d / 2.0, palette::ON_ACCENT);
+    c.fill_circle(
+        Point::new(x0 + (x1 - x0) * k, r.center().y),
+        d / 2.0,
+        palette::ON_ACCENT,
+    );
 }
 
 /// The island's picker (choices side by side in a track, the chosen one
 /// lifted) with the lift gliding to the choice picked. `live`: it takes
 /// clicks (not while partly scrolled away). Returns the choice clicked.
 #[allow(clippy::too_many_arguments)]
-fn picker_glide(ui: &mut Ui, m: &mut Motion, id: &str, x: f32, y: f32, names: &[&str], sel: Option<usize>, live: bool) -> Option<usize> {
+fn picker_glide(
+    ui: &mut Ui,
+    m: &mut Motion,
+    id: &str,
+    x: f32,
+    y: f32,
+    names: &[&str],
+    sel: Option<usize>,
+    live: bool,
+) -> Option<usize> {
     let st = TextStyle::footnote().weight(Weight::Semibold);
     let h = PICKER_H;
     let inner_h = h - 2.0 * SEG_INSET;
@@ -1364,7 +1875,11 @@ fn picker_glide(ui: &mut Ui, m: &mut Motion, id: &str, x: f32, y: f32, names: &[
             cell
         })
         .collect();
-    ui.c.fill_rrect(Rect::new(x, y, cx + SEG_INSET - x, h), h / 2.0, palette::SURFACE);
+    ui.c.fill_rrect(
+        Rect::new(x, y, cx + SEG_INSET - x, h),
+        h / 2.0,
+        palette::SURFACE,
+    );
     let base = wid(id);
     // The lift, under the names.
     let track = Rect::new(x, y, cx + SEG_INSET - x, h);
@@ -1374,27 +1889,50 @@ fn picker_glide(ui: &mut Ui, m: &mut Motion, id: &str, x: f32, y: f32, names: &[
         if lx != cell.x - x || lw != cell.w {
             m.cover(track);
         }
-        ui.c.fill_rrect(Rect::new(x + lx, cell.y, lw, inner_h), inner_h / 2.0, Color::white(0.16));
+        ui.c.fill_rrect(
+            Rect::new(x + lx, cell.y, lw, inner_h),
+            inner_h / 2.0,
+            Color::white(0.16),
+        );
     }
     let mut picked = None;
     for (i, (name, cell)) in names.iter().zip(&cells).enumerate() {
         let cid = wid_n(id, i as u64);
         let chosen = sel == Some(i);
-        let resp = if live && !chosen { ui.button(cid, Rect::new(cell.x, y, cell.w, h)) } else { Default::default() };
+        let resp = if live && !chosen {
+            ui.button(cid, Rect::new(cell.x, y, cell.w, h))
+        } else {
+            Default::default()
+        };
         if resp.clicked {
             picked = Some(i);
         }
-        let to = if resp.pressed { 0.10 } else if resp.hovered { 0.06 } else { 0.0 };
+        let to = if resp.pressed {
+            0.10
+        } else if resp.hovered {
+            0.06
+        } else {
+            0.0
+        };
         let wash = m.fade(mkey(cid, K_WASH), to, WASH);
         if wash > 0.0 {
             ui.c.fill_rrect(*cell, inner_h / 2.0, Color::white(wash));
         }
-        let lit_to = if chosen || resp.hovered || resp.pressed { 1.0 } else { 0.0 };
+        let lit_to = if chosen || resp.hovered || resp.pressed {
+            1.0
+        } else {
+            0.0
+        };
         let lit = m.fade(mkey(cid, K_LIT), lit_to, WASH);
         if wash != to || lit != lit_to {
             m.cover(*cell);
         }
-        ui.c.text(name, *cell, &st.color(Color::lerp(palette::TEXT_DIM, palette::TEXT, lit)).center());
+        ui.c.text(
+            name,
+            *cell,
+            &st.color(Color::lerp(palette::TEXT_DIM, palette::TEXT, lit))
+                .center(),
+        );
     }
     picked
 }
@@ -1407,7 +1945,11 @@ fn fill_row(ui: &mut Ui, row: Rect, c: Color, (first, last): (bool, bool)) {
     }
     ui.c.clip(row);
     let top = if first { row.y } else { row.y - GROUP_R };
-    let bottom = if last { row.bottom() } else { row.bottom() + GROUP_R };
+    let bottom = if last {
+        row.bottom()
+    } else {
+        row.bottom() + GROUP_R
+    };
     ui.c.fill_rrect(Rect::new(row.x, top, row.w, bottom - top), GROUP_R, c);
     ui.c.unclip();
 }
@@ -1422,14 +1964,26 @@ fn draw_version(ui: &mut Ui, st: &mut AppState, r: Rect, view: Rect, sf: &Surfac
     crate::oyen::app_icon(ui.c, Point::new(head.x + 20.0, cy), 40.0);
     let tx = head.x + 54.0;
     let clickable = visible(r, view).is_some_and(|v| v.h >= r.h - 0.5);
-    let check = clickable.then(|| crate::pages::settings::check_slot(ui, st, head)).flatten();
+    let check = clickable
+        .then(|| crate::pages::settings::check_slot(ui, st, head))
+        .flatten();
     let right = check.map_or(head.right(), |b| b.x - 12.0);
-    ui.c.text("Oyenza Studio", Rect::new(tx, cy - 20.0, (right - tx).max(0.0), 22.0), &TextStyle::headline());
-    ui.c.text(&format!("Version {VERSION}"), Rect::new(tx, cy + 2.0, (right - tx).max(0.0), 17.0), &TextStyle::footnote().color(palette::TEXT_DIM));
+    ui.c.text(
+        "Oyenza Studio",
+        Rect::new(tx, cy - 20.0, (right - tx).max(0.0), 22.0),
+        &TextStyle::headline(),
+    );
+    ui.c.text(
+        &format!("Version {VERSION}"),
+        Rect::new(tx, cy + 2.0, (right - tx).max(0.0), 17.0),
+        &TextStyle::footnote().color(palette::TEXT_DIM),
+    );
     if let Some(b) = check {
         crate::pages::settings::draw_check(ui, st, b);
     }
-    let Some(rel) = st.update.offer.clone() else { return };
+    let Some(rel) = st.update.offer.clone() else {
+        return;
+    };
     let px = 1.0 / ui.c.scale().max(0.5);
     let row = Rect::new(head.x, head.bottom(), head.w, r.bottom() - head.bottom());
     ui.c.fill_rect(Rect::new(row.x, row.y, row.w, px), RULE);
@@ -1438,12 +1992,20 @@ fn draw_version(ui: &mut Ui, st: &mut AppState, r: Rect, view: Rect, sf: &Surfac
     let mut buttons: Vec<(&str, Command, PillStyle)> = Vec::new();
     if st.update.ready {
         buttons.push(("Install now", Command::Update, PillStyle::Primary(accent)));
-        let later = if st.update.next_start { "Set for next start" } else { "On next start" };
+        let later = if st.update.next_start {
+            "Set for next start"
+        } else {
+            "On next start"
+        };
         buttons.push((later, Command::InstallOnNextStart, PillStyle::Utility));
     } else {
         buttons.push(("Download", Command::Update, PillStyle::Primary(accent)));
     }
-    buttons.push(("What's new", Command::OpenUrl(rel.notes.clone()), PillStyle::Utility));
+    buttons.push((
+        "What's new",
+        Command::OpenUrl(rel.notes.clone()),
+        PillStyle::Utility,
+    ));
     let mut x = row.right();
     let by = row.center().y - PILL_SMALL / 2.0;
     let mut picked = None;
@@ -1453,7 +2015,8 @@ fn draw_version(ui: &mut Ui, st: &mut AppState, r: Rect, view: Rect, sf: &Surfac
         let b = Rect::new(x, by, w, PILL_SMALL);
         x -= PILL_GAP;
         let clicked = if clickable {
-            ui.pill(wid_n("settingswin.update", i as u64), b, label, None, style).clicked
+            ui.pill(wid_n("settingswin.update", i as u64), b, label, None, style)
+                .clicked
         } else {
             let mut none = Input::default();
             let mut no_hits = Vec::new();
@@ -1466,8 +2029,18 @@ fn draw_version(ui: &mut Ui, st: &mut AppState, r: Rect, view: Rect, sf: &Surfac
     }
     let tw = (x - 12.0 - row.x).max(0.0);
     let cy = row.center().y;
-    crate::activities::text_with_dim(ui, "Update available", &rel.version, Rect::new(row.x, cy - 19.0, tw, 19.0), TextStyle::body().weight(Weight::Semibold));
-    ui.c.text(&rel.headline, Rect::new(row.x, cy + 1.0, tw, 17.0), &TextStyle::footnote().color(palette::TEXT_DIM));
+    crate::activities::text_with_dim(
+        ui,
+        "Update available",
+        &rel.version,
+        Rect::new(row.x, cy - 19.0, tw, 19.0),
+        TextStyle::body().weight(Weight::Semibold),
+    );
+    ui.c.text(
+        &rel.headline,
+        Rect::new(row.x, cy + 1.0, tw, 17.0),
+        &TextStyle::footnote().color(palette::TEXT_DIM),
+    );
     if let Some(c) = picked {
         st.cmd(c);
     }
@@ -1477,13 +2050,24 @@ fn draw_version(ui: &mut Ui, st: &mut AppState, r: Rect, view: Rect, sf: &Surfac
 /// the theme draws it, the name and a line. The ring and the tick fade to
 /// the theme picked.
 fn draw_themes(ui: &mut Ui, st: &mut AppState, r: Rect, view: Rect, sf: &Surfaces, m: &mut Motion) {
-    ui.c.text("Theme", Rect::new(r.x + 2.0, r.y, r.w, GROUP_TITLE_H - 6.0), &TextStyle::footnote().weight(Weight::Semibold).color(palette::TEXT_DIM));
+    ui.c.text(
+        "Theme",
+        Rect::new(r.x + 2.0, r.y, r.w, GROUP_TITLE_H - 6.0),
+        &TextStyle::footnote()
+            .weight(Weight::Semibold)
+            .color(palette::TEXT_DIM),
+    );
     let n = THEMES.len() as f32;
     let w = ((r.w - (n - 1.0) * THEME_GAP) / n).floor();
     let accent = st.accent;
     let mut picked = None;
     for (i, (theme, name, line)) in THEMES.iter().enumerate() {
-        let c = Rect::new(r.x + i as f32 * (w + THEME_GAP), r.y + GROUP_TITLE_H, w, THEME_CARD_H);
+        let c = Rect::new(
+            r.x + i as f32 * (w + THEME_GAP),
+            r.y + GROUP_TITLE_H,
+            w,
+            THEME_CARD_H,
+        );
         let id = wid_n("settingswin.theme", i as u64);
         let resp = match visible(c, view) {
             Some(hit) => ui.button(id, hit),
@@ -1491,10 +2075,20 @@ fn draw_themes(ui: &mut Ui, st: &mut AppState, r: Rect, view: Rect, sf: &Surface
         };
         let on = st.settings.theme == *theme;
         fill_group(ui, c, sf.group);
-        let lit_to = if resp.pressed { 1.0 } else if resp.hovered { 0.6 } else { 0.0 };
+        let lit_to = if resp.pressed {
+            1.0
+        } else if resp.hovered {
+            0.6
+        } else {
+            0.0
+        };
         let lit = m.fade(mkey(id, K_WASH), lit_to, WASH);
         if lit > 0.0 {
-            let over = if lit > 0.6 { sf.group_press } else { sf.group_hover };
+            let over = if lit > 0.6 {
+                sf.group_press
+            } else {
+                sf.group_hover
+            };
             ui.c.unthemed(|cv| cv.fill_rrect(c, GROUP_R, over.mul_alpha((lit / 0.6).min(1.0))));
         }
         let ring_to = if on { 1.0 } else { 0.0 };
@@ -1503,20 +2097,37 @@ fn draw_themes(ui: &mut Ui, st: &mut AppState, r: Rect, view: Rect, sf: &Surface
             m.cover(c.inset(-2.0, -2.0));
         }
         if ring > 0.0 {
-            ui.c.stroke_rrect(c.inset(1.0, 1.0), GROUP_R - 1.0, accent.mul_alpha(ring), 2.0);
+            ui.c.stroke_rrect(
+                c.inset(1.0, 1.0),
+                GROUP_R - 1.0,
+                accent.mul_alpha(ring),
+                2.0,
+            );
         }
         let screen = Rect::new(c.x + 10.0, c.y + 10.0, c.w - 20.0, THEME_PREVIEW_H);
         ui.c.unthemed(|cv| draw_theme_preview(cv, *theme, screen));
         let tx = c.x + 12.0;
         let ty = screen.bottom() + 10.0;
         let tw = c.w - 24.0 - if on { 20.0 } else { 0.0 };
-        ui.c.text(name, Rect::new(tx, ty, tw, 19.0), &TextStyle::body().weight(Weight::Semibold));
-        ui.c.text(line, Rect::new(tx, ty + 20.0, c.w - 24.0, 34.0), &TextStyle::footnote().color(palette::TEXT_DIM).wrap().top());
+        ui.c.text(
+            name,
+            Rect::new(tx, ty, tw, 19.0),
+            &TextStyle::body().weight(Weight::Semibold),
+        );
+        ui.c.text(
+            line,
+            Rect::new(tx, ty + 20.0, c.w - 24.0, 34.0),
+            &TextStyle::footnote().color(palette::TEXT_DIM).wrap().top(),
+        );
         if ring > 0.0 {
             let dot = Point::new(c.right() - 20.0, ty + 9.5);
             ui.c.with_alpha(ring, |cv| {
                 cv.fill_circle(dot, 8.0, accent);
-                cv.icon(Icon::Check, Rect::from_center(dot, 10.0, 10.0), palette::ON_ACCENT);
+                cv.icon(
+                    Icon::Check,
+                    Rect::from_center(dot, 10.0, 10.0),
+                    palette::ON_ACCENT,
+                );
             });
         }
         if resp.clicked {
@@ -1534,9 +2145,16 @@ fn draw_themes(ui: &mut Ui, st: &mut AppState, r: Rect, view: Rect, sf: &Surface
 fn draw_theme_preview(c: &mut Canvas, theme: Theme, screen: Rect) {
     c.clip(screen);
     c.fill_rrect(screen, 7.0, WALLPAPER);
-    c.fill_rrect(Rect::new(screen.x, screen.y + screen.h * 0.55, screen.w, screen.h), 7.0, Color::hex(0x56679C));
+    c.fill_rrect(
+        Rect::new(screen.x, screen.y + screen.h * 0.55, screen.w, screen.h),
+        7.0,
+        Color::hex(0x56679C),
+    );
     let cx = screen.center().x;
-    let clock = TextStyle::caption().weight(Weight::Semibold).tabular().center();
+    let clock = TextStyle::caption()
+        .weight(Weight::Semibold)
+        .tabular()
+        .center();
     match theme {
         Theme::Classic | Theme::Oyen | Theme::Glass => {
             let body = Rect::new(cx - 34.0, screen.y, 68.0, 20.0);
@@ -1548,7 +2166,11 @@ fn draw_theme_preview(c: &mut Canvas, theme: Theme, screen: Rect) {
             if theme == Theme::Oyen {
                 // Oyen's eyes peek over the island's edge.
                 for dx in [-6.0, 6.0] {
-                    c.fill_rrect(Rect::from_center(Point::new(cx + dx, body.center().y), 5.0, 8.0), 2.5, palette::ORANGE);
+                    c.fill_rrect(
+                        Rect::from_center(Point::new(cx + dx, body.center().y), 5.0, 8.0),
+                        2.5,
+                        palette::ORANGE,
+                    );
                 }
             } else {
                 c.text("10:08", body, &clock.color(palette::TEXT));
@@ -1602,11 +2224,16 @@ mod tests {
                 };
                 apply(&mut st, it.key, act);
                 let saved = st.cmds.iter().any(|c| matches!(c, Command::SaveSettings));
-                let opens = st.cmds.iter().any(|c| matches!(c, Command::OpenPath(_) | Command::OpenUrl(_)));
+                let opens = st
+                    .cmds
+                    .iter()
+                    .any(|c| matches!(c, Command::OpenPath(_) | Command::OpenUrl(_)));
                 match it.key {
                     // Start with Windows waits for its reading; the buttons open things.
                     Key::Autostart => assert!(st.cmds.is_empty()),
-                    Key::SettingsFile | Key::DataFolder | Key::ReleaseNotes | Key::LyricsCredit => assert!(opens, "{:?}", it.key),
+                    Key::SettingsFile | Key::DataFolder | Key::ReleaseNotes | Key::LyricsCredit => {
+                        assert!(opens, "{:?}", it.key)
+                    }
                     _ => assert!(saved, "{:?} didn't save", it.key),
                 }
             }
@@ -1624,16 +2251,40 @@ mod tests {
             apply(&mut st, Key::LyricsOffset, Act::Step(1));
         }
         let s = &st.settings;
-        assert_eq!((s.expanded_width, s.pomodoro.focus_min, s.pomodoro.long_every, s.usage.near_pct, s.lyrics_offset_ms), (900.0, 180, 12, 95, -5000));
+        assert_eq!(
+            (
+                s.expanded_width,
+                s.pomodoro.focus_min,
+                s.pomodoro.long_every,
+                s.usage.near_pct,
+                s.lyrics_offset_ms
+            ),
+            (900.0, 180, 12, 95, -5000)
+        );
         for _ in 0..100 {
             apply(&mut st, Key::Width, Act::Step(-1));
             apply(&mut st, Key::FocusMin, Act::Step(-1));
             apply(&mut st, Key::PrayerCountdown, Act::Step(-1));
         }
         let s = &st.settings;
-        assert_eq!((s.expanded_width, s.pomodoro.focus_min, s.prayer.remind_before_min), (480.0, 1, 0));
+        assert_eq!(
+            (
+                s.expanded_width,
+                s.pomodoro.focus_min,
+                s.prayer.remind_before_min
+            ),
+            (480.0, 1, 0)
+        );
         // Minutes go by five, and by one below five.
-        assert_eq!((step_min(25, -1, 1, 180), step_min(5, -1, 1, 180), step_min(3, 1, 1, 180), step_min(5, 1, 1, 180)), (20, 4, 4, 10));
+        assert_eq!(
+            (
+                step_min(25, -1, 1, 180),
+                step_min(5, -1, 1, 180),
+                step_min(3, 1, 1, 180),
+                step_min(5, 1, 1, 180)
+            ),
+            (20, 4, 4, 10)
+        );
     }
 
     #[test]
@@ -1643,7 +2294,10 @@ mod tests {
             Some(Ctl::Choice(_, sel)) => sel,
             _ => None,
         };
-        assert_eq!((pick(&st, Key::HoverDelay), pick(&st, Key::CloseDelay)), (Some(1), Some(0)));
+        assert_eq!(
+            (pick(&st, Key::HoverDelay), pick(&st, Key::CloseDelay)),
+            (Some(1), Some(0))
+        );
         st.settings.hover_delay_ms = 2000;
         assert_eq!(pick(&st, Key::HoverDelay), Some(2));
         apply(&mut st, Key::HoverDelay, Act::Pick(0));
@@ -1685,7 +2339,8 @@ mod tests {
     #[test]
     fn idle_looks_follow_the_theme() {
         let mut st = state();
-        let looks = |st: &AppState| match row(Section::Appearance, st, Key::IdleLook).map(|i| i.ctl) {
+        let looks = |st: &AppState| match row(Section::Appearance, st, Key::IdleLook).map(|i| i.ctl)
+        {
             Some(Ctl::Choice(names, _)) => names,
             _ => Vec::new(),
         };
@@ -1711,7 +2366,10 @@ mod tests {
             t += 1.0 / 144.0;
             m.begin(t, false);
             let x = m.slide(7, 0.0, SLIDE);
-            assert!(x <= last + 1e-4 && x >= 0.0, "frame {frames}: {x} after {last}");
+            assert!(
+                x <= last + 1e-4 && x >= 0.0,
+                "frame {frames}: {x} after {last}"
+            );
             last = x;
             frames += 1;
             if !m.moving {
@@ -1741,7 +2399,12 @@ mod tests {
                 }
             }
         };
-        assert!(count(WASH) < count(SWITCHING) && count(SWITCHING) <= 48, "wash {} switch {}", count(WASH), count(SWITCHING));
+        assert!(
+            count(WASH) < count(SWITCHING) && count(SWITCHING) <= 48,
+            "wash {} switch {}",
+            count(WASH),
+            count(SWITCHING)
+        );
         // Less motion (or a picture): everything lands at once.
         m.begin(t + 1.0, true);
         assert_eq!(m.slide(7, 50.0, SLIDE), 50.0);
@@ -1771,7 +2434,10 @@ mod tests {
         let highlight = m.slide(1, 100.0, SLIDE);
         m.content = true;
         assert_eq!(m.fade(2, 0.0, SWITCHING), 0.0);
-        assert!(highlight > 0.0 && highlight < 100.0 && m.moving, "{highlight}");
+        assert!(
+            highlight > 0.0 && highlight < 100.0 && m.moving,
+            "{highlight}"
+        );
     }
 
     #[test]
