@@ -5,6 +5,17 @@
 **Status:** Active
 **Owner:** NUMA project
 
+## Where this stands (13 Nov 2026)
+
+Phases 1, 3 and the notch part of 4 are live and verified against the running machine:
+
+- Gateway on 8900 owns tools, policy, approvals, the audit trail, speech, the Composio connectors and the OpenCode coding lane. Every run is verified before it is reported.
+- Fast lane: spoken commands route without a model, against the machine's real app inventory (Start Menu targets, App Paths, `Get-StartApps`), with synonyms for names people say but Windows does not use (`minecraft` → the installed launcher).
+- Notch: calico cat, warm NUMA page, approval cards fed by the gateway event stream, no controls that do nothing.
+- Voice: Deepgram STT/TTS through the gateway, empty transcripts answered locally. Wake word is built but cannot attach on a machine with no capture device; it backs off instead of spinning.
+
+Next: Phase 5's local wake/VAD work, Phase 6 GBrain, Phase 7 browser control, Phase 4's dashboard.
+
 ## Phase 0 — Stabilize the prototype
 
 - Disable unreliable automatic wake actions.
